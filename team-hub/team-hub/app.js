@@ -156,7 +156,7 @@ const TABLES = {
     F('seen', 'Seen in VODs', 'long'), F('updated', 'Last updated')] },
   roster: { label: 'Roster slots', sheet: 'Roster', order: 'name', asc: true, req: 'name', merge: true, fields: [
     F('name', 'Name', 'text', ['Player (IGN)', 'Player', 'Name']), F('ign', 'In-game name', 'text', ['Player (IGN)', 'IGN', 'In-game name']), F('discord', 'Discord username', 'text', ['Discord username', 'Discord']),
-    F('role', 'Role', 'select', ['Role'], { options: ROLES }), F('is_igl', 'IGL', 'bool', ['IGL?', 'IGL']), F('is_trial', 'Trial', 'bool', ['Trial', 'Trial player']), F('status', 'Status', 'select', ['Status'], { options: ['Active', 'Bench'] })] },
+    F('role', 'Role', 'select', ['Role'], { options: ROLES }), F('is_igl', 'IGL', 'bool', ['IGL?', 'IGL']), F('is_trial', 'Trial', 'bool', ['Trial', 'Trial player']), F('status', 'Status', 'select', ['Status'], { options: ['Active', 'Bench', 'Coach'] })] },
   game_plans: { label: 'Game plans', order: 'match_date', req: 'opponent', keepOnAdd: ['scrim_id'], fields: [
     F('opponent', 'Opponent'), F('match_date', 'Match date', 'date'), F('maps', 'Maps (comma separated)'), F('their_tendencies', 'Their tendencies (how they play)', 'long'),
     F('comp', 'Our comp (per map)', 'long'), F('attack_plan', 'Attack plan', 'long'), F('defense_plan', 'Defense plan', 'long'), F('pistols', 'Pistol rounds', 'long'),
@@ -607,12 +607,13 @@ async function teamPlayers() {
   const out = roster.map(r => {
     const m = r.claimed_by ? byId.get(r.claimed_by) : null;
     return { key: 'r' + r.id, name: r.ign || (m && m.ign) || r.name, ign: r.ign || (m && m.ign), role: r.role || (m && m.role), is_igl: r.is_igl, is_trial: r.is_trial,
-      discord: r.discord || (m && m.discord), avatar_url: m && m.avatar_url, rank: m && m.rank, rank_rr: m && m.rank_rr, peak_rank: m && m.peak_rank, riot_id: m && m.riot_id, rank_updated: m && m.rank_updated, user_id: m ? m.id : null, joined: !!(m && r.claim_status === 'approved'), rid: r.id, bench: r.status === 'Bench' };
+      discord: r.discord || (m && m.discord), avatar_url: m && m.avatar_url, rank: m && m.rank, rank_rr: m && m.rank_rr, peak_rank: m && m.peak_rank, riot_id: m && m.riot_id, rank_updated: m && m.rank_updated, user_id: m ? m.id : null, joined: !!(m && r.claim_status === 'approved'), rid: r.id, bench: r.status === 'Bench', coachSlot: r.status === 'Coach' };
   });
   members.forEach(m => { if (!m.is_coach && !m.staff_role && !roster.some(r => r.claimed_by === m.id)) out.push({ key: 'u' + m.id, name: nameOf(m), ign: m.ign, role: m.role, is_igl: m.is_igl, is_trial: m.is_trial, discord: m.discord, avatar_url: m.avatar_url, rank: m.rank, rank_rr: m.rank_rr, peak_rank: m.peak_rank, riot_id: m.riot_id, rank_updated: m.rank_updated, user_id: m.id, joined: true }); });
   const staffIds = new Set(members.filter(m => m.is_coach || m.staff_role).map(m => m.id));
   const coaches = members.filter(m => m.is_coach).concat(members.filter(m => !m.is_coach && m.staff_role));
-  return { players: out.filter(p => !(p.user_id && staffIds.has(p.user_id))).sort((a, b) => (a.is_trial ? 1 : 0) - (b.is_trial ? 1 : 0) || String(a.name).localeCompare(String(b.name))), coaches: coaches };
+  const slotCoaches = out.filter(p => p.coachSlot);
+  return { slotCoaches: slotCoaches, players: out.filter(p => !p.coachSlot && !(p.user_id && staffIds.has(p.user_id))).sort((a, b) => (a.is_trial ? 1 : 0) - (b.is_trial ? 1 : 0) || String(a.name).localeCompare(String(b.name))), coaches: coaches };
 }
 async function kickPlayer(p, done) {
   if (!confirm('Kick ' + p.name + ' from ' + teamName() + '?\n\nThey lose access to the team and their roster spot is removed. Their past stats stay.')) return;
@@ -620,10 +621,12 @@ async function kickPlayer(p, done) {
   if (p.rid) await sb.from('roster').delete().eq('id', p.rid);
   S.cache = {}; toast(p.name + ' was removed from the team'); if (done) done();
 }
-async function setBench(p, bench, done) {
+async function setBench(p, bench, done) { return setSlotStatus(p, bench ? 'Bench' : 'Active', done); }
+async function setSlotStatus(p, status, done) {
   if (!p.rid) { toast('Add ' + p.name + ' to the roster first (Coach panel → Members)'); return; }
-  const { error } = await sb.from('roster').update({ status: bench ? 'Bench' : 'Active' }).eq('id', p.rid);
-  S.cache = {}; toast(error ? error.message : p.name + (bench ? ' moved to the bench' : ' is back on the active roster')); if (done) done();
+  const { error } = await sb.from('roster').update({ status: status }).eq('id', p.rid);
+  const msg = { Bench: ' moved to the bench', Active: ' is on the active roster', Coach: ' moved to coaches' }[status];
+  S.cache = {}; toast(error ? error.message : p.name + msg); if (done) done();
 }
 function statsFor(ps, ign) {
   const rows = ps.filter(r => normName(r.player) === normName(ign));
@@ -637,10 +640,12 @@ function pcard(p, ps) {
   const key = p.rid ? 'r' + p.rid : 'u' + p.user_id;
   return '<div class="pcard' + (p.bench ? ' bench' : '') + '">' + avatar(p, 52) + '<div class="nm">' + esc(p.name) + '</div>' +
     '<div class="sub">' + esc([p.ign && p.ign !== p.name ? p.ign : '', p.discord ? '@' + p.discord : ''].filter(Boolean).join(' · ')) + '</div>' +
-    '<div class="row" style="justify-content:center;gap:4px">' + rolePill(p.role) + (p.is_igl ? '<span class="pill yellow">IGL</span>' : '') + (p.is_trial ? '<span class="pill yellow">Trial</span>' : '') + (p.bench ? '<span class="pill">Bench</span>' : '') + (!p.user_id ? '<span class="pill">Not joined</span>' : '') + '</div>' +
+    '<div class="row" style="justify-content:center;gap:4px">' + rolePill(p.role) + (p.is_igl ? '<span class="pill yellow">IGL</span>' : '') + (p.is_trial ? '<span class="pill yellow">Trial</span>' : '') + (p.bench ? '<span class="pill">Bench</span>' : '') + (p.coachSlot ? '<span class="pill blue">Coach</span>' : '') + (!p.user_id ? '<span class="pill">Not joined</span>' : '') + '</div>' +
     (p.rank ? '<div style="margin-top:6px">' + rankPill(p.rank, true) + '</div>' : '') +
     (ps ? '<div class="pstats">' + (s ? '<div><b>' + num(s.kd, 2) + '</b><span>K/D</span></div><div><b>' + pct(s.hs) + '</b><span>HS%</span></div><div><b>' + s.maps + '</b><span>Maps</span></div>' : '<div class="muted small" style="grid-column:1/-1">No stats yet</div>') + '</div>' : '') +
-    (S.me.is_coach ? '<div class="pact"><button class="btn small ghost" data-bench="' + key + '">' + (p.bench ? 'Make active' : 'Bench') + '</button><button class="btn small ghost danger-t" data-kick="' + key + '">Kick</button></div>' : '') + '</div>';
+    (S.me.is_coach ? '<div class="pact">' + (p.coachSlot ? '<button class="btn small ghost" data-slot="' + key + '|Active">Make player</button>'
+      : '<button class="btn small ghost" data-bench="' + key + '">' + (p.bench ? 'Make active' : 'Bench') + '</button><button class="btn small ghost" data-slot="' + key + '|Coach">Coach</button>') +
+      '<button class="btn small ghost danger-t" data-kick="' + key + '">Kick</button></div>' : '') + '</div>';
 }
 
 // ---- Daily check-in form (used on Home and the Check-ins page)
@@ -917,7 +922,10 @@ PAGES.team = async function (el) {
   if (tab === 'ranks') {
     body = await ranksTab();
   } else if (tab === 'roster' || !showStats) {
-    body = (team.coaches.length ? '<div class="small muted" style="margin:4px 0 12px">Coaching staff: ' + team.coaches.map(c => '<span class="chip">' + avatar(c, 20) + esc(nameOf(c)) + ' <span class="muted">' + esc(staffLabel(c)) + '</span></span>').join(' ') + '</div>' : '') +
+    const slotIds = new Set(team.slotCoaches.map(p => p.user_id).filter(Boolean));
+    const chipCoaches = team.coaches.filter(c => !slotIds.has(c.id));
+    body = (team.slotCoaches.length ? '<div class="sec-h"><h2>Coaches <span class="muted small">' + team.slotCoaches.length + '</span></h2><span class="small muted">Coaches don\'t count in check-ins or player stats.</span></div><div class="pcards" style="margin-bottom:24px">' + team.slotCoaches.map(p => pcard(p, null)).join('') + '</div>' : '') +
+      (chipCoaches.length ? '<div class="small muted" style="margin:4px 0 12px">Coaching staff: ' + chipCoaches.map(c => '<span class="chip">' + avatar(c, 20) + esc(nameOf(c)) + ' <span class="muted">' + esc(staffLabel(c)) + '</span></span>').join(' ') + '</div>' : '') +
       (team.players.length ? ['Active roster', 'Bench'].map(sec => { const list = team.players.filter(p => (sec === 'Bench') === !!p.bench);
         if (sec === 'Bench' && !list.length && !S.me.is_coach) return '';
         return '<div class="sec-h"><h2>' + sec + ' <span class="muted small">' + list.length + '</span></h2>' + (sec === 'Bench' ? '<span class="small muted">Bench players keep their access and check-ins.</span>' : '') + '</div>' +
@@ -946,8 +954,9 @@ PAGES.team = async function (el) {
   el.innerHTML = '<div class="page-h"><div><h1>' + esc(teamName()) + '</h1><p class="muted">' + team.players.length + ' player' + (team.players.length === 1 ? '' : 's') +
     (showStats && matches.length ? ' · ' + won + '–' + (matches.length - won) + ' on maps' : '') + '</p></div></div>' +
     (tabs.length > 1 ? '<div class="tabs">' + tabs.map(t => '<a href="#/team/' + t[0] + '" class="' + ((tab === t[0] || (t[0] === 'roster' && !tabs.some(x => x[0] === tab))) ? 'active' : '') + '">' + t[1] + '</a>').join('') + '</div>' : '') + body;
-  const find = k => team.players.find(p => (p.rid ? 'r' + p.rid : 'u' + p.user_id) === k);
+  const find = k => team.players.concat(team.slotCoaches).find(p => (p.rid ? 'r' + p.rid : 'u' + p.user_id) === k);
   $$('[data-bench]', el).forEach(b => b.onclick = () => { const p = find(b.dataset.bench); setBench(p, !p.bench, render); });
+  $$('[data-slot]', el).forEach(b => b.onclick = () => { const [k, st] = b.dataset.slot.split('|'); const p = find(k); if (p) setSlotStatus(p, st, render); });
   $$('[data-kick]', el).forEach(b => b.onclick = () => kickPlayer(find(b.dataset.kick), render));
 };
 
@@ -1405,7 +1414,7 @@ function rosterTable(roster, members) {
       '<td><select data-f="role">' + ROLES.map(x => '<option' + (x === (r.role || 'Flex') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></td>' +
       '<td style="text-align:center"><input type="checkbox" data-f="is_igl"' + (r.is_igl ? ' checked' : '') + '></td>' +
       '<td style="text-align:center"><input type="checkbox" data-f="is_trial"' + (r.is_trial ? ' checked' : '') + '></td>' +
-      '<td><select data-f="status" style="min-width:96px">' + ['Active', 'Bench'].map(x => '<option' + (x === (r.status || 'Active') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></td>' +
+      '<td><select data-f="status" style="min-width:96px">' + ['Active', 'Bench', 'Coach'].map(x => '<option' + (x === (r.status || 'Active') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></td>' +
       '<td>' + (r.id ? status + (who ? '<div class="small muted">' + esc(nameOf(who)) + '</div>' : '') : '') + '</td>' +
       '<td style="white-space:nowrap">' + (r.id ? '<button class="btn small ghost" data-rsave>Save</button> ' + (r.claimed_by ? '<button class="btn small ghost" data-runlink>Unlink</button> <button class="btn small danger" data-rkick>Kick</button>' : '<button class="btn small danger" data-rdel title="Delete slot">×</button>') : '<button class="btn small" data-rsave>Add</button>') + '</td></tr>';
   };
@@ -2026,7 +2035,13 @@ PAGES.maps = async function (el) {
       '<div class="grow"><div class="lbl small muted">NOT PLAYED</div><div class="small">' + (cards.filter(c => !c.n && c.pool.status !== 'Ban').map(c => esc(c.map)).join(', ') || '—') + '</div></div></div>') : '') +
     (matches.length || coach ? '<div class="mapgrid">' + cards.filter(c => c.n || c.pool.status).map(card).join('') + '</div>' +
       (cards.some(c => !c.n && !c.pool.status) ? '<details class="item" style="margin-top:14px"' + (matches.length ? '' : ' open') + '><summary><span class="t">Other maps (' + cards.filter(c => !c.n && !c.pool.status).length + ')</span> <span class="muted small">not played' + (since ? ' in this period' : ' yet') + '</span></summary><div class="body"><div class="mapgrid">' +
-        cards.filter(c => !c.n && !c.pool.status).map(card).join('') + '</div></div></details>' : '') : empty('No matches logged yet. Results show up here after the coach logs scrim results (Schedule → Log result) or imports the Matches tab.'));
+        cards.filter(c => !c.n && !c.pool.status).map(card).join('') + '</div></div></details>' : '') : empty('No matches logged yet. Results show up here after the coach logs scrim results (Schedule → Log result) or imports the Matches tab.')) +
+    (matches.length ? gamesPanel(matches, canEdit('matches')) : '');
+  const gf = $('#gmap', el);
+  if (gf) gf.onchange = () => { $$('#games tbody tr', el).forEach(tr => { tr.style.display = !gf.value || tr.dataset.map === gf.value.toLowerCase() ? '' : 'none'; }); };
+  $$('[data-gedit]', el).forEach(b => b.onclick = () => { const m = allMatches.find(x => x.id === Number(b.dataset.gedit)); if (m) editRow('matches', m, () => { S.cache = {}; render(); }); });
+  $$('[data-gdel]', el).forEach(b => b.onclick = async () => { const m = allMatches.find(x => x.id === Number(b.dataset.gdel)); if (!m || !confirm('Delete the ' + m.map + ' game' + (m.opponent ? ' vs ' + m.opponent : '') + (m.date ? ' on ' + fmtDate(m.date) : '') + '? This can\'t be undone.')) return;
+    try { await db.remove('matches', m.id); S.cache = {}; toast('Deleted'); render(); } catch (err) { toast('Error: ' + err.message); } });
   async function savePool(map, patch) {
     const ex = poolOf(map);
     try { if (ex.id) await db.update('map_pool', ex.id, patch); else { await db.insert('map_pool', [Object.assign({ map: map }, patch)]); const again = await db.list('map_pool', { limit: 100 }); pool.splice(0, pool.length, ...again); } toast('Saved'); }
@@ -2036,6 +2051,20 @@ PAGES.maps = async function (el) {
   $$('.poolnote', el).forEach(i => i.onchange = () => savePool(i.dataset.map, { notes: i.value.trim() || null }));
   if ($('#logm')) $('#logm').onclick = () => editRow('matches', { date: todayISO(), type: 'Scrim', event: 'Scrim' }, () => { S.cache = {}; render(); });
 };
+function gamesPanel(matches, edit) {
+  const list = matches.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || b.id - a.id);
+  const maps = Array.from(new Set(list.map(m => m.map))).sort();
+  const side = (w, l) => w == null && l == null ? '–' : (Number(w) || 0) + '–' + (Number(l) || 0);
+  return '<div class="card panel" style="margin-top:16px"><div class="card-h"><h2>Logged games <span class="muted small">' + list.length + '</span></h2>' +
+    '<select id="gmap" style="width:auto;padding:5px 8px"><option value="">All maps</option>' + maps.map(m => '<option>' + esc(m) + '</option>').join('') + '</select></div>' +
+    (edit ? '<p class="small muted" style="margin-top:-6px">Fix a score, map or opponent with Edit. Changes update every map card above.</p>' : '') +
+    '<div class="tablewrap" id="games"><table><thead><tr><th>Date</th><th>Opponent</th><th>Map</th><th class="num">Score</th><th>Type</th><th class="num">Atk</th><th class="num">Def</th><th class="num">Pistols</th>' + (edit ? '<th></th>' : '') + '</tr></thead><tbody>' +
+    list.map(m => '<tr data-map="' + esc(String(m.map).toLowerCase()) + '"><td>' + (m.date ? fmtDate(m.date) : '–') + '</td><td>' + esc(m.opponent || '–') + '</td><td><b>' + esc(m.map) + '</b></td>' +
+      '<td class="num"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span> ' + (Number(m.rounds_won) || 0) + '–' + (Number(m.rounds_lost) || 0) + '</td><td>' + esc(matchType(m)) + '</td>' +
+      '<td class="num">' + side(m.atk_won, m.atk_lost) + '</td><td class="num">' + side(m.def_won, m.def_lost) + '</td><td class="num">' + (m.pistols_won == null ? '–' : m.pistols_won + '/2') + '</td>' +
+      (edit ? '<td class="num" style="white-space:nowrap"><button class="btn small ghost" data-gedit="' + m.id + '">Edit</button> <button class="btn small ghost danger-t" data-gdel="' + m.id + '">Delete</button></td>' : '') + '</tr>').join('') +
+    '</tbody></table></div></div>';
+}
 function bestOnMap(rows) {
   const by = new Map(); rows.forEach(r => { const n = normName(r.player); if (!n) return; if (!by.has(n)) by.set(n, { name: String(r.player).replace(/\s*\*\s*trial\s*$/i, ''), k: 0, d: 0 }); const x = by.get(n); x.k += Number(r.kills) || 0; x.d += Number(r.deaths) || 0; });
   const list = Array.from(by.values()).filter(x => x.k + x.d > 0).map(x => Object.assign(x, { kd: x.d ? x.k / x.d : x.k })).sort((a, b) => b.kd - a.kd);
@@ -2286,7 +2315,7 @@ PAGES.explore = async function (el) {
     const rows = Array.from(names.entries()).map(([n, name]) => { const s = statsFor(ps, name); const r = roster.find(x => normName(x.ign || x.name) === n); const u = uu.filter(x => normName(x.player) === n);
       return { name: name, r: r, s: s, upr: avg(u, 'util_per_round') }; }).sort((a, b) => (b.s ? b.s.kd : -1) - (a.s ? a.s.kd : -1));
     body = rows.length ? '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Role</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">HS kill %</th><th class="num">First K / D</th><th class="num">Util / round</th></tr></thead><tbody>' +
-      rows.map(x => '<tr><td><b>' + esc(x.name) + '</b>' + (x.r && x.r.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (x.r && x.r.status === 'Bench' ? ' <span class="pill">Bench</span>' : '') + '</td><td>' + rolePill(x.r && x.r.role) + '</td>' +
+      rows.map(x => '<tr><td><b>' + esc(x.name) + '</b>' + (x.r && x.r.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (x.r && x.r.status === 'Bench' ? ' <span class="pill">Bench</span>' : '') + (x.r && x.r.status === 'Coach' ? ' <span class="pill blue">Coach</span>' : '') + '</td><td>' + rolePill(x.r && x.r.role) + '</td>' +
         (x.s ? '<td class="num">' + x.s.maps + '</td><td class="num"><b>' + num(x.s.kd, 2) + '</b></td><td class="num">' + pct(x.s.hs) + '</td><td class="num">' + x.s.fk + ' / ' + x.s.fd + '</td>' : '<td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td>') +
         '<td class="num">' + num(x.upr, 1) + '</td></tr>').join('') + '</tbody></table></div>' : empty('No players or stats yet.');
   } else if (tab === 'vods') {
@@ -2308,7 +2337,7 @@ PAGES.explore = async function (el) {
       : empty('No matches logged yet.');
   }
   el.innerHTML = '<div class="page-h"><div><a href="#/explore" class="small">← Other teams</a><h1 style="margin-top:6px">' + esc(t.name) + (t.tag ? ' <span class="pill">' + esc(t.tag) + '</span>' : '') + '</h1>' +
-    '<p class="muted">' + roster.filter(r => r.status !== 'Bench').map(r => esc(r.name) + (r.role ? ' <span class="small">(' + esc(r.role) + ')</span>' : '')).join(' · ') + '</p></div></div>' + note +
+    '<p class="muted">' + roster.filter(r => (r.status || 'Active') === 'Active').map(r => esc(r.name) + (r.role ? ' <span class="small">(' + esc(r.role) + ')</span>' : '')).join(' · ') + '</p></div></div>' + note +
     '<div class="tabs">' + tabs.map(x => '<a href="#/explore/' + tid + '/' + x[0] + '" class="' + (x[0] === tab ? 'active' : '') + '">' + x[1] + '</a>').join('') + '</div>' + body;
 };
 
