@@ -113,7 +113,8 @@ const TABLES = {
   player_stats: { label: 'Player stats', sheet: 'Player Stats', order: 'date', req: 'player', fields: [
     F('date', 'Date', 'date'), F('map', 'Map'), F('player', 'Player'), F('agent', 'Agent'), F('rounds', 'Rounds', 'int'), F('kills', 'Kills', 'int'), F('deaths', 'Deaths', 'int'),
     F('assists', 'Assists', 'int'), F('kd', 'K/D', 'num'), F('hs_kills', 'Headshot kills', 'int'), F('hs_kill_pct', 'Headshot kill %', 'pct'), F('true_hs_pct', 'True HS %', 'pct'),
-    F('first_kills', 'First kills', 'int'), F('first_deaths', 'First deaths', 'int'), F('source', 'Source'), F('notes', 'Notes', 'long')] },
+    F('first_kills', 'First kills', 'int'), F('first_deaths', 'First deaths', 'int'), F('trades', 'Trade kills', 'int', ['Trades', 'Trade kills']), F('traded_deaths', 'Deaths traded', 'int', ['Deaths traded']),
+    F('grade', 'Grade', 'text', ['Grade']), F('review_id', 'VOD review #', 'int'), F('source', 'Source'), F('notes', 'Notes', 'long')] },
   utility_usage: { label: 'Utility usage', sheet: 'Utility Usage', order: 'date', req: 'player', fields: [
     F('date', 'Date', 'date'), F('map', 'Map'), F('player', 'Player'), F('agent', 'Agent'), F('rounds', 'Rounds', 'int'), F('util_per_round', 'Util per round', 'num'),
     F('q_casts', 'Ability 1 (Q)', 'int'), F('e_casts', 'Ability 2 (E)', 'int'), F('c_casts', 'Grenade (C)', 'int'), F('ults_used', 'Ults used', 'int'), F('ults_available', 'Ults available', 'int'),
@@ -283,6 +284,9 @@ async function start() {
   S.cache = {};
   S.route = (location.hash.slice(2) || 'home').split('/')[0];
   render();
+  // quietly refresh this player's Riot games once per visit (the server skips it if it ran in the last 5 minutes)
+  if (S.me && S.me.team_id && !S.riotTried) { S.riotTried = true;
+    sb.from('riot_links').select('user_id').eq('user_id', S.me.id).maybeSingle().then(({ data }) => { if (data) riotCall({ action: 'sync' }).then(r => { if (r && r.new_games) { S.cache = {}; } }).catch(() => {}); }).catch(() => {}); }
 }
 
 // ------------------------------------------------------------------ auth
@@ -400,6 +404,7 @@ const NAV = [
   { r: 'comps', label: 'Comp Checker', sec: 'comp_checker', i: 'shield', g: 'Prepare' },
   { r: 'reviews', label: 'VOD reviews', sec: 'reviews', i: 'play', g: 'Prepare' },
   { r: 'patches', label: 'Patch notes', sec: 'patch_notes', i: 'doc', g: 'Prepare' },
+  { r: 'games', label: 'My games', sec: null, i: 'chart', g: 'Improve' },
   { r: 'aim', label: 'Aim tracker', sec: null, i: 'cross', g: 'Improve' },
   { r: 'paths', label: 'Training path', sec: null, i: 'route', g: 'Improve' },
   { r: 'notes', label: '1-on-1', sec: null, i: 'chat', g: 'Improve' }
@@ -600,8 +605,21 @@ function checkStatus(r) {
   return { label: 'Partial', cls: 'yellow' };
 }
 // one entry per player: roster slot + their account (if linked)
+async function riotSummaries() {
+  const key = 'riot_summary';
+  if (S.cache[key]) return S.cache[key];
+  const { data, error } = await sb.from('riot_summary').select('*');
+  const rows = error ? [] : (data || []);
+  S.cache[key] = rows; return rows;
+}
+function riotLine(rs) {
+  if (!rs || !rs.games) return '';
+  return '<div class="rsline" title="Last ' + rs.games + ' games from Riot' + (rs.updated_at ? ', updated ' + fmtDate(String(rs.updated_at).slice(0, 10)) : '') + '">K/D <b>' + num(Number(rs.kd), 2) + '</b> · HS <b>' + pct(rs.hs_pct == null ? null : Number(rs.hs_pct)) + '</b>' +
+    (rs.acs ? ' · ACS <b>' + Math.round(rs.acs) + '</b>' : '') + ' · <span class="muted">' + rs.games + ' games</span></div>';
+}
 async function teamPlayers() {
-  let [roster, members] = await Promise.all([cached('roster'), cached('profiles_list')]);
+  let [roster, members, rsum] = await Promise.all([cached('roster'), cached('profiles_list'), riotSummaries()]);
+  const rsBy = new Map((rsum || []).map(x => [x.user_id, x]));
   roster = roster || []; members = members || [];
   const byId = new Map(members.map(m => [m.id, m]));
   const out = roster.map(r => {
@@ -612,6 +630,7 @@ async function teamPlayers() {
   members.forEach(m => { if (!m.is_coach && !m.staff_role && !roster.some(r => r.claimed_by === m.id)) out.push({ key: 'u' + m.id, name: nameOf(m), ign: m.ign, role: m.role, is_igl: m.is_igl, is_trial: m.is_trial, discord: m.discord, avatar_url: m.avatar_url, rank: m.rank, rank_rr: m.rank_rr, peak_rank: m.peak_rank, riot_id: m.riot_id, rank_updated: m.rank_updated, user_id: m.id, joined: true }); });
   const staffIds = new Set(members.filter(m => m.is_coach || m.staff_role).map(m => m.id));
   const coaches = members.filter(m => m.is_coach).concat(members.filter(m => !m.is_coach && m.staff_role));
+  out.forEach(p => { if (p.user_id) p.rs = rsBy.get(p.user_id) || null; });
   const slotCoaches = out.filter(p => p.coachSlot);
   return { slotCoaches: slotCoaches, players: out.filter(p => !p.coachSlot && !(p.user_id && staffIds.has(p.user_id))).sort((a, b) => (a.is_trial ? 1 : 0) - (b.is_trial ? 1 : 0) || String(a.name).localeCompare(String(b.name))), coaches: coaches };
 }
@@ -632,7 +651,40 @@ function statsFor(ps, ign) {
   const rows = ps.filter(r => normName(r.player) === normName(ign));
   if (!rows.length) return null;
   const k = sum(rows, 'kills'), d = sum(rows, 'deaths'), hs = sum(rows, 'hs_kills');
-  return { maps: rows.length, k: k, kd: d ? k / d : k, hs: k ? hs / k : null, ths: avg(rows, 'true_hs_pct'), fk: sum(rows, 'first_kills'), fd: sum(rows, 'first_deaths'), a: sum(rows, 'assists') };
+  const graded = rows.map(perfScore).filter(x => x != null);
+  return { maps: rows.length, k: k, kd: d ? k / d : k, hs: k ? hs / k : null, ths: avg(rows, 'true_hs_pct'), fk: sum(rows, 'first_kills'), fd: sum(rows, 'first_deaths'), a: sum(rows, 'assists'),
+    tr: sum(rows, 'trades'), trd: sum(rows, 'traded_deaths'), score: graded.length ? graded.reduce((x, y) => x + y, 0) / graded.length : null };
+}
+// ---- Performance grade (one map). About 72-75 = an even game (C/C+), 84+ = B+, 90+ = A.
+// Per round: kills and deaths count most, then assists, opening duels, trade kills and headshot rate.
+function perfScore(r) {
+  const R = Number(r.rounds), k = Number(r.kills), d = Number(r.deaths);
+  if (!(R > 0) || isNaN(k) || isNaN(d)) return null;
+  const a = Number(r.assists) || 0, fk = Number(r.first_kills) || 0, fd = Number(r.first_deaths) || 0, tr = Number(r.trades) || 0;
+  const hsp = r.hs_kill_pct != null && r.hs_kill_pct !== '' ? Number(r.hs_kill_pct) : (k && r.hs_kills != null ? Number(r.hs_kills) / k : null);
+  let s = 70 + 35 * (k - d) / R + 15 * a / R + 30 * (fk - fd) / R + 20 * tr / R + (hsp == null || isNaN(hsp) ? 0 : Math.max(-4, Math.min(4, 10 * (hsp - 0.3))));
+  return Math.max(0, Math.min(100, s));
+}
+const GRADES = [[95, 'A+'], [90, 'A'], [87, 'A-'], [84, 'B+'], [80, 'B'], [77, 'B-'], [74, 'C+'], [70, 'C'], [67, 'C-'], [64, 'D+'], [60, 'D'], [0, 'F']];
+function letterOf(score) { if (score == null) return ''; return (GRADES.find(g => score >= g[0]) || GRADES[GRADES.length - 1])[1]; }
+function gradePill(r, score) {
+  const sc = score != null ? score : perfScore(r); const g = (r && r.grade) || letterOf(sc);
+  if (!g) return '<span class="muted">–</span>';
+  const c = { A: 'green', B: 'blue', C: 'yellow', D: 'red', F: 'red' }[g[0]] || '';
+  return '<span class="pill grade ' + c + '" title="' + (sc != null ? 'Score ' + Math.round(sc) + '/100' : '') + '">' + esc(g) + '</span>';
+}
+function scrimStatsPanel(rows, title) {
+  if (!rows.length) return '';
+  const list = rows.slice().sort((a, b) => (perfScore(b) || 0) - (perfScore(a) || 0));
+  const hsOf = r => r.hs_kill_pct != null && r.hs_kill_pct !== '' ? Number(r.hs_kill_pct) : (Number(r.kills) && r.hs_kills != null ? Number(r.hs_kills) / Number(r.kills) : null);
+  return panel(title || 'Player stats', '<span class="small muted">' + esc([rows[0].map, rows[0].rounds ? rows[0].rounds + ' rounds' : ''].filter(Boolean).join(' · ')) + '</span>',
+    '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Agent</th><th class="num">K / D / A</th><th class="num">K/D</th><th class="num">HS %</th><th class="num">First K / D</th><th class="num">Trade kills</th><th class="num">Deaths traded</th><th class="num">Grade</th></tr></thead><tbody>' +
+    list.map(r => '<tr><td><b>' + esc(String(r.player).replace(/\s*\*\s*trial\s*$/i, '')) + '</b>' + (isTrialName(r.player) ? ' <span class="pill yellow">Trial</span>' : '') + '</td><td>' + esc(r.agent || '–') + '</td>' +
+      '<td class="num">' + (r.kills ?? '–') + ' / ' + (r.deaths ?? '–') + ' / ' + (r.assists ?? '–') + '</td><td class="num"><b>' + num(Number(r.deaths) ? r.kills / r.deaths : r.kills, 2) + '</b></td>' +
+      '<td class="num">' + pct(hsOf(r)) + '</td><td class="num">' + (r.first_kills ?? '–') + ' / ' + (r.first_deaths ?? '–') + '</td><td class="num">' + (r.trades ?? '–') + '</td>' +
+      '<td class="num">' + (r.traded_deaths == null ? '–' : r.traded_deaths + (r.deaths ? ' <span class="muted small">of ' + r.deaths + '</span>' : '')) + '</td><td class="num">' + gradePill(r) + '</td></tr>').join('') +
+    '</tbody></table></div>' + (list.some(r => r.notes) ? '<div class="small" style="margin-top:8px">' + list.filter(r => r.notes).map(r => '<div><b>' + esc(String(r.player).replace(/\s*\*\s*trial\s*$/i, '')) + ':</b> ' + esc(r.notes) + '</div>').join('') + '</div>' : '') +
+    '<p class="small muted" style="margin:8px 0 0">Grade = performance score out of 100 from kills, deaths, assists, opening duels, trade kills and headshot rate per round (an even game is about a C/C+). Hover a grade for the score.</p>');
 }
 
 function pcard(p, ps) {
@@ -641,7 +693,7 @@ function pcard(p, ps) {
   return '<div class="pcard' + (p.bench ? ' bench' : '') + '">' + avatar(p, 52) + '<div class="nm">' + esc(p.name) + '</div>' +
     '<div class="sub">' + esc([p.ign && p.ign !== p.name ? p.ign : '', p.discord ? '@' + p.discord : ''].filter(Boolean).join(' · ')) + '</div>' +
     '<div class="row" style="justify-content:center;gap:4px">' + rolePill(p.role) + (p.is_igl ? '<span class="pill yellow">IGL</span>' : '') + (p.is_trial ? '<span class="pill yellow">Trial</span>' : '') + (p.bench ? '<span class="pill">Bench</span>' : '') + (p.coachSlot ? '<span class="pill blue">Coach</span>' : '') + (!p.user_id ? '<span class="pill">Not joined</span>' : '') + '</div>' +
-    (p.rank ? '<div style="margin-top:6px">' + rankPill(p.rank, true) + '</div>' : '') +
+    (p.rank ? '<div style="margin-top:6px">' + rankPill(p.rank, true) + '</div>' : '') + riotLine(p.rs) +
     (ps ? '<div class="pstats">' + (s ? '<div><b>' + num(s.kd, 2) + '</b><span>K/D</span></div><div><b>' + pct(s.hs) + '</b><span>HS%</span></div><div><b>' + s.maps + '</b><span>Maps</span></div>' : '<div class="muted small" style="grid-column:1/-1">No stats yet</div>') + '</div>' : '') +
     (S.me.is_coach ? '<div class="pact">' + (p.coachSlot ? '<button class="btn small ghost" data-slot="' + key + '|Active">Make player</button>'
       : '<button class="btn small ghost" data-bench="' + key + '">' + (p.bench ? 'Make active' : 'Bench') + '</button><button class="btn small ghost" data-slot="' + key + '|Coach">Coach</button>') +
@@ -782,7 +834,7 @@ PAGES.home = async function (el) {
   // roster
   const rosterHtml = panel('The team', '<a class="small" href="#/team">Roster &amp; stats →</a>',
     (team.coaches.length ? '<div class="small muted" style="margin-bottom:6px">Coaching staff: ' + team.coaches.map(c => esc(nameOf(c)) + ' <span class="muted">(' + esc(staffLabel(c)) + ')</span>').join(', ') + '</div>' : '') +
-    (players.length ? '<div class="plist compact">' + players.slice().sort((a, b) => (a.bench ? 1 : 0) - (b.bench ? 1 : 0)).map(p => '<div class="prow' + (p.bench ? ' benched' : '') + '">' + avatar(p, 28) + '<div class="grow t">' + esc(p.name) + (p.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (p.is_trial ? ' <span class="pill yellow">Trial</span>' : '') + (p.bench ? ' <span class="pill">Bench</span>' : '') + '</div>' + rolePill(p.role) + '</div>').join('') + '</div>' : '<p class="muted small">No players yet.</p>'));
+    (players.length ? '<div class="plist compact">' + players.slice().sort((a, b) => (a.bench ? 1 : 0) - (b.bench ? 1 : 0)).map(p => '<div class="prow' + (p.bench ? ' benched' : '') + '">' + avatar(p, 28) + '<div class="grow t">' + esc(p.name) + (p.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (p.is_trial ? ' <span class="pill yellow">Trial</span>' : '') + (p.bench ? ' <span class="pill">Bench</span>' : '') + riotLine(p.rs).replace('class="rsline"', 'class="rsline" style="margin-top:2px"') + '</div>' + rolePill(p.role) + '</div>').join('') + '</div>' : '<p class="muted small">No players yet.</p>'));
   const annHtml = panel('From the coach', coach ? '<a class="small" href="#/coach/announce">Post →</a>' : '',
     anns.length ? anns.slice(0, 5).map(a => '<div class="ann">' + (a.pinned ? '<span class="pill red">Pinned</span> ' : '') + '<b>' + esc(a.title) + '</b> <span class="muted small">' + fmtDate(a.created_at) + '</span><div class="md">' + md(a.body) + '</div></div>').join('') : '<p class="muted small">Nothing posted yet.</p>');
 
@@ -898,10 +950,11 @@ PAGES.stats = async function (el) {
     (mine.length || util.length ? '' : empty('No stats logged for you yet.')) +
     '<div class="kpis">' + kpi(num(d ? k / d : k, 2), 'K/D') + kpi(k, 'Kills') + kpi(pct(k ? hs / k : null), 'Headshot kill %') + kpi(pct(avg(mine, 'true_hs_pct')), 'True HS %') +
     kpi(sum(mine, 'first_kills') + ' / ' + sum(mine, 'first_deaths'), 'First kills / deaths') + kpi(num(avg(util, 'util_per_round'), 1), 'Util per round') +
-    kpi(pct(avg(util, 'util_before_fight')), 'Util before first fight') + kpi(mine.length, 'Maps') + '</div>' +
+    kpi(pct(avg(util, 'util_before_fight')), 'Util before first fight') + kpi(mine.length, 'Maps') + kpi(sum(mine, 'trades'), 'Trade kills') +
+    (function () { const g = mine.map(perfScore).filter(x => x != null); return g.length ? '<div class="kpi"><div class="v">' + gradePill(null, g.reduce((a, b) => a + b, 0) / g.length) + '</div><div class="l">Average grade</div></div>' : ''; })() + '</div>' +
     (recent.length ? panel('Recent form · last ' + recent.length + ' maps', '', '<div class="kpis compact-kpis">' + kpi(num(avg(recent, 'kd'), 2), 'Average K/D') + kpi(sum(recent, 'first_kills') + ' / ' + sum(recent, 'first_deaths'), 'First kills / deaths') + kpi(pct(sum(recent, 'kills') ? sum(recent, 'hs_kills') / sum(recent, 'kills') : null), 'Headshot kill %') + '</div>') : '') +
     (agents.length ? panel('Agent performance', '', '<div class="tablewrap"><table><thead><tr><th>Agent</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">HS kill %</th></tr></thead><tbody>' + agents.map(a => '<tr><td><b>' + esc(a.agent) + '</b></td><td class="num">' + a.maps + '</td><td class="num">' + num(a.kd, 2) + '</td><td class="num">' + pct(a.hs) + '</td></tr>').join('') + '</tbody></table></div>') : '') +
-    (mine.length ? panel('Map by map', '', statsTable(mine, ['date', 'map', 'agent', 'kills', 'deaths', 'assists', 'kd', 'hs_kill_pct', 'true_hs_pct', 'first_kills', 'first_deaths', 'notes'], TABLES.player_stats)) : '') +
+    (mine.length ? panel('Map by map', '', statsTable(mine, ['date', 'map', 'agent', 'kills', 'deaths', 'assists', 'kd', 'hs_kill_pct', 'true_hs_pct', 'first_kills', 'first_deaths', 'trades', 'traded_deaths', 'grade', 'notes'], TABLES.player_stats)) : '') +
     (util.length ? panel('Utility usage', '', statsTable(util, ['date', 'map', 'agent', 'rounds', 'util_per_round', 'q_casts', 'e_casts', 'c_casts', 'ults_used', 'ults_available', 'died_with_util', 'util_before_fight', 'source', 'notes'], TABLES.utility_usage)) : '');
 };
 function statsTable(rows, keys, cfg) {
@@ -924,7 +977,9 @@ PAGES.team = async function (el) {
   } else if (tab === 'roster' || !showStats) {
     const slotIds = new Set(team.slotCoaches.map(p => p.user_id).filter(Boolean));
     const chipCoaches = team.coaches.filter(c => !slotIds.has(c.id));
-    body = (team.slotCoaches.length ? '<div class="sec-h"><h2>Coaches <span class="muted small">' + team.slotCoaches.length + '</span></h2><span class="small muted">Coaches don\'t count in check-ins or player stats.</span></div><div class="pcards" style="margin-bottom:24px">' + team.slotCoaches.map(p => pcard(p, null)).join('') + '</div>' : '') +
+    const linked = team.players.filter(p => p.rs && p.rs.games).length;
+    body = (isStaff() ? '<div class="row small" style="margin:0 0 10px;gap:10px"><span class="muted">' + linked + ' of ' + team.players.filter(p => p.user_id).length + ' players linked their Riot account. Their K/D and HS% from recent games show on their card.</span><button class="btn small ghost" id="rsall">Update Riot stats</button></div>' : '') +
+      (team.slotCoaches.length ? '<div class="sec-h"><h2>Coaches <span class="muted small">' + team.slotCoaches.length + '</span></h2><span class="small muted">Coaches don\'t count in check-ins or player stats.</span></div><div class="pcards" style="margin-bottom:24px">' + team.slotCoaches.map(p => pcard(p, null)).join('') + '</div>' : '') +
       (chipCoaches.length ? '<div class="small muted" style="margin:4px 0 12px">Coaching staff: ' + chipCoaches.map(c => '<span class="chip">' + avatar(c, 20) + esc(nameOf(c)) + ' <span class="muted">' + esc(staffLabel(c)) + '</span></span>').join(' ') + '</div>' : '') +
       (team.players.length ? ['Active roster', 'Bench'].map(sec => { const list = team.players.filter(p => (sec === 'Bench') === !!p.bench);
         if (sec === 'Bench' && !list.length && !S.me.is_coach) return '';
@@ -938,8 +993,8 @@ PAGES.team = async function (el) {
     const lb = Array.from(names.entries()).map(([n, name]) => { const s = statsFor(ps, name); const p = byIgn.get(n); const u = uu.filter(r => normName(r.player) === n);
       return Object.assign(s, { name: p ? p.name : name, p: p || { name: name }, trial: (p && p.is_trial) || ps.some(r => normName(r.player) === n && isTrialName(r.player)), role: p ? p.role : '', upr: avg(u, 'util_per_round'), ubf: avg(u, 'util_before_fight') }); })
       .sort((a, b) => b.kd - a.kd);
-    body = lb.length ? '<div class="tablewrap"><table><thead><tr><th>#</th><th>Player</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">Kills</th><th class="num">Assists</th><th class="num">HS kill %</th><th class="num">True HS %</th><th class="num">First K / D</th><th class="num">Util / round</th><th class="num">Util before fight</th></tr></thead><tbody>' +
-      lb.map((p, i) => '<tr><td><span class="rank r' + (i + 1) + '">' + (i + 1) + '</span></td><td><div class="row" style="gap:8px;flex-wrap:nowrap">' + avatar(p.p, 26) + '<b>' + esc(p.name) + '</b> ' + rolePill(p.role) + (p.trial ? ' <span class="pill yellow">Trial</span>' : '') + '</div></td><td class="num">' + p.maps + '</td><td class="num"><b>' + num(p.kd, 2) + '</b></td><td class="num">' + p.k + '</td><td class="num">' + p.a + '</td><td class="num">' + pct(p.hs) + '</td><td class="num">' + pct(p.ths) + '</td><td class="num">' + p.fk + ' / ' + p.fd + '</td><td class="num">' + num(p.upr, 1) + '</td><td class="num">' + pct(p.ubf) + '</td></tr>').join('') +
+    body = lb.length ? '<div class="tablewrap"><table><thead><tr><th>#</th><th>Player</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">Kills</th><th class="num">Assists</th><th class="num">HS kill %</th><th class="num">True HS %</th><th class="num">First K / D</th><th class="num">Trade kills</th><th class="num">Grade</th><th class="num">Util / round</th><th class="num">Util before fight</th></tr></thead><tbody>' +
+      lb.map((p, i) => '<tr><td><span class="rank r' + (i + 1) + '">' + (i + 1) + '</span></td><td><div class="row" style="gap:8px;flex-wrap:nowrap">' + avatar(p.p, 26) + '<b>' + esc(p.name) + '</b> ' + rolePill(p.role) + (p.trial ? ' <span class="pill yellow">Trial</span>' : '') + '</div></td><td class="num">' + p.maps + '</td><td class="num"><b>' + num(p.kd, 2) + '</b></td><td class="num">' + p.k + '</td><td class="num">' + p.a + '</td><td class="num">' + pct(p.hs) + '</td><td class="num">' + pct(p.ths) + '</td><td class="num">' + p.fk + ' / ' + p.fd + '</td><td class="num">' + (p.tr || '–') + '</td><td class="num">' + (p.score != null ? gradePill(null, p.score) : '<span class="muted">–</span>') + '</td><td class="num">' + num(p.upr, 1) + '</td><td class="num">' + pct(p.ubf) + '</td></tr>').join('') +
       '</tbody></table></div><p class="small muted">Sorted by K/D. Stats come from reviewed scrims and matches.</p>' : empty('No player stats logged yet. Import them from your sheet (Coach panel → Content & import).');
   } else {
     const maps = groupBy(matches, 'map').map(([m, list]) => { const w = list.filter(x => Number(x.rounds_won) > Number(x.rounds_lost)).length; return { m: m, n: list.length, w: w, rw: sum(list, 'rounds_won'), rl: sum(list, 'rounds_lost') }; }).sort((a, b) => b.n - a.n);
@@ -957,6 +1012,7 @@ PAGES.team = async function (el) {
   const find = k => team.players.concat(team.slotCoaches).find(p => (p.rid ? 'r' + p.rid : 'u' + p.user_id) === k);
   $$('[data-bench]', el).forEach(b => b.onclick = () => { const p = find(b.dataset.bench); setBench(p, !p.bench, render); });
   $$('[data-slot]', el).forEach(b => b.onclick = () => { const [k, st] = b.dataset.slot.split('|'); const p = find(k); if (p) setSlotStatus(p, st, render); });
+  if ($('#rsall', el)) $('#rsall', el).onclick = async () => { const b = $('#rsall', el); b.disabled = true; b.textContent = 'Updating…'; try { const r = await riotCall({ action: 'sync_team' }); toast('Updated ' + r.synced + ' linked player' + (r.synced === 1 ? '' : 's') + (r.failed ? ' · ' + r.failed + ' failed' : '')); S.cache = {}; render(); } catch (err) { toast(err.message); b.disabled = false; b.textContent = 'Update Riot stats'; } };
   $$('[data-kick]', el).forEach(b => b.onclick = () => kickPlayer(find(b.dataset.kick), render));
 };
 
@@ -1214,6 +1270,7 @@ async function reviewDetail(el, r, work) {
   if (!r) { el.innerHTML = empty('That review isn\'t here any more.', '<a class="btn small" href="#/reviews">All reviews</a>'); return; }
   const vi = videoInfo(r.vod), items = workFor(r, work), start = vi ? (vi.t || tsToSec(r.starts_at)) : 0;
   const vodJob = isStaff() ? await db.list('vod_analysis_jobs', { eq: { review_id: r.id }, limit: 1 }).then(rows => rows[0] || null).catch(() => null) : null;
+  const revStats = (can('team_stats') || can('my_stats') || isStaff()) ? await db.list('player_stats', { eq: { review_id: r.id }, limit: 50 }).catch(() => []) : [];
   const canEmbed = vi && (vi.kind === 'yt' || vi.kind === 'tw');
   el.innerHTML = '<div class="page-h"><div><a href="#/reviews" class="small">← All reviews</a><h1 style="margin-top:6px">' + esc(r.title || 'VOD review') + '</h1>' +
     '<div class="row small" style="gap:6px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.type ? '<span class="pill">' + esc(r.type) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') +
@@ -1224,9 +1281,10 @@ async function reviewDetail(el, r, work) {
     '<div class="review-grid"><div class="vcol"><div class="player">' + (canEmbed ? '<iframe id="vplayer" src="' + esc(embedSrc(vi, start)) + '" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>' : '<div class="noembed">' + (vi ? '<a class="btn" href="' + esc(vi.url) + '" target="_blank" rel="noopener">Watch the VOD</a>' : 'No video link on this review.') + '</div>') + '</div>' +
       (start ? '<div class="small muted" style="margin-top:6px">Game starts at <button class="linkbtn" data-seek="' + start + '">' + fmtTs(start) + '</button></div>' : '') + '</div>' +
     '<div class="ncol">' +
+      scrimStatsPanel(revStats, 'Player stats from this VOD') +
       (r.summary ? panel('Key takeaways', '', '<div class="md takeaways">' + md(String(r.summary).replace(/\s(\d\))\s/g, '\n$1 ')) + '</div>') : '') +
       (items.length ? panel('What we need to work on', '<a class="small" href="#/workon">All →</a>', items.map(w => workCard(w, { onSeek: true, coachView: isStaff() })).join('')) : '') +
-      (r.body ? panel('Notes &amp; tips', '', '<div class="md notes">' + md(r.body) + '</div>') : (!r.summary && !items.length ? empty('No notes on this review yet.') : '')) +
+      (r.body ? panel('Notes &amp; tips', '', '<div class="md notes">' + md(r.body) + '</div>') : (!r.summary && !items.length && !revStats.length ? empty('No notes on this review yet.') : '')) +
     '</div></div>';
   // timestamps in the notes become buttons that seek the video
   if (canEmbed) {
@@ -1306,9 +1364,11 @@ PAGES.account = async function (el) {
     '<p class="muted small">The coach manages your name, role and what you can see.</p>' +
     '<form id="pw" class="stack"><label class="f"><span>New password</span><input name="p" type="password" minlength="6" required></label><button class="btn ghost">Change password</button></form>' +
     '<div class="row"><button class="btn danger" id="so">Sign out</button><button class="btn ghost" id="lt">Leave ' + esc(teamName()) + '</button></div></div>' +
+    '<div class="card" style="max-width:520px;margin-top:14px"><h2>Riot account</h2><div id="riotbox"><p class="muted small">Loading…</p></div></div>' +
     '<div class="card" style="max-width:520px;margin-top:14px"><h2>Rank</h2><div id="rkbox"></div></div>' +
     '<div class="card" style="max-width:520px;margin-top:14px"><b>Install the app</b><p class="small muted">Phone: open this site in Safari (iPhone) or Chrome (Android) → Share / menu → <b>Add to Home Screen</b>. Computer: in Chrome or Edge click the install icon at the right end of the address bar.</p></div>';
   rankForm($('#rkbox'), () => PAGES.account(el));
+  riotPanel($('#riotbox'));
   $('#so').onclick = () => sb.auth.signOut();
   $('#lt').onclick = async () => {
     if (!confirm('Leave ' + teamName() + '? You\'ll lose access to its data until a coach lets you back in.')) return;
@@ -2360,9 +2420,70 @@ function localStore(k, v) { try { if (v === undefined) return JSON.parse(localSt
 const AGENTS = ['Astra', 'Breach', 'Brimstone', 'Chamber', 'Clove', 'Cypher', 'Deadlock', 'Fade', 'Gekko', 'Harbor', 'Iso', 'Jett', 'KAY/O', 'Killjoy', 'Neon', 'Omen', 'Phoenix', 'Raze', 'Reyna', 'Sage', 'Skye', 'Sova', 'Tejo', 'Viper', 'Vyse', 'Waylay', 'Yoru'];
 
 // ---------------------------------------------------------------- Ranks
+// ---- Riot account link (stats pulled by the riot-sync Edge Function; the Riot ID stays private to the player)
+async function riotCall(body) {
+  const { data, error } = await sb.functions.invoke('riot-sync', { body: body });
+  if (error) { let msg = error.message; try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* keep message */ } throw new Error(msg); }
+  if (data && data.error) throw new Error(data.error);
+  return data || {};
+}
+async function riotPanel(box) {
+  const { data } = await sb.from('riot_links').select('riot_name,riot_tag,region,synced_at').eq('user_id', S.me.id).maybeSingle();
+  if (!data) {
+    box.innerHTML = '<p class="small muted" style="margin-top:0">Link your Riot account to pull your games automatically: K/D, headshot %, first kills and deaths, trades and a grade for every game. ' +
+      'Only you can see your Riot ID and your games. Your team just sees a short line under your name (K/D, HS%, games). No password needed.</p>' +
+      '<form id="rl" class="row"><input name="rid" placeholder="Name#TAG" autocomplete="off" class="grow" required><button class="btn small">Link</button></form><p class="small error" id="rlerr"></p>';
+    $('#rl', box).onsubmit = async e => { e.preventDefault(); const b = e.target.querySelector('button'); b.disabled = true; b.textContent = 'Linking…'; $('#rlerr', box).textContent = '';
+      try { const r = await riotCall({ action: 'link', riot_id: e.target.rid.value.trim() }); toast('Linked' + (r.new_games ? ' · ' + r.new_games + ' games pulled' : '')); S.cache = {}; riotPanel(box); }
+      catch (err) { $('#rlerr', box).textContent = err.message; b.disabled = false; b.textContent = 'Link'; } };
+    return;
+  }
+  box.innerHTML = '<div class="row spread"><div><b>' + esc(data.riot_name) + '#' + esc(data.riot_tag) + '</b> <span class="pill">' + esc(String(data.region).toUpperCase()) + '</span>' +
+    '<div class="small muted">Only you can see this. ' + (data.synced_at ? 'Last updated ' + new Date(data.synced_at).toLocaleString() : 'Not updated yet') + '</div></div>' +
+    '<div class="row"><a class="btn small ghost" href="#/games">My games</a><button class="btn small ghost" id="rsync">Update now</button><button class="btn small ghost danger-t" id="runlink">Unlink</button></div></div>';
+  $('#rsync', box).onclick = async () => { try { const r = await riotCall({ action: 'sync', force: true }); toast(r.new_games ? r.new_games + ' games updated' : 'Up to date'); S.cache = {}; riotPanel(box); } catch (err) { toast(err.message); } };
+  $('#runlink', box).onclick = async () => { if (!confirm('Unlink your Riot account? Your pulled games are removed from Team Hub.')) return; try { await riotCall({ action: 'unlink' }); S.cache = {}; toast('Unlinked'); riotPanel(box); } catch (err) { toast(err.message); } };
+}
+function riotRowAsStats(m) {
+  const hits = (Number(m.headshots) || 0) + (Number(m.bodyshots) || 0) + (Number(m.legshots) || 0);
+  return { rounds: m.rounds, kills: m.kills, deaths: m.deaths, assists: m.assists, first_kills: m.first_kills, first_deaths: m.first_deaths, trades: m.trades, hs_kill_pct: hits ? m.headshots / hits : null };
+}
+PAGES.games = async function (el) {
+  const [{ data: link }, { data: rows }] = await Promise.all([sb.from('riot_links').select('riot_name,riot_tag').eq('user_id', S.me.id).maybeSingle(), sb.from('riot_matches').select('*').eq('user_id', S.me.id).order('started_at', { ascending: false }).limit(60)]);
+  const list = rows || [];
+  const sel = Number(location.hash.split('/')[2]) || null;
+  if (sel) { const m = list.find(x => x.id === sel); return gameDetail(el, m); }
+  const qOf = m => ({ custom: 'Custom', competitive: 'Competitive', unrated: 'Unrated', premier: 'Premier', swiftplay: 'Swiftplay', deathmatch: 'Deathmatch', teamdeathmatch: 'Team DM', spikerush: 'Spike Rush' })[m.queue] || (m.queue || '–');
+  const real = list.filter(m => !/deathmatch/.test(m.queue || ''));
+  const k = sum(real, 'kills'), d = sum(real, 'deaths'), hs = sum(real, 'headshots'), hits = hs + sum(real, 'bodyshots') + sum(real, 'legshots'), rn = sum(real, 'rounds');
+  const scores = real.map(m => perfScore(riotRowAsStats(m))).filter(x => x != null);
+  el.innerHTML = '<div class="page-h"><div><h1>My games</h1><p class="muted">Pulled from Riot for ' + (link ? '<b>' + esc(link.riot_name) + '#' + esc(link.riot_tag) + '</b> (only you see this list)' : 'your linked account') + '. Your team only sees your K/D, HS% and games count.</p></div>' +
+    '<div class="row">' + (link ? '<button class="btn small ghost" id="gsync">Update now</button>' : '<a class="btn small" href="#/account">Link Riot account</a>') + '</div></div>' +
+    (!link ? empty('Link your Riot account on the Account page to see your games here.') : !list.length ? empty('No games pulled yet. Play a game, then press “Update now”.') :
+      '<div class="kpis">' + kpi(num(d ? k / d : k, 2), 'K/D') + kpi(pct(hits ? hs / hits : null), 'Headshot %') + kpi(rn ? Math.round(sum(real, 'score') / rn) : '–', 'ACS') + kpi(rn ? Math.round(sum(real, 'damage') / rn) : '–', 'ADR') +
+      kpi(sum(real, 'first_kills') + ' / ' + sum(real, 'first_deaths'), 'First kills / deaths') + kpi(sum(real, 'trades'), 'Trade kills') +
+      (scores.length ? '<div class="kpi"><div class="v">' + gradePill(null, scores.reduce((a, b) => a + b, 0) / scores.length) + '</div><div class="l">Average grade</div></div>' : '') + kpi(real.length, 'Games') + '</div>' +
+      '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Mode</th><th>Map</th><th>Agent</th><th>Result</th><th class="num">K / D / A</th><th class="num">K/D</th><th class="num">HS %</th><th class="num">ACS</th><th class="num">ADR</th><th class="num">First K / D</th><th class="num">Trades</th><th class="num">Grade</th></tr></thead><tbody>' +
+      list.map(m => { const st = riotRowAsStats(m); return '<tr class="clickrow" data-g="' + m.id + '"><td>' + (m.started_at ? fmtDate(String(m.started_at).slice(0, 10)) : '–') + '</td><td>' + esc(qOf(m)) + '</td><td><b>' + esc(m.map || '–') + '</b></td><td>' + esc(m.agent || '–') + '</td>' +
+        '<td>' + (m.won == null ? '–' : '<span class="pill ' + (m.won ? 'green' : 'red') + '">' + (m.won ? 'W' : 'L') + ' ' + (m.rounds_won ?? '') + '–' + (m.rounds_lost ?? '') + '</span>') + '</td>' +
+        '<td class="num">' + m.kills + ' / ' + m.deaths + ' / ' + m.assists + '</td><td class="num"><b>' + num(m.deaths ? m.kills / m.deaths : m.kills, 2) + '</b></td><td class="num">' + pct(st.hs_kill_pct) + '</td>' +
+        '<td class="num">' + (m.rounds ? Math.round(m.score / m.rounds) : '–') + '</td><td class="num">' + (m.rounds ? Math.round(m.damage / m.rounds) : '–') + '</td><td class="num">' + m.first_kills + ' / ' + m.first_deaths + '</td><td class="num">' + m.trades + '</td><td class="num">' + (/deathmatch/.test(m.queue || '') ? '–' : gradePill(st)) + '</td></tr>'; }).join('') +
+      '</tbody></table></div><p class="small muted">HS % = headshots out of all hits. Trades = kills within 3 s of a teammate dying to that enemy. Grade = performance score (an even game is about a C/C+).</p>');
+  $$('[data-g]', el).forEach(tr => tr.onclick = () => { location.hash = '#/games/' + tr.dataset.g; });
+  if ($('#gsync')) $('#gsync').onclick = async () => { const b = $('#gsync'); b.disabled = true; b.textContent = 'Updating…'; try { const r = await riotCall({ action: 'sync', force: true }); toast(r.new_games ? r.new_games + ' games updated' : 'Up to date'); S.cache = {}; render(); } catch (err) { toast(err.message); b.disabled = false; b.textContent = 'Update now'; } };
+};
+function gameDetail(el, m) {
+  if (!m) { el.innerHTML = empty('That game isn\'t here any more.', '<a class="btn small" href="#/games">My games</a>'); return; }
+  const ps = ((m.detail || {}).players || []).slice().sort((a, b) => String(a.team).localeCompare(String(b.team)) || (b.s || 0) - (a.s || 0));
+  const mine = ps.find(p => p.me); const myTeam = mine ? mine.team : null;
+  const rows = t => ps.filter(p => (p.team === myTeam) === t).map(p => '<tr' + (p.me ? ' style="background:var(--accent-soft)"' : '') + '><td><b>' + esc(p.n || '') + '</b></td><td>' + esc(p.agent || '') + '</td><td class="num">' + (m.rounds ? Math.round((p.s || 0) / m.rounds) : '–') + '</td><td class="num">' + p.k + ' / ' + p.d + ' / ' + p.a + '</td></tr>').join('');
+  el.innerHTML = '<div class="page-h"><div><a href="#/games" class="small">← My games</a><h1 style="margin-top:6px">' + esc(m.map || 'Game') + ' · ' + esc(m.agent || '') + '</h1><p class="muted">' + (m.started_at ? new Date(m.started_at).toLocaleString() : '') + ' · ' + esc(m.queue || '') + (m.won == null ? '' : ' · ' + (m.won ? 'Win ' : 'Loss ') + m.rounds_won + '–' + m.rounds_lost) + '</p></div></div>' +
+    scrimStatsPanel([Object.assign({ player: 'You', agent: m.agent, map: m.map, hs_kills: m.headshots, kills: m.kills, deaths: m.deaths, assists: m.assists, first_kills: m.first_kills, first_deaths: m.first_deaths, trades: m.trades, traded_deaths: m.traded_deaths, rounds: m.rounds }, { hs_kill_pct: riotRowAsStats(m).hs_kill_pct })], 'Your game') +
+    (ps.length ? panel('Scoreboard', '', '<div class="tablewrap"><table><thead><tr><th>Your team</th><th>Agent</th><th class="num">ACS</th><th class="num">K / D / A</th></tr></thead><tbody>' + rows(true) + '</tbody></table></div><div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>Enemy team</th><th>Agent</th><th class="num">ACS</th><th class="num">K / D / A</th></tr></thead><tbody>' + rows(false) + '</tbody></table></div>') : '');
+}
 async function rankForm(box, after) {
   const me = S.me;
-  box.innerHTML = '<form id="rk" class="stack"><label class="f"><span>Riot ID</span><input name="riot" placeholder="Name#TAG" value="' + esc(me.riot_id || '') + '"></label>' +
+  box.innerHTML = '<form id="rk" class="stack"><label class="f"><span>Riot ID <span class="muted">(optional, shown to your team for the tracker.gg link)</span></span><input name="riot" placeholder="Name#TAG" value="' + esc(me.riot_id || '') + '"></label>' +
     '<div class="row"><label class="f grow"><span>Current rank</span><select name="rank"><option value="">—</option>' + RANKS.map(r => '<option' + (r === me.rank ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></label>' +
     '<label class="f"><span>RR</span><input name="rr" inputmode="numeric" style="width:80px" value="' + esc(me.rank_rr == null ? '' : me.rank_rr) + '"></label></div>' +
     '<label class="f"><span>Peak rank</span><select name="peak"><option value="">—</option>' + RANKS.map(r => '<option' + (r === me.peak_rank ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></label>' +

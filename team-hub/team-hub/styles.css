@@ -712,3 +712,11 @@ input:focus,select:focus,textarea:focus { border-color:#ff6572; box-shadow:0 0 0
 .vod-provider-status>div>b{font-size:14px}
 .vod-provider-status>div>span{font-size:12px;color:var(--muted,#999);overflow-wrap:anywhere}
 @media(max-width:600px){.vod-provider-status{align-items:flex-start;flex-direction:column}.vod-provider-status .btn{width:100%}}
+
+/* ---------- performance grades ---------- */
+.pill.grade { min-width: 30px; text-align: center; font-weight: 800; font-size: .8rem; }
+.kpi .v .pill.grade { font-size: 1.2rem; padding: 2px 12px; }
+.rsline { font-size: .78rem; color: var(--text); margin-top: 6px; opacity: .92; }
+.rsline b { font-weight: 700; }
+tr.clickrow { cursor: pointer; }
+tr.clickrow:hover td { background: rgba(255,255,255,.04); }
