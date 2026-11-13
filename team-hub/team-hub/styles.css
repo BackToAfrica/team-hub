@@ -494,3 +494,16 @@ table.avail td.cell:not(.past):hover { filter: brightness(1.25); }
 .prep-map span { color:var(--muted); font-size:.78rem; text-align:right; }
 @media (max-width:850px) { .prep-grid { grid-template-columns:1fr; } }
 @media (max-width:560px) { .prep-hero { align-items:stretch; flex-direction:column; padding:16px; } .prep-progress { max-width:none; } .prep-link { align-items:flex-start; } .prep-map { flex-direction:column; gap:3px; } .prep-map span { text-align:left; } }
+
+
+/* ---------- Match plan starting five ---------- */
+.match-lineup-panel { margin-top:14px; }
+.match-map-select { max-width:220px; margin-bottom:12px; }
+.match-slot { display:grid; grid-template-columns:28px minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:end; padding:9px 0; border-top:1px solid var(--line); }
+.match-slot .f { margin:0; min-width:0; }
+.slot-n { width:25px; height:25px; display:grid; place-items:center; border-radius:7px; background:var(--panel-3); color:var(--muted); font-size:.78rem; font-weight:800; }
+.match-five { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px; }
+.match-slot-view { display:flex; align-items:center; gap:8px; padding:10px; border:1px solid var(--line); border-radius:9px; background:var(--panel-2); min-width:0; }
+.match-slot-view b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.match-slot-view small { margin-left:auto; }
+@media (max-width:560px) { .match-slot { grid-template-columns:26px minmax(0,1fr); } .match-slot label:last-child { grid-column:2; } .match-five { grid-template-columns:1fr; } }
