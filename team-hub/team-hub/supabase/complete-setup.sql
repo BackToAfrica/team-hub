@@ -121,7 +121,9 @@ CREATE TABLE public.comms_recordings (
   vod text,
   ratings jsonb DEFAULT '{}'::jsonb NOT NULL,
   notes text,
-  published boolean DEFAULT true NOT NULL
+  published boolean DEFAULT true NOT NULL,
+  starting_lineup jsonb DEFAULT '{}'::jsonb NOT NULL,
+  agent_comps jsonb DEFAULT '{}'::jsonb NOT NULL
 );
 
 CREATE TABLE public.comp_notes (
