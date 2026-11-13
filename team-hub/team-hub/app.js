@@ -579,7 +579,8 @@ function checkStatus(r) {
 }
 // one entry per player: roster slot + their account (if linked)
 async function teamPlayers() {
-  const [roster, members] = await Promise.all([cached('roster'), cached('profiles_list')]);
+  let [roster, members] = await Promise.all([cached('roster'), cached('profiles_list')]);
+  roster = roster || []; members = members || [];
   const byId = new Map(members.map(m => [m.id, m]));
   const out = roster.map(r => {
     const m = r.claimed_by ? byId.get(r.claimed_by) : null;
