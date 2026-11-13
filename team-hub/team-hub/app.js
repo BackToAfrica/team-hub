@@ -1134,16 +1134,57 @@ PAGES.reviews = async function (el) {
   if (id) return reviewDetail(el, rows.find(r => r.id === id), work);
   const f = location.hash.split('/')[3] || '';
   const filt = f === 'ours' ? rows.filter(isOurs) : f === 'pro' ? rows.filter(r => !isOurs(r)) : rows;
-  el.innerHTML = '<div class="page-h"><div><h1>VOD reviews</h1><p class="muted">Watch the VOD with the notes beside it. Timestamps jump the video to that moment.</p></div>' +
-    (isStaff() ? '<button class="btn small" id="addrev">Add a review</button>' : '') + '</div>' +
-    '<div class="tabs"><a href="#/reviews" class="' + (!f ? 'active' : '') + '">All</a><a href="#/reviews/0/ours" class="' + (f === 'ours' ? 'active' : '') + '">Our scrims &amp; matches</a><a href="#/reviews/0/pro" class="' + (f === 'pro' ? 'active' : '') + '">Pro &amp; other teams</a></div>' +
+  const needsWork = rows.reduce((n, r) => n + workFor(r, work).filter(w => w.status !== 'Fixed').length, 0);
+  const thisMonth = rows.filter(r => String(r.date || '').slice(0,7) === todayISO().slice(0,7)).length;
+  el.innerHTML = '<div class="vod-workspace">' +
+    '<section class="vod-hero"><div class="vod-hero-copy"><div class="eyebrow">VIDEO INTELLIGENCE / TEAM REVIEW</div><h1>VOD workspace</h1><p>Bring a scrim or match recording into Team Hub, review key moments, and turn observations into player development work.</p><div class="vod-hero-actions">' + (isStaff() ? '<button class="btn" id="uploadvod">＋ Add a VOD</button><button class="btn ghost" id="addrev">Create review notes</button>' : '<span class="pill">Team review library</span>') + '</div></div><div class="vod-hero-art"><div class="vod-play">▶</div><span>REVIEW · LEARN · REPEAT</span></div></section>' +
+    '<div class="vod-overview"><div><b>' + rows.length + '</b><span>Videos in library</span></div><div><b>' + thisMonth + '</b><span>Added this month</span></div><div><b>' + needsWork + '</b><span>Open development items</span></div></div>' +
+    '<div class="vod-content"><div class="vod-library-head"><div><div class="eyebrow">TEAM VIDEO LIBRARY</div><h2>Review library</h2><p class="muted small">Filter your team's scrims, official matches, and pro reference VODs.</p></div><div class="tabs"><a href="#/reviews" class="' + (!f ? 'active' : '') + '">All videos</a><a href="#/reviews/0/ours" class="' + (f === 'ours' ? 'active' : '') + '">Our team</a><a href="#/reviews/0/pro" class="' + (f === 'pro' ? 'active' : '') + '">Reference VODs</a></div></div>' +
     (filt.length ? '<div class="vgrid">' + filt.map(r => { const vi = videoInfo(r.vod); const n = workFor(r, work).filter(w => w.status !== 'Fixed').length;
       return '<a class="vcard" href="#/reviews/' + r.id + '">' + thumbHtml(vi) + '<div class="vb"><div class="t">' + esc(r.title || 'VOD review') + '</div>' +
-        '<div class="row small" style="gap:6px;margin-top:6px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.type ? '<span class="pill">' + esc(r.type) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') +
+        '<div class="row small" style="gap:6px;margin-top:6px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.opponent ? '<span class="muted">vs ' + esc(r.opponent) + '</span>' : '') + (r.type ? '<span class="pill">' + esc(r.type) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') +
         (n ? '<span class="pill red">' + n + ' to work on</span>' : '') + '</div></div></a>'; }).join('') + '</div>'
-      : empty(rows.length ? 'Nothing in this list yet.' : 'No reviews yet. They show up here after the coach imports the VOD Queue tab, or adds one.'));
+      : '<div class="vod-empty"><div class="vod-empty-icon">▶</div><h3>Your video library starts here</h3><p>Paste a YouTube, Twitch, or direct video link. Team Hub will create a review room so your staff can add notes, timestamps, and player action items.</p>' + (isStaff() ? '<button class="btn" id="uploadvod-empty">Add your first VOD</button>' : '') + '</div>') +
+    '</div></div>';
+  const launch = () => vodUploadModal();
+  if ($('#uploadvod')) $('#uploadvod').onclick = launch;
+  if ($('#uploadvod-empty')) $('#uploadvod-empty').onclick = launch;
   if ($('#addrev')) $('#addrev').onclick = () => editRow('reviews', null, () => { S.cache = {}; render(); });
 };
+function vodUploadModal() {
+  openModal('<div class="vod-upload-modal"><div class="eyebrow">NEW VIDEO REVIEW</div><h2>Add a VOD in seconds</h2><p class="muted small">Paste the share link. Add match details now or fill them in later.</p><form id="vodupload">' +
+    '<label class="f"><span>Video link *</span><input type="url" name="vod" required placeholder="https://www.youtube.com/watch?v=…"></label>' +
+    '<div class="vod-provider-hint">Works with YouTube, Twitch VODs, and direct video URLs. The link must be accessible to your reviewers.</div>' +
+    '<div class="vod-form-grid"><label class="f"><span>Review title</span><input name="title" placeholder="e.g. vs Sentinels · Scrim 2"></label><label class="f"><span>Date played</span><input type="date" name="date" value="' + todayISO() + '"></label>' +
+    '<label class="f"><span>Opponent</span><input name="opponent" placeholder="Opponent team"></label><label class="f"><span>Map</span><input name="map" placeholder="Ascent, Haven…"></label>' +
+    '<label class="f"><span>Recording type</span><select name="type"><option>Scrim</option><option>Official match</option><option>Pro reference</option><option>Practice</option></select></label><label class="f"><span>POV player (optional)</span><input name="pov" placeholder="Player IGN"></label></div>' +
+    '<div class="vod-upload-note"><b>What happens next?</b><span>The video is added to your review library and opens in its review room. Coaches can add timestamped notes and convert observations into player assignments. Automated match-stat extraction requires a video-analysis processor; this link form does not pretend to have analyzed the footage.</span></div>' +
+    '<div class="row"><button class="btn" type="submit">Add video to library</button><button class="btn ghost" type="button" data-close>Cancel</button></div></form></div>', m => {
+      $('#vodupload', m).onsubmit = async e => {
+        e.preventDefault();
+        const form = e.target, url = form.vod.value.trim();
+        let parsed;
+        try { parsed = new URL(url); } catch (_) { toast('Enter a valid video URL'); return; }
+        if (!/^https?:$/.test(parsed.protocol)) { toast('Use an http or https video link'); return; }
+        const info = videoInfo(url);
+        const title = form.title.value.trim() || [form.opponent.value.trim(), form.type.value].filter(Boolean).join(' · ') || 'VOD review';
+        const rec = { vod:url, title, date:form.date.value || todayISO(), opponent:form.opponent.value.trim() || null, map:form.map.value.trim() || null, type:form.type.value, pov:form.pov.value.trim() || null, whose:'Our team', summary:null, body:null };
+        const submit = $('button[type="submit"]', form); submit.disabled = true; submit.textContent = 'Adding video…';
+        try {
+          await db.insert('reviews', [rec]);
+          S.cache = {};
+          closeModal();
+          toast(info && info.kind !== 'link' ? 'VOD added to your review library' : 'Video link added to your review library');
+          location.hash = '#/reviews';
+          render();
+        } catch (err) {
+          submit.disabled = false; submit.textContent = 'Add video to library';
+          toast('Could not add VOD: ' + err.message);
+        }
+      };
+    });
+}
+
 async function reviewDetail(el, r, work) {
   if (!r) { el.innerHTML = empty('That review isn\'t here any more.', '<a class="btn small" href="#/reviews">All reviews</a>'); return; }
   const vi = videoInfo(r.vod), items = workFor(r, work), start = vi ? (vi.t || tsToSec(r.starts_at)) : 0;
