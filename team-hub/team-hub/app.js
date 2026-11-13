@@ -1138,6 +1138,7 @@ PAGES.reviews = async function (el) {
   const thisMonth = rows.filter(r => String(r.date || '').slice(0,7) === todayISO().slice(0,7)).length;
   el.innerHTML = '<div class="vod-workspace">' +
     '<section class="vod-hero"><div class="vod-hero-copy"><div class="eyebrow">VIDEO INTELLIGENCE / TEAM REVIEW</div><h1>VOD workspace</h1><p>Bring a scrim or match recording into Team Hub, review key moments, and turn observations into player development work.</p><div class="vod-hero-actions">' + (isStaff() ? '<button class="btn" id="uploadvod">＋ Add a VOD</button><button class="btn ghost" id="addrev">Create review notes</button>' : '<span class="pill">Team review library</span>') + '</div></div><div class="vod-hero-art"><div class="vod-play">▶</div><span>REVIEW · LEARN · REPEAT</span></div></section>' +
+    '<div class="vod-provider-status"><div><div class="eyebrow">AI VIDEO ANALYSIS</div><b>TwelveLabs connection</b><span id="vod-provider-state">Not checked yet · API key stays server-side</span></div>' + (isStaff() ? '<button class="btn ghost small" id="checkvodprovider">Test connection</button>' : '') + '</div>' +
     '<div class="vod-overview"><div><b>' + rows.length + '</b><span>Videos in library</span></div><div><b>' + thisMonth + '</b><span>Added this month</span></div><div><b>' + needsWork + '</b><span>Open development items</span></div></div>' +
     '<div class="vod-content"><div class="vod-library-head"><div><div class="eyebrow">TEAM VIDEO LIBRARY</div><h2>Review library</h2><p class="muted small">Filter your team&#39;s scrims, official matches, and pro reference VODs.</p></div><div class="tabs"><a href="#/reviews" class="' + (!f ? 'active' : '') + '">All videos</a><a href="#/reviews/0/ours" class="' + (f === 'ours' ? 'active' : '') + '">Our team</a><a href="#/reviews/0/pro" class="' + (f === 'pro' ? 'active' : '') + '">Reference VODs</a></div></div>' +
     (filt.length ? '<div class="vgrid">' + filt.map(r => { const vi = videoInfo(r.vod); const n = workFor(r, work).filter(w => w.status !== 'Fixed').length;
@@ -1150,6 +1151,18 @@ PAGES.reviews = async function (el) {
   if ($('#uploadvod')) $('#uploadvod').onclick = launch;
   if ($('#uploadvod-empty')) $('#uploadvod-empty').onclick = launch;
   if ($('#addrev')) $('#addrev').onclick = () => editRow('reviews', null, () => { S.cache = {}; render(); });
+  if ($('#checkvodprovider')) $('#checkvodprovider').onclick = async () => {
+    const btn = $('#checkvodprovider'), state = $('#vod-provider-state');
+    btn.disabled = true; btn.textContent = 'Checking…'; state.textContent = 'Verifying the server-side API key with TwelveLabs…';
+    try {
+      const { data, error } = await sb.functions.invoke('youtube-vod-ingest', { body: { action: 'provider_status' } });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || 'Provider connection failed');
+      state.textContent = 'Connected · API key verified · ' + (data.index_count ?? '—') + ' indexes available';
+      toast('TwelveLabs connection verified');
+    } catch (err) { state.textContent = 'Connection check failed · ' + (err.message || 'Check function secrets'); toast('TwelveLabs check failed: ' + (err.message || 'Unknown error')); }
+    finally { btn.disabled = false; btn.textContent = 'Test connection'; }
+  };
 };
 function vodUploadModal() {
   openModal('<div class="vod-upload-modal"><div class="eyebrow">NEW VIDEO REVIEW</div><h2>Add a VOD in seconds</h2><p class="muted small">Paste the share link. Add match details now or fill them in later.</p><form id="vodupload">' +
