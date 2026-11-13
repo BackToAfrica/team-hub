@@ -1971,11 +1971,35 @@ PAGES.plans = async function (el) {
 async function planDetail(el, p) {
   if (!p) { el.innerHTML = empty('That game plan isn\'t here any more.', '<a class="btn small" href="#/plans">All game plans</a>'); return; }
   const coach = isStaff();
-  const [scout, comps, matches, scrims] = await Promise.all([can('scouting') ? cached('opponent_scouting') : [], can('scouting') ? cached('comp_notes') : [], can('team_stats') ? cached('matches') : [], p.scrim_id ? listScrims() : []]);
+  const [scout, comps, matches, scrims, team] = await Promise.all([can('scouting') ? cached('opponent_scouting') : [], can('scouting') ? cached('comp_notes') : [], can('team_stats') ? cached('matches') : [], p.scrim_id ? listScrims() : [], teamPlayers()]);
   const sc = scout.filter(r => sameOpp(r.opponent, p.opponent)), cn = comps.filter(r => sameOpp(r.team, p.opponent));
   const vs = matches.filter(m => sameOpp(m.opponent, p.opponent));
   const scrim = scrims.find(s => s.id === p.scrim_id);
   const maps = mapList(p.maps);
+  const lineupMaps = maps.length ? maps : Object.keys(p.starting_lineup || {}).length ? Object.keys(p.starting_lineup) : MAPS;
+  let lineupMap = lineupMaps[0];
+  const lineupPlayers = team.players.filter(x => !x.bench);
+  const savedFive = map => (p.starting_lineup || {})[map] || [];
+  const savedAgents = map => (p.agent_comps || {})[map] || [];
+  const lineupFields = map => {
+    const five = savedFive(map), agents = savedAgents(map);
+    return Array.from({ length: 5 }, (_, i) => {
+      const slot = five[i] || {}, agent = agents[i] || slot.agent || '';
+      return '<div class="match-slot"><span class="slot-n">' + (i + 1) + '</span><label class="f grow"><span>Player</span><select data-lineup-player="' + i + '"><option value="">Choose player</option>' +
+        lineupPlayers.map(x => '<option value="' + esc(x.key) + '"' + (slot.player_key === x.key ? ' selected' : '') + '>' + esc(x.name) + (x.role ? ' · ' + esc(x.role) : '') + '</option>').join('') + '</select></label>' +
+        '<label class="f grow"><span>Agent</span><select data-lineup-agent="' + i + '"><option value="">Choose agent</option>' + AGENTS.map(a => '<option' + (a === agent ? ' selected' : '') + '>' + esc(a) + '</option>').join('') + '</select></label></div>';
+    }).join('');
+  };
+  const lineupPanel = () => {
+    const saved = savedFive(lineupMap), agents = savedAgents(lineupMap);
+    const hasFive = saved.length === 5 && agents.length === 5;
+    const view = hasFive ? '<div class="match-five">' + saved.map((x, i) => '<div class="match-slot-view"><span class="slot-n">' + (i + 1) + '</span><b>' + esc(x.player || 'Player') + '</b><span class="pill">' + esc(agents[i] || x.agent || 'Agent TBD') + '</span>' + (x.role ? '<small class="muted">' + esc(x.role) + '</small>' : '') + '</div>').join('') + '</div>' : '<p class="muted small">No starting five saved for ' + esc(lineupMap) + ' yet.</p>';
+    return '<section class="card panel match-lineup-panel"><div class="card-h"><div><h2>Starting five &amp; agent composition</h2><p class="small muted">Assign one active roster player and one agent to each slot for each map.</p></div>' +
+      (coach ? '<span class="pill purple">Coach edit</span>' : '') + '</div>' +
+      '<label class="f match-map-select"><span>Map</span><select id="lineup-map">' + lineupMaps.map(m => '<option' + (m === lineupMap ? ' selected' : '') + '>' + esc(m) + '</option>').join('') + '</select></label>' +
+      (coach ? '<div id="lineup-fields">' + lineupFields(lineupMap) + '</div><div class="row"><button class="btn small" id="save-lineup">Save starting five</button><span class="small muted">Saved to this game plan for the whole team.</span></div>' : view) +
+      '</section>';
+  };
   const intel = [];
   if (vs.length) { const st = mapStats(vs); intel.push(panel('Our record vs them', '', '<div class="mini-kpis">' + kpi(st.w + '–' + st.l, 'Maps') + kpi(pct(st.rp), 'Rounds') + '</div>' +
     vs.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 6).map(m => '<div class="small row" style="gap:8px"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span><b>' + esc(m.map) + '</b> ' + m.rounds_won + '–' + m.rounds_lost + '<span class="muted">' + (m.date ? fmtDate(m.date) : '') + '</span></div>').join(''))); }
@@ -1991,8 +2015,30 @@ async function planDetail(el, p) {
     maps.map(m => '<span class="pill">' + esc(m) + '</span>').join('') + (!p.published ? '<span class="pill purple">Draft — players can\'t see this yet</span>' : '') + '</div></div>' +
     (coach ? '<div class="row"><button class="btn small ghost" id="pub">' + (p.published ? 'Hide from players' : 'Publish to players') + '</button><button class="btn small" id="pedit">Edit</button><button class="btn small danger" id="pdel">Delete</button></div>' : '') + '</div>' +
     '<div class="plan-grid"><div class="col">' + (secs.length ? secs.map(s => panel(s[1], '', '<div class="md">' + md(p[s[0]]) + '</div>')).join('') : empty('This plan is empty so far.' + (coach ? ' Click Edit to fill it in.' : ''))) + '</div>' +
-    '<div class="col">' + (intel.length ? intel.join('') : panel('Intel', '', '<p class="muted small">No scouting notes or past games vs ' + esc(p.opponent) + ' yet. Scouting notes with the same opponent name show up here automatically.</p>')) + '</div></div>';
+    '<div class="col">' + (intel.length ? intel.join('') : panel('Intel', '', '<p class="muted small">No scouting notes or past games vs ' + esc(p.opponent) + ' yet. Scouting notes with the same opponent name show up here automatically.</p>')) + '</div></div>' + lineupPanel();
   if (coach) {
+    $('#lineup-map').onchange = e => { lineupMap = e.target.value; $('#lineup-fields').innerHTML = lineupFields(lineupMap); };
+    $('#save-lineup').onclick = async () => {
+      const selected = Array.from({ length: 5 }, (_, i) => {
+        const key = $('[data-lineup-player="' + i + '"]', el).value;
+        const agent = $('[data-lineup-agent="' + i + '"]', el).value;
+        const player = lineupPlayers.find(x => x.key === key);
+        return player && agent ? { player_key: player.key, player: player.name, role: player.role || null } : null;
+      });
+      const agents = Array.from({ length: 5 }, (_, i) => $('[data-lineup-agent="' + i + '"]', el).value);
+      if (selected.some(x => !x) || agents.some(x => !x)) { toast('Choose five players and five agents before saving.'); return; }
+      if (new Set(selected.map(x => x.player_key)).size !== 5) { toast('Each starting slot must use a different player.'); return; }
+      const starting = Object.assign({}, p.starting_lineup || {});
+      const compsByMap = Object.assign({}, p.agent_comps || {});
+      starting[lineupMap] = selected;
+      compsByMap[lineupMap] = agents;
+      try {
+        await db.update('game_plans', p.id, { starting_lineup: starting, agent_comps: compsByMap });
+        p.starting_lineup = starting; p.agent_comps = compsByMap;
+        toast('Starting five and agent composition saved for ' + lineupMap);
+        await planDetail(el, p);
+      } catch (err) { toast('Could not save lineup: ' + err.message); }
+    };
     $('#pedit').onclick = () => editRow('game_plans', p, () => { S.cache = {}; render(); });
     $('#pub').onclick = async () => { await db.update('game_plans', p.id, { published: !p.published }); toast(p.published ? 'Hidden from players' : 'Published'); render(); };
     $('#pdel').onclick = async () => { if (!confirm('Delete this game plan?')) return; await db.remove('game_plans', p.id); location.hash = '#/plans'; };
