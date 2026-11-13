@@ -547,8 +547,10 @@ function filterBar(rows, keys, onChange) {
 
 async function cached(table, opts) {
   const key = table + JSON.stringify(opts || {});
-  if (!S.cache[key]) S.cache[key] = await db.list(table, opts);
-  return S.cache[key];
+  if (S.cache[key]) return S.cache[key];
+  const rows = await db.list(table, opts);
+  S.cache[key] = rows;
+  return rows;
 }
 
 // ------------------------------------------------------------------ pages
