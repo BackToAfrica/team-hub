@@ -699,3 +699,8 @@ input:focus,select:focus,textarea:focus { border-color:#ff6572; box-shadow:0 0 0
 .vod-upload-note b { color:#f0d59e; }
 @media(max-width:760px) { .vod-hero { min-height:0; padding:23px; } .vod-hero-art { width:125px; height:115px; flex-basis:125px; } .vod-library-head { align-items:flex-start; flex-direction:column; } .vod-library-head .tabs { flex-wrap:wrap; } }
 @media(max-width:560px) { .vod-hero { padding:20px; } .vod-hero-art { display:none; } .vod-overview { gap:7px; } .vod-overview > div { min-height:70px; flex-direction:column; align-items:flex-start; gap:2px; padding:10px; } .vod-overview b { font-size:1.35rem; } .vod-overview span { font-size:.65rem; } .vod-form-grid { grid-template-columns:1fr; } .vod-hero-actions { flex-direction:column; align-items:stretch; } }
+
+
+.vod-job-progress { display:flex; flex-direction:column; gap:8px; }
+.vod-job-track { height:7px; overflow:hidden; border-radius:99px; background:#26364d; }
+.vod-job-track i { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#e94459,#ff8790); transition:width .25s ease; }
