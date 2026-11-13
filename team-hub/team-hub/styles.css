@@ -448,3 +448,22 @@ table.avail td.cell:not(.past):hover { filter: brightness(1.25); }
 .pubhero { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; background: linear-gradient(135deg, #2a1420, #141f2b); border: 1px solid var(--line); border-radius: 18px; padding: 24px; margin-bottom: 22px; }
 .pubhero .dot { width: 22px; height: 22px; margin-top: 10px; }
 .pubhero h1 { font-size: 2.1rem; margin: 0 0 6px; }
+
+
+/* ---------- Dashboard command center ---------- */
+.command-center { margin: 0 0 18px; padding: 17px 18px; border: 1px solid var(--line-2); border-radius: 16px; background: linear-gradient(135deg, color-mix(in srgb, var(--panel) 94%, #263b50), var(--panel)); box-shadow: var(--shadow); }
+.command-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.command-head h2 { margin: 2px 0 3px; font-size: 1.12rem; }
+.command-head p { margin: 0; }
+.command-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.command-stat { min-width: 0; padding: 12px 13px; border: 1px solid var(--line); border-radius: 11px; background: color-mix(in srgb, var(--panel-2) 88%, transparent); display: flex; flex-direction: column; gap: 4px; }
+.command-stat > span { color: var(--muted); font-size: .68rem; font-weight: 750; letter-spacing: .7px; text-transform: uppercase; }
+.command-stat > b { font-size: 1.45rem; line-height: 1.2; font-weight: 800; font-variant-numeric: tabular-nums; }
+.command-stat > b i { font-size: .72rem; font-style: normal; color: var(--muted); margin: 0 3px; }
+.command-stat > small { color: var(--muted); font-size: .74rem; }
+.form-dots { display: flex; align-items: center; gap: 7px; min-height: 28px; }
+.form-dots .fdot { width: 11px; height: 11px; }
+.command-empty { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 14px; border: 1px dashed var(--line-2); border-radius: 11px; }
+.command-empty p { margin: 3px 0 0; }
+@media (max-width: 760px) { .command-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 420px) { .command-center { padding: 14px; } .command-stat { padding: 10px; } .command-stat > b { font-size: 1.25rem; } .command-empty { align-items: flex-start; flex-direction: column; } }
