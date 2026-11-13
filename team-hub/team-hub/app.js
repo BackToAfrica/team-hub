@@ -1981,6 +1981,7 @@ async function planDetail(el, p) {
   const lineupPlayers = team.players.filter(x => !x.bench);
   const savedFive = map => (p.starting_lineup || {})[map] || [];
   const savedAgents = map => (p.agent_comps || {})[map] || [];
+  const lineupView = map => { const five = savedFive(map), agents = savedAgents(map); return five.length === 5 ? '<div class="match-five">' + five.map((x, i) => '<div class="match-slot-view"><span class="slot-n">' + (i + 1) + '</span><b>' + esc(x.player || 'Player') + '</b><span class="pill">' + esc(agents[i] || x.agent || 'Agent TBD') + '</span>' + (x.role ? '<small class="muted">' + esc(x.role) + '</small>' : '') + '</div>').join('') + '</div>' : '<p class="muted small">No starting five saved for ' + esc(map) + ' yet.</p>'; };
   const lineupFields = map => {
     const five = savedFive(map), agents = savedAgents(map);
     return Array.from({ length: 5 }, (_, i) => {
@@ -1991,13 +1992,11 @@ async function planDetail(el, p) {
     }).join('');
   };
   const lineupPanel = () => {
-    const saved = savedFive(lineupMap), agents = savedAgents(lineupMap);
-    const hasFive = saved.length === 5 && agents.length === 5;
-    const view = hasFive ? '<div class="match-five">' + saved.map((x, i) => '<div class="match-slot-view"><span class="slot-n">' + (i + 1) + '</span><b>' + esc(x.player || 'Player') + '</b><span class="pill">' + esc(agents[i] || x.agent || 'Agent TBD') + '</span>' + (x.role ? '<small class="muted">' + esc(x.role) + '</small>' : '') + '</div>').join('') + '</div>' : '<p class="muted small">No starting five saved for ' + esc(lineupMap) + ' yet.</p>';
+    const view = lineupView(lineupMap);
     return '<section class="card panel match-lineup-panel"><div class="card-h"><div><h2>Starting five &amp; agent composition</h2><p class="small muted">Assign one active roster player and one agent to each slot for each map.</p></div>' +
       (coach ? '<span class="pill purple">Coach edit</span>' : '') + '</div>' +
       '<label class="f match-map-select"><span>Map</span><select id="lineup-map">' + lineupMaps.map(m => '<option' + (m === lineupMap ? ' selected' : '') + '>' + esc(m) + '</option>').join('') + '</select></label>' +
-      (coach ? '<div id="lineup-fields">' + lineupFields(lineupMap) + '</div><div class="row"><button class="btn small" id="save-lineup">Save starting five</button><span class="small muted">Saved to this game plan for the whole team.</span></div>' : view) +
+      (coach ? '<div id="lineup-fields">' + lineupFields(lineupMap) + '</div><div class="row"><button class="btn small" id="save-lineup">Save starting five</button><span class="small muted">Saved to this game plan for the whole team.</span></div>' : '<div id="lineup-fields">' + view + '</div>') +
       '</section>';
   };
   const intel = [];
@@ -2016,8 +2015,8 @@ async function planDetail(el, p) {
     (coach ? '<div class="row"><button class="btn small ghost" id="pub">' + (p.published ? 'Hide from players' : 'Publish to players') + '</button><button class="btn small" id="pedit">Edit</button><button class="btn small danger" id="pdel">Delete</button></div>' : '') + '</div>' +
     '<div class="plan-grid"><div class="col">' + (secs.length ? secs.map(s => panel(s[1], '', '<div class="md">' + md(p[s[0]]) + '</div>')).join('') : empty('This plan is empty so far.' + (coach ? ' Click Edit to fill it in.' : ''))) + '</div>' +
     '<div class="col">' + (intel.length ? intel.join('') : panel('Intel', '', '<p class="muted small">No scouting notes or past games vs ' + esc(p.opponent) + ' yet. Scouting notes with the same opponent name show up here automatically.</p>')) + '</div></div>' + lineupPanel();
+  $('#lineup-map').onchange = e => { lineupMap = e.target.value; $('#lineup-fields').innerHTML = coach ? lineupFields(lineupMap) : lineupView(lineupMap); };
   if (coach) {
-    $('#lineup-map').onchange = e => { lineupMap = e.target.value; $('#lineup-fields').innerHTML = lineupFields(lineupMap); };
     $('#save-lineup').onclick = async () => {
       const selected = Array.from({ length: 5 }, (_, i) => {
         const key = $('[data-lineup-player="' + i + '"]', el).value;
@@ -2069,10 +2068,12 @@ PAGES.prep = async function (el) {
   const h2h = opponent ? matches.filter(m => sameOpp(m.opponent, opponent)) : [];
   const maps = mapList((scrim && scrim.maps) || (plan && plan.maps) || '');
   const activePlayers = team.players.filter(p => !p.bench);
+  const vetoState = localStore('th_veto') || {};
+  const vetoMatches = !!(opponent && sameOpp(vetoState.opp, opponent));
   const ready = [
     { label: 'Opponent scouting', done: scoutRows.length > 0, href: '#/scouting', detail: scoutRows.length ? scoutRows.length + ' report(s) saved' : 'No opponent report linked yet' },
     { label: 'Game plan', done: !!plan, href: '#/plans', detail: plan ? 'Plan ' + (plan.published ? 'published' : 'draft') : 'No plan linked to this match' },
-    { label: 'Map veto', done: !!(localStore('th_veto') || {}).steps?.length, href: '#/veto', detail: ((localStore('th_veto') || {}).steps || []).length ? 'Veto has progress saved on this device' : 'Veto not started on this device' },
+    { label: 'Map veto', done: vetoMatches && (vetoState.steps || []).length > 0, href: '#/veto', detail: vetoMatches && (vetoState.steps || []).length ? 'Veto progress saved for this opponent on this device' : 'No veto progress for this opponent on this device' },
     { label: 'Agent compositions', done: maps.length > 0 && !!plan && maps.every(m => ((plan.agent_comps || {})[m] || []).length === 5), href: '#/plans' + (plan ? '/' + plan.id : ''), detail: plan && Object.keys(plan.agent_comps || {}).length ? Object.keys(plan.agent_comps).length + ' map composition(s) saved' : 'No five-agent compositions saved' },
     { label: 'Starting five', done: maps.length > 0 && !!plan && maps.every(m => ((plan.starting_lineup || {})[m] || []).length === 5), href: '#/plans' + (plan ? '/' + plan.id : ''), detail: plan && Object.keys(plan.starting_lineup || {}).length ? Object.keys(plan.starting_lineup).length + ' map lineup(s) saved' : 'No starting five saved' },
     { label: 'Utility lineups', done: maps.length > 0 && maps.every(m => lineupRows.some(x => String(x.map || '').toLowerCase() === m.toLowerCase())), href: '#/lineups', detail: lineupRows.length ? lineupRows.length + ' lineup(s) in library' : 'No lineups saved' }
