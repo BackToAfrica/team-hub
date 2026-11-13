@@ -692,7 +692,7 @@ PAGES.home = async function (el) {
   const me = S.me, coach = isStaff(), head = me.is_coach;
   const doCheckin = can('checkin') && !(coach && !me.ign);
   const today = todayISO();
-  const [ann, team, myHist, todayRows, ps, work, nxt, avail, plans, matches] = await Promise.all([
+  const [ann, team, myHist, todayRows, ps, work, nxt, avail, plans, matches, drills, aimLogs, reviewRows] = await Promise.all([
     cached('announcements'), teamPlayers(),
     doCheckin ? db.list('checkins', { eq: { user_id: me.id }, order: 'day', asc: false, limit: 60 }) : Promise.resolve([]),
     coach ? db.list('checkins', { eq: { day: today } }) : Promise.resolve([]),
@@ -700,7 +700,10 @@ PAGES.home = async function (el) {
     can('reviews') ? cached('work_on') : Promise.resolve([]),
     nextScrim().catch(() => null), db.list('availability', { eq: { user_id: me.id } }).catch(() => []),
     can('scouting') ? db.list('game_plans', { limit: 200 }).catch(() => []) : Promise.resolve([]),
-    can('team_stats') ? cached('matches') : Promise.resolve([])
+    can('team_stats') ? cached('matches') : Promise.resolve([]),
+    can('my_stats') ? cached('drills') : Promise.resolve([]),
+    can('my_stats') ? db.list('aim_logs', { eq: { user_id: me.id }, order: 'date', asc: false, limit: 100 }).catch(() => []) : Promise.resolve([]),
+    coach && can('reviews') ? cached('reviews') : Promise.resolve([])
   ]);
   const doneToday = myHist.some(h => String(h.day).slice(0, 10) === today);
   const streak = calcStreak(myHist.map(h => h.day));
@@ -801,11 +804,36 @@ PAGES.home = async function (el) {
       '<div class="t">vs ' + esc(nxt.opponent || 'TBD') + '</div><div class="small muted">' + esc(fmtWhen(nxt.starts_at)) + ' · ' + relDays(nxt.starts_at) + '</div><div class="row small" style="gap:6px;margin-top:4px">' + mapList(nxt.maps).map(m => '<span class="pill">' + esc(m) + '</span>').join('') + '</div></div>' +
       (plan ? '<a class="btn small" href="#/plans/' + plan.id + '">Game plan</a>' : '') + '</div>') : (coach ? panel('Next scrim', '<a class="small" href="#/schedule">Schedule →</a>', '<p class="muted small">Nothing booked. See when everyone is free and book one.</p>') : ''));
   }
+  let roleDrills = [];
+  let playerGrowthHtml = '';
+  if (!coach && can('my_stats')) {
+    const role = String(me.role || 'Flex');
+    roleDrills = (drills || []).filter(d => !d.role || d.role === 'Everyone' || d.role === role).sort((a, b) => (Number(a.sort) || 0) - (Number(b.sort) || 0));
+    const recentAim = (aimLogs || []).filter(x => String(x.date || '') >= addDays(todayISO(), -13));
+    const activeWork = (work || []).filter(w => w.approved && w.status !== 'Fixed' && (isMine(w) || isTeamWide(w)));
+    const drillCards = roleDrills.slice(0, 3).map(d => '<div class="growth-drill"><div><span class="pill">' + esc(d.block || d.role || 'Practice') + '</span> <span class="muted small">' + esc(d.minutes || '—') + ' min</span></div><b>' + esc(d.drill) + '</b>' + (d.how ? '<p class="small muted">' + esc(d.how) + '</p>' : '') + (d.success ? '<p class="small growth-success">Success: ' + esc(d.success) + '</p>' : '') + '</div>').join('');
+    playerGrowthHtml = '<section class="growth-hub"><div class="growth-head"><div><div class="eyebrow">PLAYER DEVELOPMENT</div><h2>Your improvement plan</h2><p class="muted small">A focused view of your assigned work, role drills, and practice consistency.</p></div><a class="btn small ghost" href="#/aim/me">Practice log →</a></div>' +
+      '<div class="growth-metrics"><a href="#/workon"><b>' + activeWork.length + '</b><span>Open focus items</span></a><a href="#/aim/me"><b>' + recentAim.length + '</b><span>Aim sessions · 14d</span></a><a href="#/checkin"><b>' + myHist.filter(h => String(h.day || '') >= addDays(todayISO(), -6)).length + '/7</b><span>Check-ins this week</span></a></div>' +
+      '<div class="growth-columns"><div><div class="growth-subhead">Role practice · ' + esc(role) + '</div>' + (drillCards || '<p class="small muted">Your coach has not added role drills yet.</p>') + (roleDrills.length > 3 ? '<a class="small" href="#/aim/me">View practice tools →</a>' : '') + '</div><div><div class="growth-subhead">Your current focus</div>' + (activeWork.length ? activeWork.slice(0, 2).map(w => '<div class="growth-focus"><span class="pill ' + (PRIO[w.priority] || '') + '">' + esc(w.priority || 'Focus') + '</span><b>' + inlineMd(w.issue || 'Development item') + '</b>' + (w.tip ? '<p class="small muted">' + inlineMd(w.tip) + '</p>' : '') + '</div>').join('') : '<p class="small muted">No open coach-approved focus items. Keep building good habits.</p>') + '</div></div></section>';
+  }
+  let coachOpsHtml = '';
+  if (coach) {
+    const pendingWork = (work || []).filter(w => !w.approved).length;
+    const totalReviews = (reviewRows || []).length;
+    const todaysPct = joined.length ? Math.round(doneCount / joined.length * 100) : 0;
+    const upcomingPlan = nxt && plans.find(p => p.scrim_id === nxt.id);
+    coachOpsHtml = '<section class="coach-ops"><div class="growth-head"><div><div class="eyebrow">COACH WORKSPACE</div><h2>Staff action center</h2><p class="muted small">The items that need coaching attention today.</p></div><a class="btn small ghost" href="#/coach">Open coach panel →</a></div><div class="coach-actions">' +
+      '<a href="#/coach/work"><b>' + pendingWork + '</b><span>Work-on items awaiting approval</span><i>Review queue →</i></a>' +
+      '<a href="#/reviews"><b>' + totalReviews + '</b><span>VOD reviews in library</span><i>Open reviews →</i></a>' +
+      '<a href="#/coach/checkins"><b>' + doneCount + '/' + joined.length + '</b><span>Players checked in today · ' + todaysPct + '%</span><i>Attendance →</i></a>' +
+      '<a href="' + (upcomingPlan ? '#/plans/' + upcomingPlan.id : '#/prep') + '"><b>' + (upcomingPlan ? 'Ready' : 'Prepare') + '</b><span>' + (nxt ? 'Next opponent: ' + esc(nxt.opponent || 'TBD') : 'No upcoming scrim linked') + '</span><i>Match prep →</i></a>' +
+      '</div></section>';
+  }
   const ciHtml = doCheckin ? panel('Today\'s check-in', '<span class="muted small">' + new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) + '</span>', '<div id="ci-box"><p class="muted">Loading…</p></div>', 'ci-panel') : '';
   el.innerHTML = '<div class="home-dashboard"><div class="home-topline"><div><div class="eyebrow">TEAM OPERATIONS / OVERVIEW</div><div class="home-date">' + new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }) + '</div></div><div class="home-live"><span></span> TEAM SPACE ACTIVE</div></div>' +
     hero.replace('class="hero"', 'class="hero home-hero"') + performanceHtml +
     '<div class="home-section-label"><span>YOUR TEAM WORKSPACE</span><i></i></div>' +
-    '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + schedHtml + (coach ? '' : focusHtml) + annHtml + statsHtml + rosterHtml + '</div></div></div>';
+    (coach ? coachOpsHtml : playerGrowthHtml) + '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + schedHtml + (coach ? '' : focusHtml) + annHtml + statsHtml + rosterHtml + '</div></div></div>';
   if (doCheckin) {
     const mineToday = myHist.find(h => String(h.day).slice(0, 10) === today);
     const showForm = () => checkinForm($('#ci-box'), today, () => { S.cache = {}; render(); });
