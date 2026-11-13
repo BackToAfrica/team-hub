@@ -467,3 +467,30 @@ table.avail td.cell:not(.past):hover { filter: brightness(1.25); }
 .command-empty p { margin: 3px 0 0; }
 @media (max-width: 760px) { .command-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 420px) { .command-center { padding: 14px; } .command-stat { padding: 10px; } .command-stat > b { font-size: 1.25rem; } .command-empty { align-items: flex-start; flex-direction: column; } }
+
+
+/* ---------- Match preparation center ---------- */
+.prep-hero { display:flex; justify-content:space-between; align-items:center; gap:20px; padding:22px 24px; margin-bottom:14px; border:1px solid var(--line-2); border-radius:16px; background:linear-gradient(125deg, color-mix(in srgb, var(--accent) 13%, var(--panel)), var(--panel)); box-shadow:var(--shadow); }
+.prep-hero h2 { margin:3px 0 5px; font-size:1.55rem; }
+.prep-hero p { margin:0; }
+.prep-progress { min-width:150px; max-width:190px; text-align:center; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--panel-2); }
+.prep-progress b { display:block; font-size:1.7rem; line-height:1.2; font-variant-numeric:tabular-nums; }
+.prep-progress span { display:block; color:var(--muted); font-size:.75rem; margin:3px 0 7px; }
+.prep-grid { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,1fr); gap:14px; align-items:start; margin-bottom:14px; }
+.prep-grid > * { min-width:0; }
+.prep-checks, .prep-tools { display:flex; flex-direction:column; }
+.prep-check { display:flex; align-items:center; gap:10px; padding:11px 0; border-top:1px solid var(--line); color:var(--text); text-decoration:none; }
+.prep-check:first-child, .prep-link:first-child { border-top:0; }
+.prep-check:hover, .prep-link:hover { color:var(--accent-2); text-decoration:none; }
+.prep-check-icon { width:25px; height:25px; display:grid; place-items:center; flex-shrink:0; border-radius:50%; background:var(--panel-3); color:var(--muted); font-weight:800; }
+.prep-check-icon.done { color:#062417; background:var(--good); }
+.prep-check b, .prep-check small { display:block; }
+.prep-check small { color:var(--muted); margin-top:2px; font-size:.76rem; }
+.prep-link { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:11px 0; border-top:1px solid var(--line); color:var(--text); text-decoration:none; }
+.prep-link p { margin:3px 0 0; }
+.prep-link > span { flex-shrink:0; color:var(--accent-2); font-size:.8rem; font-weight:700; }
+.prep-maps { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:8px; }
+.prep-map { display:flex; justify-content:space-between; gap:8px; padding:10px 12px; border:1px solid var(--line); border-radius:9px; background:var(--panel-2); }
+.prep-map span { color:var(--muted); font-size:.78rem; text-align:right; }
+@media (max-width:850px) { .prep-grid { grid-template-columns:1fr; } }
+@media (max-width:560px) { .prep-hero { align-items:stretch; flex-direction:column; padding:16px; } .prep-progress { max-width:none; } .prep-link { align-items:flex-start; } .prep-map { flex-direction:column; gap:3px; } .prep-map span { text-align:left; } }
