@@ -2281,6 +2281,8 @@ PAGES.live = async function (el) {
   const plan = plans.find(p => p.id === pid);
   const maps = plan ? mapList(plan.maps) : (nxt ? mapList(nxt.maps) : []);
   if (!mapSel && maps.length) mapSel = maps[0];
+  const liveFive = plan && mapSel ? (plan.starting_lineup || {})[mapSel] || [] : [];
+  const liveAgents = plan && mapSel ? (plan.agent_comps || {})[mapSel] || [] : [];
   const key = 'th_live_' + (pid || 0) + '_' + mapSel;
   const score = localStore(key) || { us: 0, them: 0, to: 2 };
   const st = mapSel ? mapStats(matches.filter(m => String(m.map).toLowerCase() === mapSel.toLowerCase())) : null;
@@ -2295,7 +2297,7 @@ PAGES.live = async function (el) {
       '<div class="small">Timeouts left: <b>' + score.to + '</b> <button class="linkbtn" data-sc="to,-1">use one</button></div><button class="linkbtn small" data-sc="reset">Reset score</button></div>' +
       '<div class="sc"><span>THEM</span><b>' + score.them + '</b><div><button class="btn small" data-sc="them,1">+1</button><button class="btn small ghost" data-sc="them,-1">−</button></div></div></div>' +
     (st && st.n ? '<div class="livestats small"><b>' + esc(mapSel) + '</b> for us: ' + pct(st.wp) + ' win (' + st.w + '–' + st.l + ') · attack ' + pct(st.ap) + ' · defense ' + pct(st.dp) + ' · pistols ' + (st.pn ? st.pw + '/' + st.pn : '–') + '</div>' : '') +
-    (plan ? sec('Our comp', plan.comp) + sec('Pistol rounds', plan.pistols) + sec('Attack', plan.attack_plan) + sec('Defense', plan.defense_plan) + sec('Their tendencies', plan.their_tendencies) + sec('Anti-strat', plan.anti_strat)
+    (plan ? sec('Our comp', plan.comp) + (liveFive.length === 5 ? '<section class="livesec"><h3>Starting five · ' + esc(mapSel) + '</h3><div class="match-five">' + liveFive.map((x, i) => '<div class="match-slot-view"><span class="slot-n">' + (i + 1) + '</span><b>' + esc(x.player || 'Player') + '</b><span class="pill">' + esc(liveAgents[i] || 'Agent TBD') + '</span></div>').join('') + '</div></section>' : '') + sec('Pistol rounds', plan.pistols) + sec('Attack', plan.attack_plan) + sec('Defense', plan.defense_plan) + sec('Their tendencies', plan.their_tendencies) + sec('Anti-strat', plan.anti_strat)
       : '<div class="card" style="margin-top:12px"><p class="muted" style="margin:0">No game plan for this match yet.' + (isStaff() ? ' <a href="#/plans">Make one in Game plans</a> and it shows here.' : '') + '</p></div>') +
     '<div class="row spread" style="margin-top:18px"><h2 style="margin:0">Timeout cards</h2>' + (isStaff() ? '<button class="btn small ghost" id="addcard">Add a card</button>' : '') + '</div>' +
     '<div class="tcards">' + allCards.map((c, i) => '<button class="tcard" data-card="' + i + '"><span class="pill">' + esc(c.category || 'Call') + '</span><b>' + esc(c.title) + '</b></button>').join('') + '</div></div>';
