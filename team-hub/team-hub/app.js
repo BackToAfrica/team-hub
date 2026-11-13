@@ -108,7 +108,8 @@ const TABLES = {
     F('block', 'Block'), F('minutes', 'Minutes'), F('drill', 'Drill'), F('how', 'How to do it', 'long'), F('success', 'Success looks like', 'long'), F('sort', 'Order', 'int', ['Order', 'Sort'])] },
   matches: { label: 'Matches', sheet: 'Matches', order: 'date', req: 'map', fields: [
     F('date', 'Date', 'date'), F('event', 'Event'), F('opponent', 'Opponent'), F('map', 'Map'), F('rounds_won', 'Rounds won', 'int'), F('rounds_lost', 'Rounds lost', 'int'),
-    F('start_side', 'Start side'), F('vod_link', 'VOD link', 'link'), F('notes', 'Notes', 'long')] },
+    F('start_side', 'Start side'), F('type', 'Type', 'select', ['Type'], { options: ['Scrim', 'Official'] }), F('atk_won', 'Attack rounds won', 'int'), F('atk_lost', 'Attack rounds lost', 'int'),
+    F('def_won', 'Defense rounds won', 'int'), F('def_lost', 'Defense rounds lost', 'int'), F('pistols_won', 'Pistols won (0-2)', 'int', ['Pistols won']), F('vod_link', 'VOD link', 'link'), F('notes', 'Notes', 'long')] },
   player_stats: { label: 'Player stats', sheet: 'Player Stats', order: 'date', req: 'player', fields: [
     F('date', 'Date', 'date'), F('map', 'Map'), F('player', 'Player'), F('agent', 'Agent'), F('rounds', 'Rounds', 'int'), F('kills', 'Kills', 'int'), F('deaths', 'Deaths', 'int'),
     F('assists', 'Assists', 'int'), F('kd', 'K/D', 'num'), F('hs_kills', 'Headshot kills', 'int'), F('hs_kill_pct', 'Headshot kill %', 'pct'), F('true_hs_pct', 'True HS %', 'pct'),
@@ -156,6 +157,10 @@ const TABLES = {
   roster: { label: 'Roster slots', sheet: 'Roster', order: 'name', asc: true, req: 'name', merge: true, fields: [
     F('name', 'Name', 'text', ['Player (IGN)', 'Player', 'Name']), F('ign', 'In-game name', 'text', ['Player (IGN)', 'IGN', 'In-game name']), F('discord', 'Discord username', 'text', ['Discord username', 'Discord']),
     F('role', 'Role', 'select', ['Role'], { options: ROLES }), F('is_igl', 'IGL', 'bool', ['IGL?', 'IGL']), F('is_trial', 'Trial', 'bool', ['Trial', 'Trial player']), F('status', 'Status', 'select', ['Status'], { options: ['Active', 'Bench'] })] },
+  game_plans: { label: 'Game plans', order: 'match_date', req: 'opponent', keepOnAdd: ['scrim_id'], fields: [
+    F('opponent', 'Opponent'), F('match_date', 'Match date', 'date'), F('maps', 'Maps (comma separated)'), F('their_tendencies', 'Their tendencies (how they play)', 'long'),
+    F('comp', 'Our comp (per map)', 'long'), F('attack_plan', 'Attack plan', 'long'), F('defense_plan', 'Defense plan', 'long'), F('pistols', 'Pistol rounds', 'long'),
+    F('anti_strat', 'Anti-strat (if they do X, we do Y)', 'long'), F('notes', 'Notes', 'long'), F('published', 'Players can see it', 'bool')] },
   patch_notes: { label: 'Patch notes', shared: true, sheet: 'Patch Notes', order: 'date', req: 'changed', fields: [
     F('patch', 'Patch'), F('date', 'Date', 'date'), F('category', 'Category'), F('item', 'Agent / item'), F('effect', 'Effect'), F('changed', 'What changed', 'long'), F('coach_notes', 'Coach notes', 'long')] }
 };
@@ -340,15 +345,21 @@ const ICONS = {
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   globe: '<circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19M12 2.5c2.6 2.6 3.9 5.8 3.9 9.5s-1.3 6.9-3.9 9.5c-2.6-2.6-3.9-5.8-3.9-9.5S9.4 5.1 12 2.5z"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.2-6 8-6s7 2 8 6"/>',
-  target: '<circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.5"/>'
+  target: '<circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.5"/>',
+  cal: '<rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
+  map: '<path d="M9 4L3 6.5v13.5L9 17.5l6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/>',
+  flag: '<path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>'
 };
 function icon(n) { return '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[n] || '') + '</svg>'; }
 const NAV = [
   { r: 'home', label: 'Home', sec: null, i: 'home', g: 'Team' },
   { r: 'team', label: 'Team', sec: null, i: 'users', g: 'Team' },
+  { r: 'schedule', label: 'Schedule', sec: null, i: 'cal', g: 'Team' },
   { r: 'checkin', label: 'My check-ins', sec: 'checkin', i: 'check', g: 'Team' },
   { r: 'stats', label: 'My stats', sec: 'my_stats', i: 'chart', g: 'Team' },
   { r: 'workon', label: 'Work on', sec: 'reviews', i: 'target', g: 'Team' },
+  { r: 'plans', label: 'Game plans', sec: 'scouting', i: 'flag', g: 'Prepare' },
+  { r: 'maps', label: 'Map pool', sec: 'team_stats', i: 'map', g: 'Prepare' },
   { r: 'playbook', label: 'Playbook', sec: ['playbook', 'comms'], i: 'book', g: 'Prepare' },
   { r: 'scouting', label: 'Scouting', sec: 'scouting', i: 'eye', g: 'Prepare' },
   { r: 'comps', label: 'Comp Checker', sec: 'comp_checker', i: 'shield', g: 'Prepare' },
@@ -630,12 +641,14 @@ PAGES.home = async function (el) {
   const me = S.me, coach = me.is_coach;
   const doCheckin = can('checkin') && !(coach && !me.ign);
   const today = todayISO();
-  const [ann, team, myHist, todayRows, ps, work] = await Promise.all([
+  const [ann, team, myHist, todayRows, ps, work, nxt, avail, plans] = await Promise.all([
     cached('announcements'), teamPlayers(),
     doCheckin ? db.list('checkins', { eq: { user_id: me.id }, order: 'day', asc: false, limit: 60 }) : Promise.resolve([]),
     coach ? db.list('checkins', { eq: { day: today } }) : Promise.resolve([]),
     can('my_stats') || can('team_stats') ? cached('player_stats') : Promise.resolve([]),
-    can('reviews') ? cached('work_on') : Promise.resolve([])
+    can('reviews') ? cached('work_on') : Promise.resolve([]),
+    nextScrim().catch(() => null), db.list('availability', { eq: { user_id: me.id } }).catch(() => []),
+    can('scouting') ? db.list('game_plans', { limit: 200 }).catch(() => []) : Promise.resolve([])
   ]);
   const doneToday = myHist.some(h => String(h.day).slice(0, 10) === today);
   const streak = calcStreak(myHist.map(h => h.day));
@@ -701,8 +714,20 @@ PAGES.home = async function (el) {
       focusHtml = panel('My focus from VODs', '<a class="small" href="#/workon">All →</a>', mineW.length ? mineW.slice(0, 3).map(w => '<div class="focus"><div class="row" style="gap:6px">' + (w.priority ? '<span class="pill ' + (PRIO[w.priority] || '') + '">' + esc(w.priority) + '</span>' : '') + (w.area ? '<span class="pill blue">' + esc(w.area) + '</span>' : '') + (isTeamWide(w) ? '<span class="pill">Whole team</span>' : '') + '</div><div class="t">' + inlineMd(w.issue || '') + '</div>' + (w.tip ? '<div class="small muted">→ ' + inlineMd(w.tip) + '</div>' : '') + '</div>').join('') + (mineW.length > 3 ? '<a class="small" href="#/workon">+' + (mineW.length - 3) + ' more</a>' : '') : '<p class="muted small">Nothing right now. Your coach adds things to work on from VOD reviews.</p>');
     }
   }
+  // next scrim + "fill in your times" nudge
+  let schedHtml = '';
+  {
+    const plan = nxt && (plans.find(p => p.scrim_id === nxt.id) || plans.find(p => sameOpp(p.opponent, nxt.opponent) && p.match_date && String(p.match_date).slice(0, 10) === isoOf(new Date(nxt.starts_at))));
+    const mySlots = new Set(((avail[0] || {}).slots) || []);
+    const mon = weekMonday(0), mon2 = weekMonday(1);
+    const filled = m => DAYS.some((_, d) => SCHED_HOURS.some(h => mySlots.has(slotKey(slotDate(m, d, h)))));
+    const nudge = !coach && !filled(mon) && !filled(mon2) ? '<a class="card alert" href="#/schedule" style="margin-bottom:14px"><b>When can you play this week?</b><span class="small muted">Mark your free times so the coach can book scrims →</span></a>' : '';
+    schedHtml = nudge + (nxt ? panel('Next scrim', '<a class="small" href="#/schedule">Schedule →</a>', '<div class="nextscrim"><div class="sdate"><b>' + new Date(nxt.starts_at).toLocaleDateString(undefined, { weekday: 'short' }) + '</b><span>' + new Date(nxt.starts_at).getDate() + '</span></div><div class="grow">' +
+      '<div class="t">vs ' + esc(nxt.opponent || 'TBD') + '</div><div class="small muted">' + esc(fmtWhen(nxt.starts_at)) + ' · ' + relDays(nxt.starts_at) + '</div><div class="row small" style="gap:6px;margin-top:4px">' + mapList(nxt.maps).map(m => '<span class="pill">' + esc(m) + '</span>').join('') + '</div></div>' +
+      (plan ? '<a class="btn small" href="#/plans/' + plan.id + '">Game plan</a>' : '') + '</div>') : (coach ? panel('Next scrim', '<a class="small" href="#/schedule">Schedule →</a>', '<p class="muted small">Nothing booked. See when everyone is free and book one.</p>') : ''));
+  }
   const ciHtml = doCheckin ? panel('Today\'s check-in', '<span class="muted small">' + new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) + '</span>', '<div id="ci-box"><p class="muted">Loading…</p></div>', 'ci-panel') : '';
-  el.innerHTML = hero + '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + (coach ? '' : focusHtml) + annHtml + statsHtml + rosterHtml + '</div></div>';
+  el.innerHTML = hero + '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + schedHtml + (coach ? '' : focusHtml) + annHtml + statsHtml + rosterHtml + '</div></div>';
   if (doCheckin) {
     const mineToday = myHist.find(h => String(h.day).slice(0, 10) === today);
     const showForm = () => checkinForm($('#ci-box'), today, () => { S.cache = {}; render(); });
@@ -970,11 +995,11 @@ function workCard(w, opts) {
       (canMark || opts.coachView ? '<select class="wstat" data-wid="' + w.id + '">' + ['Open', 'Working on it', 'Fixed'].map(x => '<option' + (x === (w.status || 'Open') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select>' : '<span class="pill ' + (WSTAT[w.status] || '') + '">' + esc(w.status || 'Open') + '</span>') + '</div>' +
     '<div class="wi"><span class="lbl">Mistake</span>' + inlineMd(w.issue || '') + '</div>' +
     (w.tip ? '<div class="wt"><span class="lbl">How to avoid it</span>' + inlineMd(w.tip) + '</div>' : '') +
-    (w.drill ? '<div class="small muted" style="margin-top:6px">Drill: ' + inlineMd(w.drill) + '</div>' : '') +
+    (w.drill ? '<div class="small muted" style="margin-top:6px">Drill: ' + inlineMd(w.drill) + '</div>' : '') + workProgressHtml(w) +
     '<div class="small muted row" style="margin-top:8px;gap:10px">' + (w.date ? '<span>' + fmtDate(w.date) + '</span>' : '') + (w.source ? '<span>' + esc(w.source) + '</span>' : '') +
       (vi ? (opts.onSeek && vi.id ? '<button type="button" class="linkbtn" data-seek="' + (vi.t || 0) + '">▶ Watch ' + fmtTs(vi.t || 0) + '</button>' : '<a href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch the moment</a>') : '') + '</div>' +
     (opts.coachView ? '<div class="row" style="margin-top:10px;gap:6px">' + (!w.approved ? '<button class="btn small" data-wapprove="' + w.id + '">Approve for ' + esc(isTeamWide(w) ? 'team' : w.player) + '</button>' : '<button class="btn small ghost" data-wunapprove="' + w.id + '">Hide from player</button>') +
-      '<button class="btn small ghost" data-wedit="' + w.id + '">Edit</button><button class="btn small ghost" data-wdel="' + w.id + '">' + (w.approved ? 'Delete' : 'Dismiss') + '</button></div>' : '') + '</div>';
+      (w.approved ? '<button class="btn small ghost" data-wseen="' + w.id + '" title="This mistake showed up again">Seen again</button>' : '') + '<button class="btn small ghost" data-wedit="' + w.id + '">Edit</button><button class="btn small ghost" data-wdel="' + w.id + '">' + (w.approved ? 'Delete' : 'Dismiss') + '</button></div>' : '') + '</div>';
 }
 function wireWork(box, items, refresh) {
   $$('.wstat', box).forEach(sel => sel.onchange = async () => {
@@ -984,6 +1009,7 @@ function wireWork(box, items, refresh) {
   $$('[data-wapprove]', box).forEach(b => b.onclick = async () => { await db.update('work_on', Number(b.dataset.wapprove), { approved: true }); S.cache = {}; toast('Approved — the player can see it now'); refresh(); });
   $$('[data-wunapprove]', box).forEach(b => b.onclick = async () => { await db.update('work_on', Number(b.dataset.wunapprove), { approved: false }); S.cache = {}; toast('Hidden from the player'); refresh(); });
   $$('[data-wedit]', box).forEach(b => b.onclick = () => editRow('work_on', items.find(w => w.id === Number(b.dataset.wedit)), () => { S.cache = {}; refresh(); }));
+  $$('[data-wseen]', box).forEach(b => b.onclick = () => seenAgain(items.find(w => w.id === Number(b.dataset.wseen)), refresh));
   $$('[data-wdel]', box).forEach(b => b.onclick = async () => { if (!confirm('Remove this item?')) return; await db.remove('work_on', Number(b.dataset.wdel)); S.cache = {}; refresh(); });
 }
 
@@ -1051,10 +1077,10 @@ PAGES.workon = async function (el) {
   const tab = (k, l) => '<a href="#/workon/' + encodeURIComponent(k) + '" class="' + (who === k ? 'active' : '') + '">' + esc(l) + '</a>';
   el.innerHTML = '<div class="page-h"><div><h1>Work on</h1><p class="muted">Mistakes from our VODs and how to avoid them next time. ' + (coach ? 'Players see the items you approve (Coach panel → Work on).' : 'Mark yours as you work on them.') + '</p></div>' +
     (coach ? '<a class="btn small" href="#/coach/work">Review suggestions</a>' : '') + '</div>' +
-    '<div class="kpis">' + kpi(open.filter(w => w.status !== 'Working on it').length, 'Open') + kpi(open.filter(w => w.status === 'Working on it').length, 'Working on it') + kpi(fixed.length, 'Fixed') + '</div>' +
+    workSummary(list, coach && who === 'all') +
     '<div class="tabs">' + (coach ? '' : tab('me', 'Mine')) + tab('all', 'Everything') + tab('team', 'Whole team') + players.map(p => tab(p, p)).join('') + '</div>' +
-    (open.length ? '<div class="wgrid">' + open.map(w => workCard(w)).join('') + '</div>' : empty(list.length ? 'Everything here is fixed. 💪' : (coach ? 'Nothing approved yet. Approve suggestions from the VOD reviews in Coach panel → Work on.' : 'Nothing to work on right now. Your coach adds items from VOD reviews.'))) +
-    (fixed.length ? '<details class="item" style="margin-top:16px"' + (showFixed ? ' open' : '') + '><summary><span class="t">Fixed (' + fixed.length + ')</span></summary><div class="body"><div class="wgrid">' + fixed.map(w => workCard(w)).join('') + '</div></div></details>' : '');
+    (open.length ? '<div class="wgrid">' + open.map(w => workCard(w, { coachView: coach })).join('') + '</div>' : empty(list.length ? 'Everything here is fixed. 💪' : (coach ? 'Nothing approved yet. Approve suggestions from the VOD reviews in Coach panel → Work on.' : 'Nothing to work on right now. Your coach adds items from VOD reviews.'))) +
+    (fixed.length ? '<details class="item" style="margin-top:16px"' + (showFixed ? ' open' : '') + '><summary><span class="t">Fixed (' + fixed.length + ')</span></summary><div class="body"><div class="wgrid">' + fixed.map(w => workCard(w, { coachView: coach })).join('') + '</div></div></details>' : '');
   wireWork(el, items, () => render());
 };
 
@@ -1388,6 +1414,7 @@ function editRow(table, row, refresh) {
       const rec = {};
       cfg.fields.forEach(f => { const el = e.target[f.k]; rec[f.k] = f.type === 'bool' ? el.checked : coerce(f, el.value); });
       if (!row.id && table === 'work_on') rec.approved = row.approved !== false;
+      if (!row.id) (cfg.keepOnAdd || []).forEach(k => { if (row[k] != null) rec[k] = row[k]; });
       try { if (row.id) await db.update(table, row.id, rec); else await db.insert(table, [rec]); S.cache = {}; closeModal(); toast('Saved'); refresh(); }
       catch (err) { toast('Error: ' + err.message); }
     };
@@ -1528,7 +1555,24 @@ async function mergeWork(rows) {
   const have = await db.list('work_on', { limit: 5000 });
   const key = r => String(r.date || '').slice(0, 10) + '|' + normName(r.player) + '|' + String(r.issue || '').toLowerCase().replace(/\W+/g, ' ').trim().slice(0, 80);
   const seen = new Set(have.map(key));
-  const fresh = rows.filter(r => !seen.has(key(r))).map(r => Object.assign({ status: 'Open', priority: 'Medium' }, r, { approved: false }));
+  // same player + same mistake on a different date = it came up again: log it on the existing item instead of adding a duplicate
+  const same = r => normName(r.player) + '|' + String(r.issue || '').toLowerCase().replace(/\W+/g, ' ').trim().slice(0, 80);
+  const fresh = [];
+  for (const r of rows) {
+    if (seen.has(key(r))) continue;
+    const ex = have.find(h => h.approved && same(h) === same(r));
+    const d = r.date ? String(r.date).slice(0, 10) : null;
+    if (ex && d) {
+      const t = workTrack(ex);
+      if (!t.dates.includes(d)) {
+        const patch = { seen: (Array.isArray(ex.seen) ? ex.seen : []).concat([{ date: d, source: r.source || null }]) };
+        if (ex.status === 'Fixed' && (!t.fixedAt || d > t.fixedAt)) { patch.status = 'Open'; patch.came_back = true; }
+        await db.update('work_on', ex.id, patch); Object.assign(ex, patch);
+      }
+      seen.add(key(r)); continue;
+    }
+    fresh.push(Object.assign({ status: 'Open', priority: 'Medium' }, r, { approved: false })); seen.add(key(r));
+  }
   for (let j = 0; j < fresh.length; j += 400) await db.insert('work_on', fresh.slice(j, j + 400));
   return fresh.length;
 }
@@ -1562,6 +1606,364 @@ async function importFile(file, out, done) {
   };
 }
 
+
+// =====================================================================
+//  Scrim scheduler, map pool, game plans, work-on progress
+// =====================================================================
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const SCHED_HOURS = [];
+for (let h = 10; h <= 25; h++) SCHED_HOURS.push(h); // 10am .. 1am (next day)
+let SCHED_STOP = null;
+document.addEventListener('pointerup', () => { if (SCHED_STOP) SCHED_STOP(); });
+document.addEventListener('pointerdown', e => { window.__lastPointer = e.pointerType; }, true);
+function weekMonday(offset) { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + 7 * (offset || 0)); return d; }
+function slotDate(monday, day, hour) { const d = new Date(monday); d.setDate(d.getDate() + day); d.setHours(hour, 0, 0, 0); return d; }
+function slotKey(d) { return d.toISOString().slice(0, 13) + ':00Z'; }
+function hourLabel(h) { h = h % 24; return (h % 12 || 12) + (h < 12 ? 'am' : 'pm'); }
+function fmtWhen(iso) { const d = new Date(iso); return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) + ' · ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
+function relDays(iso) {
+  const d = new Date(iso), now = new Date(); const a = new Date(d); a.setHours(0, 0, 0, 0); const b = new Date(now); b.setHours(0, 0, 0, 0);
+  const n = Math.round((a - b) / 86400000);
+  if (n === 0) return d > now ? 'today' : 'today'; if (n === 1) return 'tomorrow'; if (n === -1) return 'yesterday';
+  return n > 0 ? 'in ' + n + ' days' : Math.abs(n) + ' days ago';
+}
+function myTZ() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; } }
+function sameOpp(a, b) { const x = normName(a), y = normName(b); return !!(x && y && (x === y || x.includes(y) || y.includes(x))); }
+function mapList(s) { return String(s || '').split(/[,/+&]| and /i).map(x => x.trim()).filter(Boolean).map(x => MAPS.find(m => m.toLowerCase() === x.toLowerCase()) || x); }
+function matchType(m) { return m.type || (/scrim/i.test(m.event || '') ? 'Scrim' : m.event ? 'Official' : 'Scrim'); }
+function isWin(m) { return Number(m.rounds_won) > Number(m.rounds_lost); }
+async function listScrims() { return db.list('scrims', { order: 'starts_at', asc: true, limit: 500 }); }
+async function nextScrim() { const now = Date.now() - 3 * 3600000; return (await listScrims()).find(s => s.status === 'Planned' && new Date(s.starts_at).getTime() > now) || null; }
+
+// ---- Schedule page
+PAGES.schedule = async function (el) {
+  const me = S.me, coach = me.is_coach;
+  const off = Number(location.hash.split('/')[2]) || 0;
+  const monday = weekMonday(off);
+  const [avail, scrims, team, plans] = await Promise.all([db.list('availability', { limit: 200 }), listScrims(), teamPlayers(),
+    can('scouting') ? db.list('game_plans', { limit: 500 }) : Promise.resolve([])]);
+  const people = new Map(); // user_id -> display
+  team.players.filter(p => p.user_id).forEach(p => people.set(p.user_id, p));
+  team.coaches.forEach(c => { if (!people.has(c.id)) people.set(c.id, Object.assign({ coach: true }, c)); });
+  const counted = new Set(team.players.filter(p => p.user_id && !p.bench).map(p => p.user_id)); // active players
+  let mine = avail.find(a => a.user_id === me.id);
+  const mySlots = new Set((mine && mine.slots) || []);
+  const byKey = new Map();
+  avail.forEach(a => (a.slots || []).forEach(k => { if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(a.user_id); }));
+  const total = counted.size;
+  const nowMs = Date.now();
+  const upcoming = scrims.filter(s => s.status !== 'Cancelled' && new Date(s.starts_at).getTime() > nowMs - 3 * 3600000 && s.status === 'Planned');
+  const past = scrims.filter(s => !upcoming.includes(s)).reverse().slice(0, 8);
+  const planFor = s => plans.find(p => p.scrim_id === s.id) || plans.find(p => p.match_date && String(p.match_date).slice(0, 10) === isoOf(new Date(s.starts_at)) && sameOpp(p.opponent, s.opponent));
+  const scrimRow = s => { const plan = planFor(s); const d = new Date(s.starts_at);
+    return '<div class="srow' + (s.status === 'Cancelled' ? ' cancelled' : '') + '"><div class="sdate"><b>' + d.toLocaleDateString(undefined, { weekday: 'short' }) + '</b><span>' + d.getDate() + '</span></div>' +
+      '<div class="grow"><div class="t">vs ' + esc(s.opponent || 'TBD') + ' <span class="muted small">' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) + ' · ' + relDays(s.starts_at) + '</span></div>' +
+      '<div class="row small" style="gap:6px;margin-top:4px">' + mapList(s.maps).map(m => '<span class="pill">' + esc(m) + '</span>').join('') + (s.format ? '<span class="muted">' + esc(s.format) + '</span>' : '') +
+      (s.status !== 'Planned' ? '<span class="pill ' + (s.status === 'Done' ? 'green' : '') + '">' + esc(s.status) + '</span>' : '') + '</div>' +
+      (s.notes ? '<div class="small muted" style="margin-top:4px">' + inlineMd(s.notes) + '</div>' : '') + '</div>' +
+      '<div class="row" style="gap:6px;justify-content:flex-end">' + (plan ? '<a class="btn small ghost" href="#/plans/' + plan.id + '">Game plan</a>' : (coach && s.status === 'Planned' ? '<button class="btn small ghost" data-plan="' + s.id + '">Make game plan</button>' : '')) +
+      (coach ? (s.status === 'Planned' ? '<button class="btn small" data-result="' + s.id + '">Log result</button>' : '') + '<button class="btn small ghost" data-sedit="' + s.id + '">Edit</button>' : '') + '</div></div>'; };
+
+  // best times: blocks of consecutive hours where (almost) everyone is free
+  const need = total ? Math.min(5, total) : 1;
+  const blocks = [];
+  for (let d = 0; d < 7; d++) {
+    let cur = null;
+    SCHED_HOURS.forEach(h => { const k = slotKey(slotDate(monday, d, h)); const n = (byKey.get(k) || []).filter(u => counted.has(u)).length;
+      if (n >= need && slotDate(monday, d, h).getTime() > nowMs) { if (cur && cur.end === h) { cur.end = h + 1; cur.min = Math.min(cur.min, n); } else { cur = { d: d, start: h, end: h + 1, min: n }; blocks.push(cur); } } else cur = null; });
+  }
+  blocks.sort((a, b) => b.min - a.min || (b.end - b.start) - (a.end - a.start));
+  const bestHtml = blocks.length ? blocks.slice(0, 6).map(b => '<div class="best"><div class="grow"><b>' + DAYS[b.d] + ' ' + slotDate(monday, b.d, 0).getDate() + '</b> · ' + hourLabel(b.start) + '–' + hourLabel(b.end) +
+      ' <span class="pill green">' + b.min + '/' + total + ' free</span></div>' + (coach ? '<button class="btn small ghost" data-book="' + slotDate(monday, b.d, b.start).toISOString() + '">Book scrim</button>' : '') + '</div>').join('')
+    : '<p class="muted small">' + (total ? 'No time this week where ' + need + ' players are free yet. Ask everyone to fill in their times.' : 'Add players to the roster first.') + '</p>';
+  const missing = Array.from(counted).filter(u => { const a = avail.find(x => x.user_id === u); const keys = new Set((a && a.slots) || []);
+    return !DAYS.some((_, d) => SCHED_HOURS.some(h => keys.has(slotKey(slotDate(monday, d, h))))); }).map(u => nameOf(people.get(u)));
+
+  const head = '<tr><th></th>' + DAYS.map((d, i) => { const dt = slotDate(monday, i, 0); const today = isoOf(dt) === todayISO();
+    return '<th class="' + (today ? 'today' : '') + '">' + d + '<span>' + dt.getDate() + '</span></th>'; }).join('') + '</tr>';
+  const rows = SCHED_HOURS.map(h => '<tr><th class="hl">' + hourLabel(h) + '</th>' + DAYS.map((_, d) => { const dt = slotDate(monday, d, h); const k = slotKey(dt);
+    const who = (byKey.get(k) || []); const n = who.filter(u => counted.has(u)).length; const lvl = total ? Math.min(4, Math.round(n / total * 4)) : 0;
+    const names = who.map(u => nameOf(people.get(u) || {})).join(', ');
+    return '<td class="cell l' + lvl + (mySlots.has(k) ? ' mine' : '') + (dt.getTime() < nowMs ? ' past' : '') + '" data-k="' + k + '" title="' + esc(names || 'Nobody yet') + '">' + (n ? '<span>' + n + '</span>' : '') + '</td>'; }).join('') + '</tr>').join('');
+
+  el.innerHTML = '<div class="page-h"><div><h1>Schedule</h1><p class="muted">Mark when you can play, and see when the whole team is free. Times are in your time zone' + (myTZ() ? ' (' + esc(myTZ().replace(/_/g, ' ')) + ')' : '') + '.</p></div>' +
+    (coach ? '<button class="btn small" id="book">Book a scrim</button>' : '') + '</div>' +
+    panel('Upcoming scrims', '', upcoming.length ? '<div class="slist">' + upcoming.map(scrimRow).join('') + '</div>' : empty(coach ? 'No scrims booked. Use “Best times” below to find when everyone is free.' : 'No scrims booked yet.')) +
+    '<div class="sched-grid">' +
+    '<section class="card panel"><div class="card-h"><h2>When are you free?</h2><div class="row" style="gap:6px"><a class="btn small ghost" href="#/schedule/' + (off - 1) + '">←</a><b class="small">' +
+      (off === 0 ? 'This week' : off === 1 ? 'Next week' : off === -1 ? 'Last week' : 'Week of ' + monday.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })) +
+      '</b><a class="btn small ghost" href="#/schedule/' + (off + 1) + '">→</a></div></div>' +
+      '<p class="small muted" style="margin-top:0">Click or drag over the hours you can play. Darker = more of the team is free; the number is how many players. Hover to see who.</p>' +
+      '<div class="tablewrap"><table class="avail"><thead>' + head + '</thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div class="row" style="margin-top:10px"><button class="btn small ghost" id="copyprev">Copy my times from last week</button><button class="btn small ghost" id="clearwk">Clear my week</button><span class="small muted" id="savest"></span></div></section>' +
+    '<div class="col">' + panel('Best times this week', '', bestHtml) +
+      (missing.length ? panel('Haven\'t filled in this week', '', '<p class="small">' + missing.map(esc).join(', ') + '</p>') : '') + '</div></div>' +
+    (past.length ? '<details class="item" style="margin-top:16px"><summary><span class="t">Past &amp; cancelled scrims (' + past.length + ')</span></summary><div class="body"><div class="slist">' + past.map(scrimRow).join('') + '</div></div></details>' : '');
+
+  // painting availability
+  let painting = null, timer = null;
+  const status = t => { const s = $('#savest'); if (s) s.textContent = t; };
+  async function save() {
+    const cutoff = Date.now() - 21 * 86400000;
+    const slots = Array.from(mySlots).filter(k => new Date(k).getTime() > cutoff).sort();
+    status('Saving…');
+    try {
+      if (mine && mine.id) await db.update('availability', mine.id, { slots: slots, updated_at: new Date().toISOString() });
+      else { await db.insert('availability', [{ slots: slots, user_id: me.id }]); const again = await db.list('availability', { eq: { user_id: me.id } }); if (again[0]) mine = again[0]; }
+      status('Saved ✓');
+    } catch (err) { status('Couldn\'t save: ' + err.message); }
+  }
+  const queue = () => { clearTimeout(timer); timer = setTimeout(save, 700); status('…'); };
+  const setCell = (td, on) => { const k = td.dataset.k; if (on) mySlots.add(k); else mySlots.delete(k); td.classList.toggle('mine', on);
+    const who = (byKey.get(k) || []).filter(u => u !== me.id).concat(on ? [me.id] : []); byKey.set(k, who);
+    const n = who.filter(u => counted.has(u)).length;
+    td.innerHTML = n ? '<span>' + n + '</span>' : ''; td.className = td.className.replace(/\bl\d\b/, 'l' + (total ? Math.min(4, Math.round(n / total * 4)) : 0));
+    td.title = who.map(u => nameOf(people.get(u) || {})).join(', ') || 'Nobody yet';
+    queue(); };
+  $$('td.cell', el).forEach(td => {
+    td.addEventListener('pointerdown', e => { if (td.classList.contains('past') || e.pointerType === 'touch') return; e.preventDefault(); painting = !td.classList.contains('mine'); setCell(td, painting); });
+    td.addEventListener('click', e => { if (td.classList.contains('past') || e.pointerType === 'mouse' || painting !== null) return; if (td.__lastToggle && Date.now() - td.__lastToggle < 300) return; td.__lastToggle = Date.now(); if (window.__lastPointer === 'touch') setCell(td, !td.classList.contains('mine')); });
+    td.addEventListener('pointerenter', () => { if (painting === null || td.classList.contains('past')) return; if (td.classList.contains('mine') !== painting) setCell(td, painting); });
+  });
+  SCHED_STOP = () => { painting = null; };
+  $('#copyprev').onclick = () => { const prev = weekMonday(off - 1); let n = 0;
+    DAYS.forEach((_, d) => SCHED_HOURS.forEach(h => { const a = slotKey(slotDate(prev, d, h)); const b = slotDate(monday, d, h); if (mySlots.has(a) && b.getTime() > Date.now()) { mySlots.add(slotKey(b)); n++; } }));
+    if (!n) { toast('Nothing to copy from last week'); return; } save().then(() => render()); };
+  $('#clearwk').onclick = () => { DAYS.forEach((_, d) => SCHED_HOURS.forEach(h => mySlots.delete(slotKey(slotDate(monday, d, h))))); save().then(() => render()); };
+  if ($('#book')) $('#book').onclick = () => scrimForm(null, null);
+  $$('[data-book]', el).forEach(b => b.onclick = () => scrimForm(null, b.dataset.book));
+  $$('[data-sedit]', el).forEach(b => b.onclick = () => scrimForm(scrims.find(s => s.id === Number(b.dataset.sedit))));
+  $$('[data-result]', el).forEach(b => b.onclick = () => scrimResult(scrims.find(s => s.id === Number(b.dataset.result))));
+  $$('[data-plan]', el).forEach(b => b.onclick = () => { const s = scrims.find(x => x.id === Number(b.dataset.plan)); newPlanFrom(s); });
+};
+
+function mapChecks(selected) {
+  const sel = new Set(mapList(selected).map(m => m.toLowerCase()));
+  return '<div class="mapchecks">' + MAPS.map(m => '<label><input type="checkbox" name="maps" value="' + m + '"' + (sel.has(m.toLowerCase()) ? ' checked' : '') + '> ' + m + '</label>').join('') + '</div>';
+}
+function scrimForm(s, startIso) {
+  s = s || {};
+  const d = s.starts_at ? new Date(s.starts_at) : startIso ? new Date(startIso) : (() => { const x = new Date(); x.setDate(x.getDate() + 1); x.setHours(19, 0, 0, 0); return x; })();
+  const time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  openModal('<h2>' + (s.id ? 'Edit scrim' : 'Book a scrim') + '</h2><form id="sf">' +
+    '<div class="row"><label class="f grow"><span>Date</span><input type="date" name="date" required value="' + isoOf(d) + '"></label><label class="f grow"><span>Start time (your time)</span><input type="time" name="time" required value="' + time + '"></label></div>' +
+    '<label class="f"><span>Opponent</span><input name="opponent" required value="' + esc(s.opponent || '') + '" placeholder="Team name"></label>' +
+    '<div class="f"><span>Maps</span>' + mapChecks(s.maps) + '</div>' +
+    '<label class="f"><span>Format</span><input name="format" value="' + esc(s.format || '') + '" placeholder="e.g. 2 maps, 24 rounds each"></label>' +
+    '<label class="f"><span>Notes (lobby, contact, what to practise)</span><textarea name="notes" rows="3">' + esc(s.notes || '') + '</textarea></label>' +
+    (s.id ? '<label class="f"><span>Status</span><select name="status">' + ['Planned', 'Done', 'Cancelled'].map(x => '<option' + (x === s.status ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label>' : '') +
+    '<div class="row"><button class="btn">' + (s.id ? 'Save' : 'Book it') + '</button><button type="button" class="btn ghost" data-close>Cancel</button>' + (s.id ? '<span class="grow"></span><button type="button" class="btn small danger" id="sdel">Delete</button>' : '') + '</div></form>', m => {
+    $('#sf', m).onsubmit = async e => {
+      e.preventDefault(); const f = e.target;
+      const rec = { starts_at: new Date(f.date.value + 'T' + f.time.value).toISOString(), opponent: f.opponent.value.trim(), maps: $$('[name=maps]:checked', f).map(c => c.value).join(', ') || null,
+        format: f.format.value.trim() || null, notes: f.notes.value.trim() || null };
+      if (f.status) rec.status = f.status.value;
+      try { if (s.id) await db.update('scrims', s.id, rec); else await db.insert('scrims', [Object.assign({ status: 'Planned' }, rec)]); closeModal(); toast(s.id ? 'Saved' : 'Scrim booked'); S.cache = {}; render(); }
+      catch (err) { toast('Error: ' + err.message); }
+    };
+    if ($('#sdel', m)) $('#sdel', m).onclick = async () => { if (!confirm('Delete this scrim?')) return; await db.remove('scrims', s.id); closeModal(); S.cache = {}; render(); };
+  });
+}
+function scrimResult(s) {
+  const maps = mapList(s.maps); if (!maps.length) maps.push('');
+  const block = (m, i) => '<div class="resmap" data-i="' + i + '"><div class="row"><label class="f grow"><span>Map</span><select name="map' + i + '"><option value="">—</option>' + MAPS.map(x => '<option' + (x === m ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label>' +
+    '<label class="f"><span>Rounds won</span><input name="rw' + i + '" inputmode="numeric" style="width:90px"></label><label class="f"><span>Rounds lost</span><input name="rl' + i + '" inputmode="numeric" style="width:90px"></label>' +
+    '<label class="f"><span>Started on</span><select name="ss' + i + '"><option></option><option>Attack</option><option>Defense</option></select></label></div>' +
+    '<div class="row small"><label class="f"><span>Attack rounds W–L</span><span class="row" style="gap:4px"><input name="aw' + i + '" style="width:60px">–<input name="al' + i + '" style="width:60px"></span></label>' +
+    '<label class="f"><span>Defense rounds W–L</span><span class="row" style="gap:4px"><input name="dw' + i + '" style="width:60px">–<input name="dl' + i + '" style="width:60px"></span></label>' +
+    '<label class="f"><span>Pistols won</span><select name="pw' + i + '"><option value=""></option><option>0</option><option>1</option><option>2</option></select></label></div></div>';
+  openModal('<h2>Result vs ' + esc(s.opponent || '') + '</h2><p class="small muted">Saved as matches, so they count in the Map pool and on the Team page. Attack/defense and pistols are optional.</p><form id="rf"><div id="resmaps">' +
+    maps.map(block).join('') + '</div><button type="button" class="btn small ghost" id="addmap">+ Another map</button><label class="f" style="margin-top:10px"><span>Notes</span><textarea name="notes" rows="2"></textarea></label>' +
+    '<div class="row"><button class="btn">Save result</button><button type="button" class="btn ghost" data-close>Cancel</button></div></form>', m => {
+    let n = maps.length;
+    $('#addmap', m).onclick = () => { $('#resmaps', m).insertAdjacentHTML('beforeend', block('', n++)); };
+    $('#rf', m).onsubmit = async e => {
+      e.preventDefault(); const f = e.target; const int = v => v === '' || v == null || isNaN(v) ? null : parseInt(v, 10);
+      const rows = [];
+      for (let i = 0; i < n; i++) { if (!f['map' + i] || !f['map' + i].value) continue;
+        rows.push({ date: isoOf(new Date(s.starts_at)), event: 'Scrim', type: 'Scrim', opponent: s.opponent, map: f['map' + i].value, rounds_won: int(f['rw' + i].value), rounds_lost: int(f['rl' + i].value),
+          start_side: f['ss' + i].value || null, atk_won: int(f['aw' + i].value), atk_lost: int(f['al' + i].value), def_won: int(f['dw' + i].value), def_lost: int(f['dl' + i].value),
+          pistols_won: int(f['pw' + i].value), notes: f.notes.value.trim() || null, scrim_id: s.id }); }
+      if (!rows.length) { toast('Pick at least one map'); return; }
+      if (rows.some(r => r.rounds_won == null || r.rounds_lost == null)) { toast('Enter rounds won and lost for each map'); return; }
+      try { await db.insert('matches', rows); await db.update('scrims', s.id, { status: 'Done' }); closeModal(); S.cache = {}; toast('Result saved'); render(); }
+      catch (err) { toast('Error: ' + err.message); }
+    };
+  });
+}
+
+// ---- Map pool
+const POOL = ['Main pick', 'In pool', 'Practising', 'Ban'];
+const POOL_PILL = { 'Main pick': 'green', 'In pool': 'blue', Practising: 'yellow', Ban: 'red' };
+function mapStats(list) {
+  const n = list.length, w = list.filter(isWin).length;
+  const rw = sum(list, 'rounds_won'), rl = sum(list, 'rounds_lost');
+  const atk = list.filter(m => m.atk_won != null || m.atk_lost != null), def = list.filter(m => m.def_won != null || m.def_lost != null);
+  const aw = sum(atk, 'atk_won'), al = sum(atk, 'atk_lost'), dw = sum(def, 'def_won'), dl = sum(def, 'def_lost');
+  const pist = list.filter(m => m.pistols_won != null && m.pistols_won !== '');
+  const sorted = list.slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || a.id - b.id);
+  return { n: n, w: w, l: n - w, wp: n ? w / n : null, rw: rw, rl: rl, rp: rw + rl ? rw / (rw + rl) : null,
+    ap: aw + al ? aw / (aw + al) : null, aw: aw, al: al, dp: dw + dl ? dw / (dw + dl) : null, dw: dw, dl: dl,
+    pw: sum(pist, 'pistols_won'), pn: pist.length * 2, last: sorted.length ? sorted[sorted.length - 1].date : null, form: sorted.slice(-5) };
+}
+PAGES.maps = async function (el) {
+  const coach = S.me.is_coach;
+  const parts = location.hash.split('/'); const typ = parts[2] || 'all', per = parts[3] || 'all';
+  const [allMatches, pool, ps] = await Promise.all([cached('matches'), db.list('map_pool', { limit: 100 }), cached('player_stats')]);
+  const since = per === '30' ? addDays(todayISO(), -30) : per === '90' ? addDays(todayISO(), -90) : null;
+  const matches = allMatches.filter(m => m.map && (typ === 'all' || matchType(m).toLowerCase() === typ) && (!since || String(m.date || '') >= since));
+  const names = Array.from(new Set(MAPS.concat(matches.map(m => m.map)).concat(pool.map(p => p.map))));
+  const poolOf = m => pool.find(p => p.map.toLowerCase() === m.toLowerCase()) || {};
+  const cards = names.map(m => { const list = matches.filter(x => String(x.map).toLowerCase() === m.toLowerCase()); return Object.assign({ map: m, pool: poolOf(m) }, mapStats(list),
+    { best: bestOnMap(ps.filter(r => String(r.map || '').toLowerCase() === m.toLowerCase() && (!since || String(r.date || '') >= since))) }); });
+  const rank = c => { const i = POOL.indexOf(c.pool.status); return i < 0 ? (c.n ? 3.5 : 5) : i === 3 ? 6 : i; };
+  cards.sort((a, b) => rank(a) - rank(b) || b.n - a.n || a.map.localeCompare(b.map));
+  const all = mapStats(matches);
+  const played = cards.filter(c => c.n >= 2);
+  const best = played.slice().sort((a, b) => b.wp - a.wp || b.rp - a.rp)[0], worst = played.slice().sort((a, b) => a.wp - b.wp || a.rp - b.rp)[0];
+  const picks = cards.filter(c => c.pool.status !== 'Ban' && c.n >= 2 && c.wp >= .5).sort((a, b) => b.wp - a.wp || b.n - a.n).slice(0, 2);
+  const bans = cards.filter(c => c.pool.status === 'Ban').concat(cards.filter(c => c.pool.status !== 'Ban' && c.n >= 2 && c.wp < .5).sort((a, b) => a.wp - b.wp)).slice(0, 2);
+  const tab = (href, label, on) => '<a href="' + href + '" class="' + (on ? 'active' : '') + '">' + label + '</a>';
+  const dots = c => c.form.map(m => '<span class="fdot ' + (isWin(m) ? 'w' : 'l') + '" title="' + esc((m.date ? fmtDate(m.date) + ' · ' : '') + (m.opponent || '') + ' ' + m.rounds_won + '–' + m.rounds_lost) + '"></span>').join('');
+  const card = c => '<div class="mapcard' + (c.pool.status === 'Ban' ? ' ban' : '') + '"><div class="row spread"><h3>' + esc(c.map) + '</h3>' +
+      (coach ? '<select class="poolsel" data-map="' + esc(c.map) + '"><option value="">Not set</option>' + POOL.map(p => '<option' + (p === c.pool.status ? ' selected' : '') + '>' + p + '</option>').join('') + '</select>'
+        : (c.pool.status ? '<span class="pill ' + POOL_PILL[c.pool.status] + '">' + esc(c.pool.status) + '</span>' : '')) + '</div>' +
+    (c.n ? '<div class="mbig"><b>' + pct(c.wp) + '</b><span class="muted small">' + c.w + 'W – ' + c.l + 'L · ' + c.n + ' played</span></div>' +
+      '<div class="bar"><div style="width:' + Math.round((c.wp || 0) * 100) + '%"></div></div>' +
+      '<div class="mgrid"><div><span>Rounds</span><b>' + pct(c.rp) + '</b><i>' + c.rw + '–' + c.rl + '</i></div><div><span>Attack</span><b>' + pct(c.ap) + '</b><i>' + (c.ap == null ? 'not logged' : c.aw + '–' + c.al) + '</i></div>' +
+      '<div><span>Defense</span><b>' + pct(c.dp) + '</b><i>' + (c.dp == null ? 'not logged' : c.dw + '–' + c.dl) + '</i></div><div><span>Pistols</span><b>' + (c.pn ? c.pw + '/' + c.pn : '–') + '</b><i>' + (c.pn ? pct(c.pw / c.pn) : 'not logged') + '</i></div></div>' +
+      '<div class="row small" style="margin-top:10px;gap:8px"><span class="muted">Form</span>' + dots(c) + '<span class="grow"></span><span class="muted">Last ' + (c.last ? fmtDate(c.last) : '–') + '</span></div>' +
+      (c.best ? '<div class="small" style="margin-top:6px"><span class="muted">Top fragger:</span> <b>' + esc(c.best.name) + '</b> ' + num(c.best.kd, 2) + ' K/D</div>' : '')
+      : '<p class="muted small" style="margin:10px 0">Not played' + (since ? ' in this period' : ' yet') + '.</p>') +
+    (coach ? '<input class="poolnote" data-map="' + esc(c.map) + '" placeholder="Coach note (e.g. need a B retake)" value="' + esc(c.pool.notes || '') + '">' : (c.pool.notes ? '<div class="small quote" style="margin-top:8px">' + esc(c.pool.notes) + '</div>' : '')) + '</div>';
+  el.innerHTML = '<div class="page-h"><div><h1>Map pool</h1><p class="muted">How we do on every map, from logged scrims and matches.' + (coach ? ' Set each map\'s status to plan your pool and veto.' : '') + '</p></div>' +
+    (coach ? '<button class="btn small" id="logm">Log a match</button>' : '') + '</div>' +
+    '<div class="row spread" style="margin-bottom:6px"><div class="tabs" style="margin:0">' + tab('#/maps/all/' + per, 'All games', typ === 'all') + tab('#/maps/scrim/' + per, 'Scrims', typ === 'scrim') + tab('#/maps/official/' + per, 'Official', typ === 'official') + '</div>' +
+    '<div class="tabs" style="margin:0">' + tab('#/maps/' + typ + '/all', 'All time', per === 'all') + tab('#/maps/' + typ + '/90', '90 days', per === '90') + tab('#/maps/' + typ + '/30', '30 days', per === '30') + '</div></div>' +
+    '<div class="kpis">' + kpi(all.w + '–' + all.l, 'Map record') + kpi(pct(all.wp), 'Map win %') + kpi(pct(all.rp), 'Round win %') + kpi(best ? esc(best.map) : '–', 'Best map') + kpi(worst && worst !== best ? esc(worst.map) : '–', 'Weakest map') + '</div>' +
+    (matches.length ? panel('Veto helper', '', '<div class="row" style="gap:18px;align-items:flex-start"><div class="grow"><div class="lbl small muted">PICK</div>' + (picks.length ? picks.map(c => '<div><b>' + esc(c.map) + '</b> <span class="small muted">' + pct(c.wp) + ' over ' + c.n + '</span></div>').join('') : '<div class="small muted">Need 2+ games on a map with a winning record.</div>') + '</div>' +
+      '<div class="grow"><div class="lbl small muted">BAN</div>' + (bans.length ? bans.map(c => '<div><b>' + esc(c.map) + '</b> <span class="small muted">' + (c.pool.status === 'Ban' ? 'set as ban' : pct(c.wp) + ' over ' + c.n) + '</span></div>').join('') : '<div class="small muted">No weak maps yet.</div>') + '</div>' +
+      '<div class="grow"><div class="lbl small muted">NOT PLAYED</div><div class="small">' + (cards.filter(c => !c.n && c.pool.status !== 'Ban').map(c => esc(c.map)).join(', ') || '—') + '</div></div></div>') : '') +
+    (matches.length || coach ? '<div class="mapgrid">' + cards.filter(c => c.n || c.pool.status).map(card).join('') + '</div>' +
+      (cards.some(c => !c.n && !c.pool.status) ? '<details class="item" style="margin-top:14px"' + (matches.length ? '' : ' open') + '><summary><span class="t">Other maps (' + cards.filter(c => !c.n && !c.pool.status).length + ')</span> <span class="muted small">not played' + (since ? ' in this period' : ' yet') + '</span></summary><div class="body"><div class="mapgrid">' +
+        cards.filter(c => !c.n && !c.pool.status).map(card).join('') + '</div></div></details>' : '') : empty('No matches logged yet. Results show up here after the coach logs scrim results (Schedule → Log result) or imports the Matches tab.'));
+  async function savePool(map, patch) {
+    const ex = poolOf(map);
+    try { if (ex.id) await db.update('map_pool', ex.id, patch); else { await db.insert('map_pool', [Object.assign({ map: map }, patch)]); const again = await db.list('map_pool', { limit: 100 }); pool.splice(0, pool.length, ...again); } toast('Saved'); }
+    catch (err) { toast('Error: ' + err.message); }
+  }
+  $$('.poolsel', el).forEach(s => s.onchange = async () => { await savePool(s.dataset.map, { status: s.value || null }); render(); });
+  $$('.poolnote', el).forEach(i => i.onchange = () => savePool(i.dataset.map, { notes: i.value.trim() || null }));
+  if ($('#logm')) $('#logm').onclick = () => editRow('matches', { date: todayISO(), type: 'Scrim', event: 'Scrim' }, () => { S.cache = {}; render(); });
+};
+function bestOnMap(rows) {
+  const by = new Map(); rows.forEach(r => { const n = normName(r.player); if (!n) return; if (!by.has(n)) by.set(n, { name: String(r.player).replace(/\s*\*\s*trial\s*$/i, ''), k: 0, d: 0 }); const x = by.get(n); x.k += Number(r.kills) || 0; x.d += Number(r.deaths) || 0; });
+  const list = Array.from(by.values()).filter(x => x.k + x.d > 0).map(x => Object.assign(x, { kd: x.d ? x.k / x.d : x.k })).sort((a, b) => b.kd - a.kd);
+  return list[0] || null;
+}
+
+// ---- Game plans
+const PLAN_SECTIONS = [['their_tendencies', 'Their tendencies'], ['comp', 'Our comp'], ['attack_plan', 'Attack plan'], ['defense_plan', 'Defense plan'], ['pistols', 'Pistol rounds'], ['anti_strat', 'Anti-strat'], ['notes', 'Notes']];
+function newPlanFrom(s) {
+  editRow('game_plans', { opponent: s.opponent, match_date: isoOf(new Date(s.starts_at)), maps: s.maps, scrim_id: s.id, published: true }, () => { S.cache = {}; render(); });
+}
+PAGES.plans = async function (el) {
+  const id = Number(location.hash.split('/')[2]) || null;
+  const coach = S.me.is_coach;
+  const plans = await db.list('game_plans', { order: 'match_date', asc: false, limit: 500 });
+  if (id) return planDetail(el, plans.find(p => p.id === id));
+  const today = todayISO();
+  const up = plans.filter(p => !p.match_date || String(p.match_date).slice(0, 10) >= today).reverse(), old = plans.filter(p => !up.includes(p));
+  const card = p => '<a class="plancard" href="#/plans/' + p.id + '"><div class="row spread"><div class="t">vs ' + esc(p.opponent) + '</div>' + (!p.published ? '<span class="pill purple">Draft</span>' : '') + '</div>' +
+    '<div class="row small" style="gap:6px;margin-top:6px">' + (p.match_date ? '<span class="muted">' + fmtDate(p.match_date) + ' · ' + relDays(p.match_date + 'T12:00:00') + '</span>' : '<span class="muted">No date</span>') +
+    mapList(p.maps).map(m => '<span class="pill">' + esc(m) + '</span>').join('') + '</div>' +
+    '<div class="small muted" style="margin-top:8px">' + PLAN_SECTIONS.filter(s => p[s[0]]).map(s => s[1]).join(' · ') + '</div></a>';
+  el.innerHTML = '<div class="page-h"><div><h1>Game plans</h1><p class="muted">One page per opponent: how they play, our comp, our plan, and what to do if it goes wrong. Read it before the match.</p></div>' +
+    (coach ? '<button class="btn small" id="newplan">New game plan</button>' : '') + '</div>' +
+    '<h2>Coming up</h2>' + (up.length ? '<div class="plangrid">' + up.map(card).join('') + '</div>' : empty(coach ? 'No game plans yet. Make one from a booked scrim (Schedule) or with “New game plan”.' : 'No game plans for upcoming matches yet.')) +
+    (old.length ? '<h2 style="margin-top:22px">Past</h2><div class="plangrid">' + old.map(card).join('') + '</div>' : '');
+  if ($('#newplan')) $('#newplan').onclick = () => editRow('game_plans', { published: true }, () => { S.cache = {}; render(); });
+};
+async function planDetail(el, p) {
+  if (!p) { el.innerHTML = empty('That game plan isn\'t here any more.', '<a class="btn small" href="#/plans">All game plans</a>'); return; }
+  const coach = S.me.is_coach;
+  const [scout, comps, matches, scrims] = await Promise.all([can('scouting') ? cached('opponent_scouting') : [], can('scouting') ? cached('comp_notes') : [], can('team_stats') ? cached('matches') : [], p.scrim_id ? listScrims() : []]);
+  const sc = scout.filter(r => sameOpp(r.opponent, p.opponent)), cn = comps.filter(r => sameOpp(r.team, p.opponent));
+  const vs = matches.filter(m => sameOpp(m.opponent, p.opponent));
+  const scrim = scrims.find(s => s.id === p.scrim_id);
+  const maps = mapList(p.maps);
+  const intel = [];
+  if (vs.length) { const st = mapStats(vs); intel.push(panel('Our record vs them', '', '<div class="mini-kpis">' + kpi(st.w + '–' + st.l, 'Maps') + kpi(pct(st.rp), 'Rounds') + '</div>' +
+    vs.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 6).map(m => '<div class="small row" style="gap:8px"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span><b>' + esc(m.map) + '</b> ' + m.rounds_won + '–' + m.rounds_lost + '<span class="muted">' + (m.date ? fmtDate(m.date) : '') + '</span></div>').join(''))); }
+  if (maps.length && can('team_stats')) intel.push(panel('Our form on these maps', '<a class="small" href="#/maps">Map pool →</a>', maps.map(m => { const st = mapStats(matches.filter(x => String(x.map).toLowerCase() === m.toLowerCase()));
+    return '<div class="row small" style="gap:8px;margin:4px 0"><b style="min-width:80px">' + esc(m) + '</b>' + (st.n ? '<span>' + pct(st.wp) + ' win</span><span class="muted">' + st.w + '–' + st.l + ' · atk ' + pct(st.ap) + ' · def ' + pct(st.dp) + '</span>' : '<span class="muted">not played yet</span>') + '</div>'; }).join('')));
+  if (sc.length) intel.push(panel('Scouting notes', '<a class="small" href="#/scouting">All →</a>', sc.map(r => '<div class="scout"><div class="row small" style="gap:6px">' + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + '</div>' +
+    [['veto', 'Veto'], ['fav_attack_site', 'Favourite attack site'], ['defense_setup', 'Defense setup'], ['pistol_plan', 'Pistol plan'], ['after_losing', 'After losing a round'], ['star_player', 'Star player'], ['weakness', 'Weakness to attack']]
+      .filter(k => r[k[0]]).map(k => '<div class="small"><span class="muted">' + k[1] + ':</span> ' + inlineMd(r[k[0]]) + '</div>').join('') + '</div>').join('')));
+  if (cn.length) intel.push(panel('Comps they ran', '', cn.map(r => '<div class="small" style="margin:4px 0"><b>' + [r.a1, r.a2, r.a3, r.a4, r.a5].filter(Boolean).map(esc).join(', ') + '</b>' + (r.map ? ' <span class="pill">' + esc(r.map) + '</span>' : '') + (r.weaknesses ? '<div class="muted">' + inlineMd(r.weaknesses) + '</div>' : '') + '</div>').join('')));
+  const secs = PLAN_SECTIONS.filter(s => p[s[0]]);
+  el.innerHTML = '<div class="page-h"><div><a href="#/plans" class="small">← All game plans</a><h1 style="margin-top:6px">Game plan vs ' + esc(p.opponent) + '</h1>' +
+    '<div class="row small" style="gap:6px">' + (p.match_date ? '<span class="muted">' + fmtDate(p.match_date) + ' · ' + relDays(p.match_date + 'T12:00:00') + '</span>' : '') + (scrim ? '<span class="muted">' + esc(fmtWhen(scrim.starts_at)) + '</span>' : '') +
+    maps.map(m => '<span class="pill">' + esc(m) + '</span>').join('') + (!p.published ? '<span class="pill purple">Draft — players can\'t see this yet</span>' : '') + '</div></div>' +
+    (coach ? '<div class="row"><button class="btn small ghost" id="pub">' + (p.published ? 'Hide from players' : 'Publish to players') + '</button><button class="btn small" id="pedit">Edit</button><button class="btn small danger" id="pdel">Delete</button></div>' : '') + '</div>' +
+    '<div class="plan-grid"><div class="col">' + (secs.length ? secs.map(s => panel(s[1], '', '<div class="md">' + md(p[s[0]]) + '</div>')).join('') : empty('This plan is empty so far.' + (coach ? ' Click Edit to fill it in.' : ''))) + '</div>' +
+    '<div class="col">' + (intel.length ? intel.join('') : panel('Intel', '', '<p class="muted small">No scouting notes or past games vs ' + esc(p.opponent) + ' yet. Scouting notes with the same opponent name show up here automatically.</p>')) + '</div></div>';
+  if (coach) {
+    $('#pedit').onclick = () => editRow('game_plans', p, () => { S.cache = {}; render(); });
+    $('#pub').onclick = async () => { await db.update('game_plans', p.id, { published: !p.published }); toast(p.published ? 'Hidden from players' : 'Published'); render(); };
+    $('#pdel').onclick = async () => { if (!confirm('Delete this game plan?')) return; await db.remove('game_plans', p.id); location.hash = '#/plans'; };
+  }
+}
+
+// ---- Work on: is the mistake coming back?
+function workTrack(w) {
+  const seen = Array.isArray(w.seen) ? w.seen : [];
+  const dates = [w.date].concat(seen.map(s => s.date)).filter(Boolean).map(d => String(d).slice(0, 10)).sort();
+  const last = dates[dates.length - 1] || null;
+  const fixedAt = w.fixed_at ? String(w.fixed_at).slice(0, 10) : null;
+  return { times: Math.max(1, dates.length), dates: dates, last: last, fixedAt: fixedAt, cameBack: !!w.came_back, cleanSince: w.status === 'Fixed' && fixedAt && !(last > fixedAt) };
+}
+function workProgressHtml(w) {
+  const t = workTrack(w);
+  const bits = [];
+  if (t.cameBack) bits.push('<span class="pill red">Came back</span>');
+  if (t.times > 1) bits.push('<span class="pill ' + (t.times >= 3 ? 'red' : 'yellow') + '">Seen ' + t.times + '×</span>');
+  const dots = t.dates.length > 1 ? '<span class="tdots">' + t.dates.map(d => '<span class="fdot l" title="' + esc(fmtDate(d)) + '"></span>').join('') + (t.cleanSince ? '<span class="fdot w" title="Fixed"></span>' : '') + '</span>' : '';
+  const txt = t.cleanSince ? 'Fixed ' + fmtDate(t.fixedAt) + ' · not seen since ✓' : t.times > 1 && t.last ? 'Last seen ' + relDays(t.last + 'T12:00:00') : '';
+  if (!bits.length && !txt) return '';
+  return '<div class="wprog row small">' + bits.join('') + dots + (txt ? '<span class="muted">' + txt + '</span>' : '') + '</div>';
+}
+function seenAgain(w, refresh) {
+  openModal('<h2>Seen again</h2><p class="small muted">Log that this mistake showed up again. ' + (w.status === 'Fixed' ? 'It\'s marked fixed, so it will reopen and be flagged “Came back”.' : 'The player sees how often it keeps happening.') + '</p>' +
+    '<div class="quote small" style="margin-bottom:12px">' + inlineMd(w.issue || '') + '</div><form id="sa"><label class="f"><span>Date</span><input type="date" name="date" value="' + todayISO() + '" required></label>' +
+    '<label class="f"><span>Where (VOD / scrim)</span><input name="source" placeholder="e.g. Scrim vs Night Owls, Lotus"></label><div class="row"><button class="btn">Save</button><button type="button" class="btn ghost" data-close>Cancel</button></div></form>', m => {
+    $('#sa', m).onsubmit = async e => {
+      e.preventDefault();
+      const seen = (Array.isArray(w.seen) ? w.seen : []).concat([{ date: e.target.date.value, source: e.target.source.value.trim() || null }]);
+      const patch = { seen: seen };
+      if (w.status === 'Fixed') { patch.status = 'Open'; patch.came_back = true; }
+      try { await db.update('work_on', w.id, patch); closeModal(); S.cache = {}; toast(patch.came_back ? 'Reopened — flagged as came back' : 'Logged'); refresh(); } catch (err) { toast('Error: ' + err.message); }
+    };
+  });
+}
+function workSummary(items, coach) {
+  const month = addDays(todayISO(), -30);
+  const fixedRecent = items.filter(w => w.status === 'Fixed' && w.fixed_at && String(w.fixed_at).slice(0, 10) >= month).length;
+  const back = items.filter(w => w.came_back && w.status !== 'Fixed').length;
+  const repeat = items.filter(w => w.status !== 'Fixed' && workTrack(w).times >= 3).length;
+  let html = '<div class="kpis">' + kpi(items.filter(w => w.status !== 'Fixed' && w.status !== 'Working on it').length, 'Open') + kpi(items.filter(w => w.status === 'Working on it').length, 'Working on it') +
+    kpi(fixedRecent, 'Fixed (30 days)') + kpi(back, 'Came back') + kpi(repeat, 'Seen 3+ times') + '</div>';
+  if (coach) {
+    const by = groupBy(items.filter(w => !isTeamWide(w)), 'player');
+    if (by.length) html += panel('Progress by player', '', '<div class="tablewrap"><table><thead><tr><th>Player</th><th class="num">Open</th><th class="num">Working</th><th class="num">Fixed (30d)</th><th class="num">Came back</th><th>Keeps happening</th></tr></thead><tbody>' +
+      by.map(([p, list]) => { const rep = list.filter(w => w.status !== 'Fixed').map(w => [w, workTrack(w).times]).sort((a, b) => b[1] - a[1])[0];
+        return '<tr><td><a href="#/workon/' + encodeURIComponent(p) + '"><b>' + esc(p) + '</b></a></td><td class="num">' + list.filter(w => w.status !== 'Fixed' && w.status !== 'Working on it').length + '</td><td class="num">' + list.filter(w => w.status === 'Working on it').length +
+          '</td><td class="num">' + list.filter(w => w.status === 'Fixed' && w.fixed_at && String(w.fixed_at).slice(0, 10) >= month).length + '</td><td class="num">' + list.filter(w => w.came_back && w.status !== 'Fixed').length + '</td><td class="small">' +
+          (rep && rep[1] > 1 ? esc(String(rep[0].issue || '').slice(0, 70)) + ' <span class="pill ' + (rep[1] >= 3 ? 'red' : 'yellow') + '">' + rep[1] + '×</span>' : '<span class="muted">—</span>') + '</td></tr>'; }).join('') + '</tbody></table></div>');
+  }
+  return html;
+}
+
 // ----- cached member list for the leaderboard (names/roles of teammates)
 const _origCached = cached;
 cached = async function (table, opts) {
@@ -1573,7 +1975,7 @@ cached = async function (table, opts) {
 };
 
 // expose pure helpers for tests
-window.__TEAMHUB__ = { md: md, planImport: planImport, coerce: coerce, compAnalysis: compAnalysis, calcStreak: calcStreak, parseCSV: parseCSV, TABLES: TABLES, normName: normName };
+window.__TEAMHUB__ = { md: md, planImport: planImport, mergeWork: mergeWork, coerce: coerce, compAnalysis: compAnalysis, calcStreak: calcStreak, parseCSV: parseCSV, TABLES: TABLES, normName: normName };
 
 if (!window.__TEAMHUB_NO_BOOT__) boot();
 })();
