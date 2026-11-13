@@ -712,7 +712,9 @@ PAGES.home = async function (el) {
   const roundDiff = roundsFor - roundsAgainst;
   const mapCount = new Set(matchRows.map(m => m.map).filter(Boolean)).size;
   const recentForm = matchRows.slice(0, 5);
-  const performanceHtml = can('team_stats')
+  const canSeeTeamStats = can('team_stats');
+  const performanceHtml = S.me && S.me.approved
+    ? (canSeeTeamStats
     ? '<section class="command-center"><div class="command-head"><div><div class="eyebrow">TEAM PERFORMANCE</div><h2>Command center</h2><p class="muted small">' + (matchRows.length ? 'A quick read on your recorded match results.' : 'Your team overview will build as results are logged.') + '</p></div><a class="btn small ghost" href="#/team/matches">Match history →</a></div>' +
       (matchRows.length
         ? '<div class="command-kpis">' +
@@ -723,6 +725,7 @@ PAGES.home = async function (el) {
           '</div>'
         : '<div class="command-empty"><div><b>No match results yet</b><p class="small muted">Log your first map result to unlock win rate, round differential, and recent form.</p></div>' + (isStaff() ? '<a class="btn small" href="#/coach/data">Add match results</a>' : '') + '</div>') +
       '</section>'
+    : '<section class="command-center"><div class="command-head"><div><div class="eyebrow">TEAM HUB</div><h2>Command center</h2><p class="muted small">Your team dashboard is ready. Performance analytics are hidden by your team visibility settings.</p></div></div></section>')
     : '';
   const byUser = new Map(todayRows.map(r => [r.user_id, r]));
   const joined = players.filter(p => p.user_id);
