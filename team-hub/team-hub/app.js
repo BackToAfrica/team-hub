@@ -389,6 +389,7 @@ const NAV = [
   { r: 'stats', label: 'My stats', sec: 'my_stats', i: 'chart', g: 'Team' },
   { r: 'workon', label: 'Work on', sec: 'reviews', i: 'target', g: 'Team' },
   { r: 'live', label: 'Live match', sec: 'scouting', i: 'bolt', g: 'Prepare' },
+  { r: 'prep', label: 'Match prep center', sec: 'scouting', i: 'target', g: 'Prepare' },
   { r: 'plans', label: 'Game plans', sec: 'scouting', i: 'flag', g: 'Prepare' },
   { r: 'veto', label: 'Veto simulator', sec: 'team_stats', i: 'swap', g: 'Prepare' },
   { r: 'maps', label: 'Map pool', sec: 'team_stats', i: 'map', g: 'Prepare' },
@@ -1997,6 +1998,70 @@ async function planDetail(el, p) {
     $('#pdel').onclick = async () => { if (!confirm('Delete this game plan?')) return; await db.remove('game_plans', p.id); location.hash = '#/plans'; };
   }
 }
+
+
+ 
+// ---- Match preparation command center
+PAGES.prep = async function (el) {
+  const coach = isStaff();
+  const [scrim, plans, scouting, comps, matches, pool, lineupRows, team] = await Promise.all([
+    nextScrim().catch(() => null),
+    can('scouting') ? db.list('game_plans', { order: 'match_date', asc: true, limit: 300 }) : [],
+    can('scouting') ? cached('opponent_scouting') : [],
+    can('scouting') ? cached('comp_notes') : [],
+    can('team_stats') ? cached('matches') : [],
+    can('team_stats') ? db.list('map_pool', { limit: 100 }) : [],
+    can('playbook') ? db.list('lineups', { order: 'created_at', asc: false, limit: 1000 }) : [],
+    teamPlayers()
+  ]);
+  const opponent = scrim && scrim.opponent ? String(scrim.opponent) : '';
+  const plan = (scrim && plans.find(p => p.scrim_id === scrim.id)) ||
+    (opponent && plans.find(p => sameOpp(p.opponent, opponent))) ||
+    plans.find(p => p.match_date && String(p.match_date).slice(0, 10) >= todayISO()) || null;
+  const scoutRows = opponent ? scouting.filter(s => sameOpp(s.opponent, opponent)) : [];
+  const compRows = opponent ? comps.filter(s => sameOpp(s.team, opponent)) : [];
+  const h2h = opponent ? matches.filter(m => sameOpp(m.opponent, opponent)) : [];
+  const maps = mapList((scrim && scrim.maps) || (plan && plan.maps) || '');
+  const activePlayers = team.players.filter(p => !p.bench);
+  const ready = [
+    { label: 'Opponent scouting', done: scoutRows.length > 0, href: '#/scouting', detail: scoutRows.length ? scoutRows.length + ' report(s) saved' : 'No opponent report linked yet' },
+    { label: 'Game plan', done: !!plan, href: '#/plans', detail: plan ? 'Plan ' + (plan.published ? 'published' : 'draft') : 'No plan linked to this match' },
+    { label: 'Map veto', done: !!(localStore('th_veto') || {}).steps?.length, href: '#/veto', detail: ((localStore('th_veto') || {}).steps || []).length ? 'Veto has progress saved on this device' : 'Veto not started on this device' },
+    { label: 'Agent compositions', done: maps.length > 0 && maps.every(m => compRows.some(x => String(x.map || '').toLowerCase() === m.toLowerCase())), href: '#/comps', detail: compRows.length ? compRows.length + ' opponent comp note(s) saved' : 'No opponent comps saved' },
+    { label: 'Utility lineups', done: maps.length > 0 && maps.every(m => lineupRows.some(x => String(x.map || '').toLowerCase() === m.toLowerCase())), href: '#/lineups', detail: lineupRows.length ? lineupRows.length + ' lineup(s) in library' : 'No lineups saved' }
+  ];
+  const done = ready.filter(x => x.done).length;
+  const linkCard = (href, title, desc, action) => '<a class="prep-link" href="' + href + '"><div><b>' + title + '</b><p class="small muted">' + desc + '</p></div><span>' + action + ' →</span></a>';
+  const opponentLabel = opponent ? 'vs ' + esc(opponent) : 'No upcoming opponent';
+  const mapStatsHtml = maps.length ? maps.map(m => {
+    const rows = matches.filter(x => String(x.map || '').toLowerCase() === m.toLowerCase());
+    const w = rows.filter(isWin).length, l = rows.length - w;
+    return '<div class="prep-map"><b>' + esc(m) + '</b><span>' + (rows.length ? w + '–' + l + ' · ' + pct(w / rows.length) : 'No results logged') + '</span></div>';
+  }).join('') : '<p class="muted small">Add maps to the upcoming scrim or game plan to see map-specific preparation here.</p>';
+  el.innerHTML = '<div class="page-h"><div><div class="eyebrow">Team operations</div><h1>Match preparation center</h1><p class="muted">One place to prepare the opponent, map veto, comps, utility, and match-day plan.</p></div>' +
+    (coach ? '<a class="btn small" href="#/plans">Create game plan</a>' : '') + '</div>' +
+    '<section class="prep-hero"><div><div class="eyebrow">Next scheduled match</div><h2>' + opponentLabel + '</h2><p class="muted">' +
+      (scrim ? esc(fmtWhen(scrim.starts_at)) + (scrim.format ? ' · ' + esc(scrim.format) : '') : 'No upcoming planned scrim found. Add one in Schedule to build a match-specific checklist.') +
+      '</p><div class="row" style="gap:7px;margin-top:12px">' + maps.map(m => '<span class="pill">' + esc(m) + '</span>').join('') + '</div></div>' +
+      '<div class="prep-progress"><b>' + done + '/' + ready.length + '</b><span>prep areas ready</span><div class="bar"><div style="width:' + Math.round(done / ready.length * 100) + '%"></div></div></div></section>' +
+    '<div class="kpis">' + kpi(activePlayers.length, 'Active roster') + kpi(plan ? 'Ready' : 'Missing', 'Game plan') + kpi(scoutRows.length, 'Scouting reports') + kpi(h2h.length, 'Past maps vs opponent') + '</div>' +
+    '<div class="prep-grid"><section class="card panel"><div class="card-h"><h2>Preparation checklist</h2><span class="small muted">' + done + ' of ' + ready.length + ' complete</span></div>' +
+      '<div class="prep-checks">' + ready.map(x => '<a class="prep-check" href="' + x.href + '"><span class="prep-check-icon ' + (x.done ? 'done' : '') + '">' + (x.done ? '✓' : '•') + '</span><span class="grow"><b>' + x.label + '</b><small>' + x.detail + '</small></span><span class="muted">→</span></a>').join('') + '</div></section>' +
+      '<section class="card panel"><div class="card-h"><h2>Match-day tools</h2></div><div class="prep-tools">' +
+        linkCard('#/veto', 'Map veto simulator', 'Build a BO1 or BO3 veto using map results and opponent intel.', 'Open') +
+        linkCard('#/comps', 'Agent comp checker', 'Review saved compositions and counter notes.', 'Open') +
+        linkCard('#/lineups', 'Utility lineup library', 'Find map, agent, side, and site-specific utility.', 'Open') +
+        linkCard('#/live', 'Live match mode', 'Round score, timeout cards, and the active game plan.', 'Open') +
+        linkCard('#/scouting', 'Opponent scouting', 'Track tendencies, star players, weaknesses, and pistol plans.', 'Open') +
+        linkCard('#/plans', 'Game plans', 'Publish the match plan and anti-strat for players.', 'Open') +
+      '</div></section></div>' +
+    '<section class="card panel"><div class="card-h"><h2>Map preparation</h2><a class="small" href="#/maps">Full map pool →</a></div><div class="prep-maps">' + mapStatsHtml + '</div></section>' +
+    (opponent && h2h.length ? '<section class="card panel"><div class="card-h"><h2>Head-to-head vs ' + esc(opponent) + '</h2><span class="small muted">' + h2h.length + ' map(s) logged</span></div>' +
+      '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Map</th><th>Score</th><th>Result</th></tr></thead><tbody>' +
+      h2h.slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0,8).map(m => '<tr><td>' + (m.date ? fmtDate(m.date) : '—') + '</td><td>' + esc(m.map || '—') + '</td><td>' + esc(m.rounds_won) + '–' + esc(m.rounds_lost) + '</td><td><span class="pill ' + (isWin(m) ? 'green' : 'red') + '">' + (isWin(m) ? 'Win' : 'Loss') + '</span></td></tr>').join('') +
+      '</tbody></table></div></section>' : '') +
+    '<p class="small muted">Preparation status is based on saved Team Hub records. Veto progress is currently stored in this browser; the other modules use your team database and existing permissions.</p>';
+};
 
 // ---- Work on: is the mistake coming back?
 function workTrack(w) {
