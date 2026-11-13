@@ -101,9 +101,9 @@ function F(k, label, type, aliases, extra) { return Object.assign({ k: k, label:
 
 // Each table: label, sheet tab name in the coach's workbook, fields (with sheet header aliases), required key.
 const TABLES = {
-  announcements: { label: 'Announcements', order: 'created_at', req: 'title', fields: [
+  announcements: { label: 'Announcements', builtin: true, order: 'created_at', req: 'title', fields: [
     F('title', 'Title'), F('body', 'Message', 'long'), F('pinned', 'Pinned', 'bool')] },
-  drills: { label: 'Daily drills', sheet: 'Daily Routine', order: 'sort', asc: true, req: 'drill', fields: [
+  drills: { label: 'Daily drills', builtin: true, sheet: 'Daily Routine', order: 'sort', asc: true, req: 'drill', fields: [
     F('role', 'Role', 'select', ['Role'], { options: ['Everyone', 'Duelist', 'Initiator', 'Controller', 'Sentinel', 'Flex', 'IGL'] }),
     F('block', 'Block'), F('minutes', 'Minutes'), F('drill', 'Drill'), F('how', 'How to do it', 'long'), F('success', 'Success looks like', 'long'), F('sort', 'Order', 'int', ['Order', 'Sort'])] },
   matches: { label: 'Matches', sheet: 'Matches', order: 'date', req: 'map', fields: [
@@ -127,7 +127,7 @@ const TABLES = {
     F('utility', 'Utility used', 'long', ['Utility used (who / what / where / when)', 'Utility used']), F('timeline', 'How it played out', 'long', ['How it played out (timeline)', 'How it played out']),
     F('why', 'Why it won', 'long', ['Why it won (or lost)', 'Why it won']), F('how_we_run', 'How we run it', 'long', ['How we run it (role by role)', 'How we run it']),
     F('how_to_beat', 'How to beat it', 'long'), F('set_play', 'Set Play name'), F('valoplant', 'ValoPlant', 'link'), F('watch', 'Watch it', 'link'), F('taken_from', 'Taken from')] },
-  guides: { label: 'Guides (comms etc.)', order: 'sort', asc: true, req: 'title', fields: [
+  guides: { label: 'Guides (comms etc.)', builtin: true, order: 'sort', asc: true, req: 'title', fields: [
     F('title', 'Title'), F('section', 'Shown in', 'select', ['Section'], { options: ['comms', 'playbook', 'reviews', 'scouting'] }), F('body', 'Text (markdown)', 'long'), F('sort', 'Order', 'int')] },
   reviews: { label: 'VOD reviews', order: 'date', req: 'title', fields: [
     F('date', 'Date', 'date'), F('title', 'Title'), F('opponent', 'Opponent'), F('type', 'Type'), F('map', 'Map'), F('vod', 'VOD link', 'link'),
@@ -139,7 +139,7 @@ const TABLES = {
   comp_notes: { label: 'Comp notes', sheet: 'Comp Notes', order: 'date', req: 'a1', fields: [
     F('date', 'Date', 'date'), F('a1', 'Agent 1'), F('a2', 'Agent 2'), F('a3', 'Agent 3'), F('a4', 'Agent 4'), F('a5', 'Agent 5'), F('map', 'Map'),
     F('team', 'Team that ran it'), F('result', 'Result vs it'), F('weaknesses', 'Weaknesses seen / what beat it', 'long'), F('watch', 'Watch it', 'link')] },
-  agent_counters: { label: 'Agent counters', sheet: 'Agent Counters', order: 'agent', asc: true, req: 'agent', fields: [
+  agent_counters: { label: 'Agent counters', shared: true, sheet: 'Agent Counters', order: 'agent', asc: true, req: 'agent', fields: [
     F('agent', 'Agent'), F('role', 'Role'), F('brings', 'What they bring', 'long'), F('weaknesses', 'Weaknesses', 'long'),
     F('beat_attack', 'Beat them when they attack', 'long', ['Beat them when THEY attack (we defend)', 'Beat them when they attack']),
     F('beat_defense', 'Beat them when they defend', 'long', ['Beat them when THEY defend (we attack)', 'Beat them when they defend']),
@@ -149,13 +149,16 @@ const TABLES = {
   roster: { label: 'Roster slots', sheet: 'Roster', order: 'name', asc: true, req: 'name', merge: true, fields: [
     F('name', 'Name', 'text', ['Player (IGN)', 'Player', 'Name']), F('ign', 'In-game name', 'text', ['Player (IGN)', 'IGN', 'In-game name']), F('discord', 'Discord username', 'text', ['Discord username', 'Discord']),
     F('role', 'Role', 'select', ['Role'], { options: ROLES }), F('is_igl', 'IGL', 'bool', ['IGL?', 'IGL']), F('is_trial', 'Trial', 'bool', ['Trial', 'Trial player'])] },
-  patch_notes: { label: 'Patch notes', sheet: 'Patch Notes', order: 'date', req: 'changed', fields: [
+  patch_notes: { label: 'Patch notes', shared: true, sheet: 'Patch Notes', order: 'date', req: 'changed', fields: [
     F('patch', 'Patch'), F('date', 'Date', 'date'), F('category', 'Category'), F('item', 'Agent / item'), F('effect', 'Effect'), F('changed', 'What changed', 'long'), F('coach_notes', 'Coach notes', 'long')] }
 };
 
 // --------------------------------------------------------------- database
 let sb = null;
-const S = { session: null, me: null, route: 'home', cache: {} };
+const S = { session: null, me: null, team: null, route: 'home', cache: {} };
+function teamName() { return (S.team && S.team.name) || TEAM; }
+// can this person edit a table (shared tables: owner only)
+function canEdit(table) { return !!(S.me && S.me.is_coach && (!(TABLES[table] || {}).shared || S.me.is_admin)); }
 
 const db = {
   async list(table, opts) {
@@ -185,7 +188,9 @@ const db = {
     if (error) throw error;
   },
   async clear(table) {
-    const { error } = await sb.from(table).delete().gt('id', 0);
+    let q = sb.from(table).delete().gt('id', 0);
+    if (!(TABLES[table] || {}).shared) q = q.eq('team_id', S.me.team_id); // never touch other teams or built-in rows
+    const { error } = await q;
     if (error) throw error;
   }
 };
@@ -208,6 +213,8 @@ async function boot() {
     $('#app').innerHTML = '<div class="auth"><div class="card"><h1>Can\'t load</h1><p>Couldn\'t load the Supabase library. Check your internet connection and refresh.</p></div></div>';
     return;
   }
+  const jm = location.hash.match(/^#\/join\/([A-Za-z0-9]+)/);
+  if (jm) { try { localStorage.setItem('th_join', jm[1].toUpperCase()); } catch (e) {} location.hash = '#/home'; }
   sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, { auth: { flowType: 'pkce', detectSessionInUrl: true, persistSession: true } });
   sb.auth.onAuthStateChange(async (event, session) => {
     if (event === 'PASSWORD_RECOVERY') { S.session = session; renderSetPassword(); return; }
@@ -227,6 +234,12 @@ async function loadMe() {
   if (!S.session) { S.me = null; return; }
   const { data } = await sb.from('profiles').select('*').eq('id', S.session.user.id).limit(1);
   S.me = (data && data[0]) || null;
+  S.team = null;
+  if (S.me && S.me.team_id) {
+    const { data: t } = await sb.from('teams').select('*').eq('id', S.me.team_id).limit(1);
+    S.team = (t && t[0]) || null;
+    if (S.me.is_admin) { S.me.is_coach = true; S.me.approved = true; } // the app owner can run any team they open
+  }
 }
 
 async function start() {
@@ -246,7 +259,7 @@ async function discordLogin() {
 function renderAuth(mode, msg) {
   if (!CFG.ALLOW_EMAIL_LOGIN && mode !== 'email') {
     $('#app').innerHTML = '<div class="auth"><h1>' + esc(TEAM) + '</h1><div class="card stack" style="text-align:center">' +
-      '<h2>Sign in</h2><p class="muted">Use your Discord account. The first time, you\'ll pick your name on the team roster.</p>' +
+      '<h2>Sign in</h2><p class="muted">Use your Discord account. New here? After signing in you can register your team, or join your team with the code your coach gives you.</p>' +
       '<button class="btn discord" id="dlogin" style="width:100%">' + DISCORD_SVG + ' Continue with Discord</button>' +
       (msg ? '<div class="' + (msg.ok ? 'ok' : 'error') + '">' + esc(msg.text) + '</div>' : '') + '</div></div>';
     $('#dlogin').onclick = discordLogin;
@@ -327,15 +340,19 @@ function navAllowed(n) {
 
 function render() {
   const me = S.me;
+  if (me && !me.team_id) { renderOnboard(); return; }
   if (!me || !me.approved) { renderPending(); return; }
   const items = NAV.filter(navAllowed);
-  if (!items.some(n => n.r === S.route) && !(S.route === 'coach' && me.is_coach) && S.route !== 'account') S.route = 'home';
+  if (!items.some(n => n.r === S.route) && !(S.route === 'coach' && me.is_coach) && !(S.route === 'owner' && me.is_admin) && S.route !== 'account') S.route = 'home';
+  const ownerView = me.is_admin && S.team && S.team.owner_id !== me.id;
   const navHtml = items.map(n => '<a href="#/' + n.r + '" class="' + (S.route === n.r ? 'active' : '') + '">' + esc(n.label) + '</a>').join('') +
     (me.is_coach ? '<div class="sep"></div><a href="#/coach" class="' + (S.route === 'coach' ? 'active' : '') + '">Coach panel</a>' : '') +
+    (me.is_admin ? '<a href="#/owner" class="' + (S.route === 'owner' ? 'active' : '') + '">Owner: all teams</a>' : '') +
     '<div class="sep"></div><a href="#/account" class="' + (S.route === 'account' ? 'active' : '') + '">Account</a>';
   $('#app').innerHTML =
-    '<div class="topbar"><button id="menubtn" aria-label="Menu">☰</button><b>' + esc(TEAM) + '</b></div>' +
-    '<div class="layout"><aside class="sidebar" id="sidebar"><div class="brand"><span class="dot"></span>' + esc(TEAM) + '</div>' +
+    '<div class="topbar"><button id="menubtn" aria-label="Menu">☰</button><b>' + esc(teamName()) + '</b></div>' +
+    '<div class="layout"><aside class="sidebar" id="sidebar"><div class="brand"><span class="dot"></span>' + esc(teamName()) + (S.team && S.team.tag ? ' <span class="pill">' + esc(S.team.tag) + '</span>' : '') + '</div>' +
+    (ownerView ? '<a href="#/owner" class="warnbox small" style="display:block;margin:0 10px 10px;text-decoration:none">Owner view — you\'re looking at another team. Back to all teams</a>' : '') +
     '<nav class="nav">' + navHtml + '</nav>' +
     '<div class="me">' + (me.avatar_url ? '<img src="' + esc(me.avatar_url) + '" alt="" style="width:28px;height:28px;border-radius:50%;vertical-align:middle;margin-right:6px">' : '') + esc(me.display_name || me.email) + '<br>' + esc([me.discord ? '@' + me.discord : '', me.ign, me.is_coach ? 'Coach' : me.role].filter(Boolean).join(' · ')) + '</div></aside>' +
     '<main class="main" id="main"><div class="muted">Loading…</div></main></div>';
@@ -343,6 +360,49 @@ function render() {
   $$('#sidebar a').forEach(a => a.addEventListener('click', () => $('#sidebar').classList.remove('open')));
   const page = PAGES[S.route] || PAGES.home;
   Promise.resolve(page($('#main'))).catch(err => { $('#main').innerHTML = '<div class="card error">Something went wrong: ' + esc(err.message || err) + '</div>'; console.error(err); });
+}
+
+// ------------------------------------------------- no team yet: join or register
+async function renderOnboard() {
+  const me = S.me;
+  let invites = [];
+  try { const { data } = await sb.rpc('my_invites'); invites = data || []; } catch (e) { invites = []; }
+  let saved = ''; try { saved = localStorage.getItem('th_join') || ''; } catch (e) {}
+  const who = me.discord ? '@' + me.discord : (me.display_name || me.email || '');
+  $('#app').innerHTML = '<div class="auth" style="max-width:520px"><h1>' + esc(TEAM) + '</h1>' +
+    '<div class="card stack"><h2>Welcome' + (me.display_name ? ', ' + esc(me.display_name.split(' ')[0]) : '') + '</h2><p class="muted small">Signed in as <b>' + esc(who) + '</b>.</p>' +
+    (invites.length ? '<div class="stack"><b>You\'ve been added to a roster</b>' + invites.map((v, i) =>
+      '<button class="check" style="width:100%;text-align:left;color:inherit;font:inherit" data-inv="' + i + '"><div><div class="t">Join ' + esc(v.team_name) + (v.team_tag ? ' [' + esc(v.team_tag) + ']' : '') + '</div><div class="small muted">as ' + esc(v.slot_name) + '</div></div></button>').join('') + '</div>' : '') +
+    '<form id="joinf" class="stack"><b>Join your team</b><p class="small muted">Ask your coach for the team code (Coach panel → Team &amp; invites).</p>' +
+    '<div class="row"><input name="code" placeholder="Team code, e.g. 4F9A2C" value="' + esc(saved) + '" style="max-width:220px;text-transform:uppercase" required><button class="btn">Join</button></div></form>' +
+    '<div class="sep" style="border-top:1px solid var(--line);margin:6px 0"></div>' +
+    '<form id="createf" class="stack"><b>Register a new team</b><p class="small muted">For coaches. You\'ll be the coach and get a code to invite your players. Each team\'s data is private to that team (the app owner can also open it to run and support the app).</p>' +
+    '<label class="f"><span>Team name</span><input name="name" required minlength="2" maxlength="40"></label>' +
+    '<label class="f"><span>Tag (optional)</span><input name="tag" maxlength="6" style="max-width:120px;text-transform:uppercase"></label>' +
+    '<button class="btn">Create team</button></form>' +
+    '<div id="obmsg" class="error"></div><button class="btn ghost" id="out">Sign out</button></div></div>';
+  const fail = err => { $('#obmsg').textContent = (err && err.message) || String(err); };
+  $('#out').onclick = () => sb.auth.signOut();
+  $$('[data-inv]').forEach(b => b.onclick = async () => {
+    const v = invites[Number(b.dataset.inv)];
+    const { data, error } = await sb.rpc('claim_roster', { rid: v.slot_id });
+    if (error) return fail(error);
+    if (data !== 'approved' && data !== 'pending') return fail('Couldn\'t join (' + data + '). Ask your coach to check your Discord name on the roster.');
+    toast('Welcome to ' + v.team_name + '!'); start();
+  });
+  $('#joinf').onsubmit = async e => {
+    e.preventDefault();
+    const { data, error } = await sb.rpc('join_team', { p_code: e.target.code.value.trim().toUpperCase() });
+    if (error) return fail(error);
+    try { localStorage.removeItem('th_join'); } catch (er) {}
+    toast('Joined ' + data); S._autoTried = false; start();
+  };
+  $('#createf').onsubmit = async e => {
+    e.preventDefault();
+    const { error } = await sb.rpc('create_team', { p_name: e.target.name.value, p_tag: e.target.tag.value || null });
+    if (error) return fail(error);
+    toast('Team created'); location.hash = '#/coach/team'; start();
+  };
 }
 
 async function renderPending() {
@@ -366,11 +426,12 @@ async function renderPending() {
   const list = open.length ? '<div class="stack" style="margin-top:12px">' + open.map(r =>
       '<button class="check" style="width:100%;text-align:left;color:inherit;font:inherit" data-claim="' + r.id + '"><div><div class="t">' + esc(r.name) + '</div>' +
       '<div class="small muted">' + esc([r.ign && r.ign !== r.name ? 'IGN ' + r.ign : '', r.role, r.is_igl ? 'IGL' : '', r.is_trial ? 'Trial' : ''].filter(Boolean).join(' · ')) + '</div></div></button>').join('') + '</div>'
-    : (mine ? '' : '<p class="muted">There are no open spots on the roster yet. Ask your coach to add you (Coach panel → Members → Roster slots), then tap refresh.</p>');
-  $('#app').innerHTML = '<div class="auth"><h1>' + esc(TEAM) + '</h1><div class="card">' + body + list +
+    : (mine ? '' : '<p class="muted">There are no open spots on ' + esc(teamName()) + '\'s roster yet. Ask your coach to add you (Coach panel → Members → Roster slots), then tap refresh.</p>');
+  $('#app').innerHTML = '<div class="auth"><h1>' + esc(teamName()) + '</h1><div class="card">' + body + list +
     '<div id="claimmsg" class="error" style="margin-top:8px"></div>' +
-    '<div class="row" style="margin-top:14px"><button class="btn" id="refresh">Refresh</button><button class="btn ghost" id="out">Sign out</button></div></div></div>';
+    '<div class="row" style="margin-top:14px"><button class="btn" id="refresh">Refresh</button><button class="btn ghost" id="leave">Wrong team? Leave</button><button class="btn ghost" id="out">Sign out</button></div></div></div>';
   $('#refresh').onclick = () => { S._autoTried = false; start(); };
+  $('#leave').onclick = async () => { if (!confirm('Leave ' + teamName() + '?')) return; const { error } = await sb.rpc('leave_team'); if (error) { $('#claimmsg').textContent = error.message; return; } start(); };
   $('#out').onclick = () => sb.auth.signOut();
   $$('[data-claim]').forEach(b => b.onclick = async () => {
     const r = open.find(x => x.id === Number(b.dataset.claim));
@@ -703,11 +764,17 @@ PAGES.account = async function (el) {
   const me = S.me;
   el.innerHTML = '<h1>Account</h1><div class="card stack" style="max-width:520px"><div><b>' + esc(me.display_name || '') + '</b><div class="muted small">' + esc(me.email || '') + '</div></div>' +
     '<div class="small">In-game name: <b>' + esc(me.ign || '—') + '</b> · Role: <b>' + esc(me.role || '—') + '</b>' + (me.is_igl ? ' · IGL' : '') + '</div>' +
+    '<div class="small">Team: <b>' + esc(teamName()) + '</b>' + (me.is_coach ? ' · Coach' : '') + '</div>' +
     '<p class="muted small">The coach manages your name, role and what you can see.</p>' +
     '<form id="pw" class="stack"><label class="f"><span>New password</span><input name="p" type="password" minlength="6" required></label><button class="btn ghost">Change password</button></form>' +
-    '<button class="btn danger" id="so">Sign out</button></div>' +
+    '<div class="row"><button class="btn danger" id="so">Sign out</button><button class="btn ghost" id="lt">Leave ' + esc(teamName()) + '</button></div></div>' +
     '<div class="card" style="max-width:520px;margin-top:14px"><b>Install the app</b><p class="small muted">Phone: open this site in Safari (iPhone) or Chrome (Android) → Share / menu → <b>Add to Home Screen</b>. Computer: in Chrome or Edge click the install icon at the right end of the address bar.</p></div>';
   $('#so').onclick = () => sb.auth.signOut();
+  $('#lt').onclick = async () => {
+    if (!confirm('Leave ' + teamName() + '? You\'ll lose access to its data until a coach lets you back in.')) return;
+    const { error } = await sb.rpc('leave_team'); if (error) { toast(error.message); return; }
+    location.hash = '#/home'; start();
+  };
   $('#pw').onsubmit = async e => { e.preventDefault(); const { error } = await sb.auth.updateUser({ password: e.target.p.value }); toast(error ? error.message : 'Password changed'); e.target.reset(); };
 };
 
@@ -715,10 +782,10 @@ PAGES.account = async function (el) {
 PAGES.coach = async function (el) {
   if (!S.me.is_coach) { el.innerHTML = '<p>Coach only.</p>'; return; }
   const sub = location.hash.split('/')[2] || 'members';
-  const tabs = [['members', 'Members'], ['checkins', 'Check-ins'], ['announce', 'Announcements'], ['data', 'Content & import']];
+  const tabs = [['members', 'Members'], ['team', 'Team & invites'], ['checkins', 'Check-ins'], ['announce', 'Announcements'], ['data', 'Content & import']];
   el.innerHTML = '<h1>Coach panel</h1><div class="tabs">' + tabs.map(t => '<button data-t="' + t[0] + '" class="' + (t[0] === sub ? 'active' : '') + '">' + t[1] + '</button>').join('') + '</div><div id="cp"></div>';
   $$('.tabs button', el).forEach(b => b.onclick = () => { location.hash = '#/coach/' + b.dataset.t; });
-  await COACH[sub]($('#cp'));
+  await (COACH[sub] || COACH.members)($('#cp'));
 };
 
 const COACH = {};
@@ -758,8 +825,8 @@ COACH.members = async function (box) {
   });
   wireRoster(box, roster, () => COACH.members(box));
   $$('[data-remove]', box).forEach(b => b.onclick = async () => {
-    if (!confirm('Remove this person from the team? They\'ll lose access (their login still exists).')) return;
-    const { error } = await sb.from('profiles').delete().eq('id', b.dataset.remove);
+    if (!confirm('Remove this person from the team? They lose access to the team (they can join again with the code if you approve them).')) return;
+    const { error } = await sb.rpc('remove_member', { uid: b.dataset.remove });
     toast(error ? error.message : 'Removed'); COACH.members(box);
   });
   $('#applyall').onclick = async () => {
@@ -835,6 +902,59 @@ function wireRoster(box, roster, refresh) {
   });
 }
 
+COACH.team = async function (box) {
+  const t = S.team || {};
+  const link = location.origin + location.pathname + '#/join/' + (t.join_code || '');
+  box.innerHTML = '<div class="card stack" style="max-width:620px"><h2>Invite players</h2>' +
+    '<p class="small muted">Send players this link or the code. After they sign in with Discord they land on your team and pick their roster slot. If you put their Discord username on a roster slot (Members tab) they\'re let in automatically; otherwise you approve them.</p>' +
+    '<div class="row"><div class="kpi"><div class="v" style="letter-spacing:3px">' + esc(t.join_code || '—') + '</div><div class="l">Team code</div></div></div>' +
+    '<div class="row"><input id="jl" value="' + esc(link) + '" readonly><button class="btn small" id="cp1">Copy link</button></div>' +
+    '<div><button class="btn ghost small" id="nc">Make a new code</button> <span class="small muted">Old code and link stop working.</span></div></div>' +
+    '<div class="card stack" style="max-width:620px;margin-top:14px"><h2>Team details</h2><form id="tf" class="stack">' +
+    '<label class="f"><span>Team name</span><input name="name" value="' + esc(t.name || '') + '" required minlength="2" maxlength="40"></label>' +
+    '<label class="f"><span>Tag</span><input name="tag" value="' + esc(t.tag || '') + '" maxlength="6" style="max-width:120px;text-transform:uppercase"></label>' +
+    '<button class="btn">Save</button></form><p class="small muted">Only your team can see your team\'s data. Other teams using the app can\'t see it. The app owner can open any team to run and support the app.</p></div>';
+  $('#cp1').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link copied'); } catch (e) { $('#jl').select(); toast('Press Ctrl+C to copy'); } };
+  $('#nc').onclick = async () => {
+    if (!confirm('Make a new code? Anyone with the old code or link won\'t be able to join with it.')) return;
+    const { error } = await sb.rpc('new_join_code'); if (error) { toast(error.message); return; }
+    await loadMe(); COACH.team(box);
+  };
+  $('#tf').onsubmit = async e => {
+    e.preventDefault();
+    const { error } = await sb.from('teams').update({ name: e.target.name.value.trim(), tag: e.target.tag.value.trim().toUpperCase() || null }).eq('id', t.id);
+    toast(error ? error.message : 'Saved'); if (!error) { await loadMe(); render(); }
+  };
+};
+
+PAGES.owner = async function (el) {
+  if (!S.me.is_admin) { el.innerHTML = '<p>Owner only.</p>'; return; }
+  const { data, error } = await sb.rpc('admin_teams');
+  if (error) { el.innerHTML = '<div class="card error">' + esc(error.message) + '</div>'; return; }
+  const teams = data || [];
+  el.innerHTML = '<h1>All teams</h1><p class="muted small">Every team registered on the app. Open one to see it exactly as its coach does (you count as a coach there). You\'re currently in <b>' + esc(teamName()) + '</b>.</p>' +
+    '<div class="kpis">' + kpi(teams.length, 'Teams') + kpi(teams.reduce((s, t) => s + Number(t.members || 0), 0), 'Members') + kpi(teams.reduce((s, t) => s + Number(t.checkins_7d || 0), 0), 'Check-ins (7 days)') + '</div>' +
+    (teams.length ? '<div class="tablewrap" style="margin-top:14px"><table><thead><tr><th>Team</th><th>Created by</th><th class="num">Coaches</th><th class="num">Members</th><th class="num">Waiting</th><th class="num">Check-ins 7d</th><th>Last check-in</th><th>Created</th><th></th></tr></thead><tbody>' +
+      teams.map(t => '<tr' + (S.team && t.id === S.team.id ? ' style="background:rgba(255,70,85,.08)"' : '') + '><td><b>' + esc(t.name) + '</b>' + (t.tag ? ' <span class="pill">' + esc(t.tag) + '</span>' : '') + '<div class="small muted">code ' + esc(t.join_code) + '</div></td><td>' + esc(t.owner || '—') + '</td>' +
+        '<td class="num">' + t.coaches + '</td><td class="num">' + t.members + '</td><td class="num">' + t.waiting + '</td><td class="num">' + t.checkins_7d + '</td><td>' + (t.last_checkin ? fmtDate(t.last_checkin) : '—') + '</td><td>' + fmtDate(t.created_at) + '</td>' +
+        '<td style="white-space:nowrap">' + (S.team && t.id === S.team.id ? '<span class="pill green">Open now</span>' : '<button class="btn small" data-open="' + t.id + '">Open</button>') + ' <button class="btn small danger" data-tdel="' + t.id + '">Delete</button></td></tr>').join('') +
+      '</tbody></table></div>' : '<p class="muted">No teams yet.</p>') +
+    '<p class="small muted" style="margin-top:14px">To make a team of your own, open your team and use it as normal. Deleting a team removes all of its data and sends its members back to the join screen.</p>';
+  $$('[data-open]', el).forEach(b => b.onclick = async () => {
+    const { error: e2 } = await sb.rpc('admin_open_team', { tid: Number(b.dataset.open) });
+    if (e2) { toast(e2.message); return; }
+    location.hash = '#/home'; start();
+  });
+  $$('[data-tdel]', el).forEach(b => b.onclick = async () => {
+    const t = teams.find(x => x.id === Number(b.dataset.tdel));
+    const typed = prompt('This deletes "' + t.name + '" and ALL its data (stats, reviews, check-ins…). It can\'t be undone.\n\nType the team name to confirm:');
+    if (typed == null) return;
+    if (typed.trim() !== t.name) { toast('Name didn\'t match — nothing deleted'); return; }
+    const { error: e3 } = await sb.rpc('admin_delete_team', { tid: t.id });
+    toast(e3 ? e3.message : 'Team deleted'); await loadMe(); if (!S.me.team_id) { start(); return; } PAGES.owner(el);
+  });
+};
+
 COACH.checkins = async function (box) {
   const [{ data: members }, rows] = await Promise.all([
     sb.from('profiles').select('*').eq('approved', true).order('display_name'),
@@ -868,11 +988,14 @@ COACH.announce = async function (box) {
   const rows = await db.list('announcements');
   box.innerHTML = '<div class="card"><form id="an"><label class="f"><span>Title</span><input name="title" required></label>' +
     '<label class="f"><span>Message (you can use **bold**, lists and links)</span><textarea name="body"></textarea></label>' +
-    '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="pinned"> Pin to the top</label><button class="btn">Post</button></form></div>' +
-    '<h2 style="margin-top:18px">Posted</h2>' + (rows.length ? rows.map(a => '<div class="card row spread" style="margin-bottom:8px"><div><b>' + esc(a.title) + '</b> ' + (a.pinned ? '<span class="pill red">Pinned</span>' : '') + '<div class="small muted">' + fmtDate(a.created_at) + '</div></div><button class="btn small danger" data-del="' + a.id + '">Delete</button></div>').join('') : '<p class="muted">Nothing yet.</p>');
+    '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="pinned"> Pin to the top</label>' +
+    (S.me.is_admin ? '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="everyone"> Show to every team (owner)</label>' : '') + '<button class="btn">Post</button></form></div>' +
+    '<h2 style="margin-top:18px">Posted</h2>' + (rows.length ? rows.map(a => '<div class="card row spread" style="margin-bottom:8px"><div><b>' + esc(a.title) + '</b> ' + (a.pinned ? '<span class="pill red">Pinned</span>' : '') + (a.team_id == null ? ' <span class="pill">All teams</span>' : '') + '<div class="small muted">' + fmtDate(a.created_at) + '</div></div>' + (a.team_id == null && !S.me.is_admin ? '' : '<button class="btn small danger" data-del="' + a.id + '">Delete</button>') + '</div>').join('') : '<p class="muted">Nothing yet.</p>');
   $('#an').onsubmit = async e => {
     e.preventDefault();
-    try { await db.insert('announcements', [{ title: e.target.title.value, body: e.target.body.value, pinned: e.target.pinned.checked }]); S.cache = {}; toast('Posted'); COACH.announce(box); }
+    const rec = { title: e.target.title.value, body: e.target.body.value, pinned: e.target.pinned.checked };
+    if (e.target.everyone && e.target.everyone.checked) rec.team_id = null;
+    try { await db.insert('announcements', [rec]); S.cache = {}; toast('Posted'); COACH.announce(box); }
     catch (err) { toast(err.message); }
   };
   $$('[data-del]', box).forEach(b => b.onclick = async () => { if (!confirm('Delete this announcement?')) return; await db.remove('announcements', Number(b.dataset.del)); S.cache = {}; COACH.announce(box); });
@@ -880,7 +1003,7 @@ COACH.announce = async function (box) {
 
 // ---- Content manager + workbook import
 COACH.data = async function (box) {
-  const keys = Object.keys(TABLES);
+  const keys = Object.keys(TABLES).filter(canEdit);
   const counts = await Promise.all(keys.map(async k => { const { count } = await sb.from(k).select('id', { count: 'exact', head: true }); return count || 0; }));
   const cur = location.hash.split('/')[3] || '';
   box.innerHTML = '<div class="card"><h2>Import from your coaching workbook</h2>' +
@@ -891,7 +1014,7 @@ COACH.data = async function (box) {
     keys.map((k, i) => '<a class="card" style="text-decoration:none;color:inherit' + (k === cur ? ';border-color:var(--accent)' : '') + '" href="#/coach/data/' + k + '"><b>' + esc(TABLES[k].label) + '</b><div class="muted small">' + counts[i] + ' rows</div></a>').join('') +
     '</div><div id="tm" style="margin-top:18px"></div>';
   $('#wb').onchange = e => { const f = e.target.files[0]; if (f) importFile(f, $('#wbout'), () => COACH.data(box)); };
-  if (cur && TABLES[cur]) await tableManager(cur, $('#tm'), () => COACH.data(box));
+  if (cur && TABLES[cur] && canEdit(cur)) await tableManager(cur, $('#tm'), () => COACH.data(box));
 };
 
 async function tableManager(table, box, refresh) {
@@ -901,10 +1024,13 @@ async function tableManager(table, box, refresh) {
   box.innerHTML = '<div class="row spread"><h2>' + esc(cfg.label) + '</h2><div class="row"><button class="btn small" id="add">Add row</button>' +
     '<button class="btn small ghost" id="clr">Delete all</button></div></div>' +
     (rows.length ? '<div class="tablewrap"><table><thead><tr>' + show.map(f => '<th>' + esc(f.label) + '</th>').join('') + '<th></th></tr></thead><tbody>' +
-      rows.map(r => '<tr>' + show.map(f => '<td>' + (fieldVal(f, r[f.k]) || '') + '</td>').join('') + '<td style="white-space:nowrap"><button class="btn small ghost" data-edit="' + r.id + '">Edit</button> <button class="btn small danger" data-del="' + r.id + '">×</button></td></tr>').join('') +
+      rows.map(r => '<tr>' + show.map(f => '<td>' + (fieldVal(f, r[f.k]) || '') + '</td>').join('') + '<td style="white-space:nowrap">' +
+        (cfg.builtin && r.team_id == null && !S.me.is_admin ? '<span class="pill" title="Shown to every team; add your own rows to customise">Built-in</span>' :
+          (cfg.builtin && r.team_id == null ? '<span class="pill">Built-in</span> ' : '') + '<button class="btn small ghost" data-edit="' + r.id + '">Edit</button> <button class="btn small danger" data-del="' + r.id + '">×</button>') + '</td></tr>').join('') +
       '</tbody></table></div>' : '<p class="muted">Empty.</p>');
   $('#add').onclick = () => editRow(table, null, refresh);
-  $('#clr').onclick = async () => { if (!confirm('Delete ALL ' + rows.length + ' rows in ' + cfg.label + '? This can\'t be undone.')) return; await db.clear(table); S.cache = {}; toast('Cleared'); refresh(); };
+  const mineCount = cfg.shared ? rows.length : rows.filter(r => r.team_id != null).length;
+  $('#clr').onclick = async () => { if (!confirm('Delete ALL ' + mineCount + ' of your team\'s rows in ' + cfg.label + (cfg.builtin ? ' (built-in rows stay)' : '') + '? This can\'t be undone.')) return; await db.clear(table); S.cache = {}; toast('Cleared'); refresh(); };
   $$('[data-edit]', box).forEach(b => b.onclick = () => editRow(table, rows.find(r => r.id === Number(b.dataset.edit)), refresh));
   $$('[data-del]', box).forEach(b => b.onclick = async () => { if (!confirm('Delete this row?')) return; await db.remove(table, Number(b.dataset.del)); S.cache = {}; refresh(); });
 }
@@ -1067,7 +1193,7 @@ async function mergeRoster(rows) {
 async function importFile(file, out, done) {
   out.innerHTML = '<p class="muted">Reading ' + esc(file.name) + '…</p>';
   let plan;
-  try { plan = planImport(await readWorkbook(file)); } catch (err) { out.innerHTML = '<p class="error">' + esc(err.message) + '</p>'; return; }
+  try { plan = planImport(await readWorkbook(file)).filter(p => canEdit(p.table)); } catch (err) { out.innerHTML = '<p class="error">' + esc(err.message) + '</p>'; return; }
   if (!plan.length) { out.innerHTML = '<p class="error">Didn\'t find any tabs I recognise. Tab names need to match (e.g. "Player Stats", "Set Plays").</p>'; return; }
   out.innerHTML = '<div class="tablewrap"><table><thead><tr><th>Import?</th><th>Tab</th><th>Goes to</th><th class="num">Rows</th><th>Mode</th></tr></thead><tbody>' +
     plan.map((p, i) => '<tr><td><input type="checkbox" data-i="' + i + '"' + (p.rows.length ? ' checked' : '') + '></td><td>' + esc(p.sheet) + '</td><td>' + esc(TABLES[p.table].label) +
