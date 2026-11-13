@@ -240,12 +240,23 @@ async function boot() {
     window.addEventListener('hashchange', () => { if (/^#\/t\//.test(location.hash)) renderPublic(); else location.reload(); });
     await renderPublic(); return;
   }
-  sb.auth.onAuthStateChange(async (event, session) => {
+  // Keep the auth-state callback synchronous. Supabase holds an internal
+  // auth lock while notifying listeners; awaiting database work (start/loadMe)
+  // inside this callback can deadlock sign-in on some clients.
+  sb.auth.onAuthStateChange((event, session) => {
     if (event === 'PASSWORD_RECOVERY') { S.session = session; renderSetPassword(); return; }
     if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
       const had = S.session && S.session.user && S.session.user.id;
       S.session = session;
-      if (event !== 'SIGNED_IN' || had !== (session && session.user && session.user.id)) await start();
+      if (event !== 'SIGNED_IN' || had !== (session && session.user && session.user.id)) {
+        setTimeout(() => {
+          start().catch(err => {
+            console.error('Team Hub failed to refresh after an auth change:', err);
+            const app = $('#app');
+            if (app) app.innerHTML = '<div class="auth"><div class="card error">Could not load your account. Please refresh and try again.</div></div>';
+          });
+        }, 0);
+      }
     }
   });
   const { data } = await sb.auth.getSession();
