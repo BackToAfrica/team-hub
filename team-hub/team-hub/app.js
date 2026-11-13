@@ -887,11 +887,15 @@ PAGES.stats = async function (el) {
   const mine = ps.filter(r => normName(r.player) === normName(me.ign));
   const util = uu.filter(r => normName(r.player) === normName(me.ign));
   const k = sum(mine, 'kills'), d = sum(mine, 'deaths'), hs = sum(mine, 'hs_kills');
+  const recent = mine.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 5);
+  const agents = groupBy(mine, 'agent').filter(([name]) => name).map(([agent, rows]) => ({ agent, maps: rows.length, kills: sum(rows, 'kills'), deaths: sum(rows, 'deaths'), kd: sum(rows, 'deaths') ? sum(rows, 'kills') / sum(rows, 'deaths') : sum(rows, 'kills'), hs: sum(rows, 'kills') ? sum(rows, 'hs_kills') / sum(rows, 'kills') : null })).sort((a, b) => b.maps - a.maps);
   el.innerHTML = '<div class="page-h"><div><h1>My stats</h1><p class="muted">Matched to in-game name <b>' + esc(me.ign) + '</b>. Stats come from reviewed scrims and matches.</p></div></div>' +
     (mine.length || util.length ? '' : empty('No stats logged for you yet.')) +
     '<div class="kpis">' + kpi(num(d ? k / d : k, 2), 'K/D') + kpi(k, 'Kills') + kpi(pct(k ? hs / k : null), 'Headshot kill %') + kpi(pct(avg(mine, 'true_hs_pct')), 'True HS %') +
     kpi(sum(mine, 'first_kills') + ' / ' + sum(mine, 'first_deaths'), 'First kills / deaths') + kpi(num(avg(util, 'util_per_round'), 1), 'Util per round') +
     kpi(pct(avg(util, 'util_before_fight')), 'Util before first fight') + kpi(mine.length, 'Maps') + '</div>' +
+    (recent.length ? panel('Recent form · last ' + recent.length + ' maps', '', '<div class="kpis compact-kpis">' + kpi(num(avg(recent, 'kd'), 2), 'Average K/D') + kpi(sum(recent, 'first_kills') + ' / ' + sum(recent, 'first_deaths'), 'First kills / deaths') + kpi(pct(sum(recent, 'kills') ? sum(recent, 'hs_kills') / sum(recent, 'kills') : null), 'Headshot kill %') + '</div>') : '') +
+    (agents.length ? panel('Agent performance', '', '<div class="tablewrap"><table><thead><tr><th>Agent</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">HS kill %</th></tr></thead><tbody>' + agents.map(a => '<tr><td><b>' + esc(a.agent) + '</b></td><td class="num">' + a.maps + '</td><td class="num">' + num(a.kd, 2) + '</td><td class="num">' + pct(a.hs) + '</td></tr>').join('') + '</tbody></table></div>') : '') +
     (mine.length ? panel('Map by map', '', statsTable(mine, ['date', 'map', 'agent', 'kills', 'deaths', 'assists', 'kd', 'hs_kill_pct', 'true_hs_pct', 'first_kills', 'first_deaths', 'notes'], TABLES.player_stats)) : '') +
     (util.length ? panel('Utility usage', '', statsTable(util, ['date', 'map', 'agent', 'rounds', 'util_per_round', 'q_casts', 'e_casts', 'c_casts', 'ults_used', 'ults_available', 'died_with_util', 'util_before_fight', 'source', 'notes'], TABLES.utility_usage)) : '');
 };
@@ -931,7 +935,9 @@ PAGES.team = async function (el) {
       '</tbody></table></div><p class="small muted">Sorted by K/D. Stats come from reviewed scrims and matches.</p>' : empty('No player stats logged yet. Import them from your sheet (Coach panel → Content & import).');
   } else {
     const maps = groupBy(matches, 'map').map(([m, list]) => { const w = list.filter(x => Number(x.rounds_won) > Number(x.rounds_lost)).length; return { m: m, n: list.length, w: w, rw: sum(list, 'rounds_won'), rl: sum(list, 'rounds_lost') }; }).sort((a, b) => b.n - a.n);
-    body = matches.length ? '<div class="kpis">' + kpi(won + '–' + (matches.length - won), 'Map record') + kpi(pct(rw + rl ? rw / (rw + rl) : null), 'Round win %') + kpi(matches.length, 'Maps played') + '</div>' +
+    const atkW = sum(matches, 'atk_won'), atkL = sum(matches, 'atk_lost'), defW = sum(matches, 'def_won'), defL = sum(matches, 'def_lost');
+    const pistolWins = sum(matches, 'pistols_won'), pistolMapsLogged = matches.filter(m => m.pistols_won != null && m.pistols_won !== '').length;
+    body = matches.length ? '<div class="kpis">' + kpi(won + '–' + (matches.length - won), 'Map record') + kpi(pct(rw + rl ? rw / (rw + rl) : null), 'Round win %') + kpi(matches.length, 'Maps played') + kpi(atkW + atkL ? pct(atkW / (atkW + atkL)) : '—', 'Attack round win %') + kpi(defW + defL ? pct(defW / (defW + defL)) : '—', 'Defense round win %') + kpi(pistolMapsLogged ? pistolWins + ' / ' + (pistolMapsLogged * 2) : '—', 'Pistol rounds won') + '</div>' +
       panel('By map', '', '<div class="tablewrap"><table><thead><tr><th>Map</th><th class="num">Played</th><th class="num">Won</th><th class="num">Win %</th><th class="num">Rounds</th></tr></thead><tbody>' +
         maps.map(x => '<tr><td><b>' + esc(x.m) + '</b></td><td class="num">' + x.n + '</td><td class="num">' + x.w + '</td><td class="num">' + pct(x.n ? x.w / x.n : null) + '</td><td class="num">' + x.rw + '–' + x.rl + '</td></tr>').join('') + '</tbody></table></div>') +
       panel('All matches', '', statsTable(matches, ['date', 'event', 'opponent', 'map', 'rounds_won', 'rounds_lost', 'start_side', 'vod_link', 'notes'], TABLES.matches))
