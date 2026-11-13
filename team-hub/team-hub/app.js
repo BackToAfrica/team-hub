@@ -379,7 +379,7 @@ function render() {
     '<div class="layout"><aside class="sidebar" id="sidebar"><div class="brand"><span class="dot"></span><span class="bn">' + esc(teamName()) + '</span>' + (S.team && S.team.tag ? '<span class="tag">' + esc(S.team.tag) + '</span>' : '') + '</div>' +
     (ownerView ? '<a href="#/owner" class="ownerbar">Owner view: another team.<br><b>Back to all teams</b></a>' : '') +
     '<nav class="nav">' + navHtml + '</nav>' +
-    '<a href="#/account" class="me' + (S.route === 'account' ? ' active' : '') + '">' + avatar(me, 34) + '<div class="grow"><div class="t">' + esc(me.display_name || me.discord || me.email) + '</div><div class="small muted">' +
+    '<a href="#/account" class="me' + (S.route === 'account' ? ' active' : '') + '">' + avatar(me, 34) + '<div class="grow"><div class="t">' + esc(nameOf(me)) + '</div><div class="small muted">' +
       esc([me.discord ? '@' + me.discord : '', me.is_coach ? 'Coach' : me.role].filter(Boolean).join(' · ')) + '</div></div></a></aside>' +
     '<main class="main" id="main"><div class="muted">Loading…</div></main></div>';
   $('#menubtn').onclick = () => $('#sidebar').classList.toggle('open');
@@ -394,9 +394,9 @@ async function renderOnboard() {
   let invites = [];
   try { const { data } = await sb.rpc('my_invites'); invites = data || []; } catch (e) { invites = []; }
   let saved = ''; try { saved = localStorage.getItem('th_join') || ''; } catch (e) {}
-  const who = me.discord ? '@' + me.discord : (me.display_name || me.email || '');
+  const who = nameOf(me);
   $('#app').innerHTML = '<div class="auth" style="max-width:520px"><h1>' + esc(TEAM) + '</h1>' +
-    '<div class="card stack"><h2>Welcome' + (me.display_name ? ', ' + esc(me.display_name.split(' ')[0]) : '') + '</h2><p class="muted small">Signed in as <b>' + esc(who) + '</b>.</p>' +
+    '<div class="card stack"><h2>Welcome, ' + esc(nameOf(me)) + '</h2><p class="muted small">Signed in as <b>' + esc(who) + '</b>.</p>' +
     (invites.length ? '<div class="stack"><b>You\'ve been added to a roster</b>' + invites.map((v, i) =>
       '<button class="check" style="width:100%;text-align:left;color:inherit;font:inherit" data-inv="' + i + '"><div><div class="t">Join ' + esc(v.team_name) + (v.team_tag ? ' [' + esc(v.team_tag) + ']' : '') + '</div><div class="small muted">as ' + esc(v.slot_name) + '</div></div></button>').join('') + '</div>' : '') +
     '<form id="joinf" class="stack"><b>Join your team</b><p class="small muted">Ask your coach for the team code (Coach panel → Team &amp; invites).</p>' +
@@ -441,7 +441,7 @@ async function renderPending() {
   } catch (e) { roster = []; }
   const mine = me ? roster.find(r => r.claimed_by === me.id) : null;
   const open = roster.filter(r => !r.claimed_by);
-  const who = me ? (me.discord ? '@' + me.discord : (me.display_name || me.email)) : '';
+  const who = me ? nameOf(me) : '';
   let body;
   if (mine) {
     body = '<h2>Waiting for the coach</h2><p>You picked <b>' + esc(mine.name) + '</b>' + (mine.role ? ' (' + esc(mine.role) + ')' : '') + '. The coach just needs to confirm it\'s you (signed in as <b>' + esc(who) + '</b>).</p>' +
@@ -522,7 +522,7 @@ const ROLE_PILL = { Duelist: 'red', Initiator: 'green', Controller: 'purple', Se
 function rolePill(r) { return r ? '<span class="pill ' + (ROLE_PILL[r] || '') + '">' + esc(r) + '</span>' : ''; }
 function avatar(p, size) {
   size = size || 36;
-  const name = (p && (p.display_name || p.name || p.ign || p.discord)) || '?';
+  const name = (p && (p.ign || p.name || p.discord)) || '?';
   const st = 'width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.4) + 'px';
   if (p && p.avatar_url) return '<img class="av" src="' + esc(p.avatar_url) + '" alt="" style="' + st + '">';
   const ini = String(name).trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
@@ -531,7 +531,8 @@ function avatar(p, size) {
 function panel(title, right, body, cls) {
   return '<section class="card panel ' + (cls || '') + '"><div class="card-h"><h2>' + title + '</h2>' + (right || '') + '</div>' + body + '</section>';
 }
-function firstName(p) { return ((p.display_name || p.discord || '').split(' ')[0]) || 'there'; }
+function nameOf(p) { return (p && (p.ign || p.name || (p.discord ? '@' + p.discord : ''))) || 'Player'; }
+function firstName(p) { return nameOf(p); }
 function empty(text, action) { return '<div class="empty"><p>' + text + '</p>' + (action || '') + '</div>'; }
 function statLine(n, l) { return '<div class="hs"><div class="v">' + n + '</div><div class="l">' + esc(l) + '</div></div>'; }
 function checkStatus(r) {
@@ -545,10 +546,10 @@ async function teamPlayers() {
   const byId = new Map(members.map(m => [m.id, m]));
   const out = roster.map(r => {
     const m = r.claimed_by ? byId.get(r.claimed_by) : null;
-    return { key: 'r' + r.id, name: r.name, ign: r.ign || (m && m.ign), role: r.role || (m && m.role), is_igl: r.is_igl, is_trial: r.is_trial,
+    return { key: 'r' + r.id, name: r.ign || (m && m.ign) || r.name, ign: r.ign || (m && m.ign), role: r.role || (m && m.role), is_igl: r.is_igl, is_trial: r.is_trial,
       discord: r.discord || (m && m.discord), avatar_url: m && m.avatar_url, user_id: m ? m.id : null, joined: !!(m && r.claim_status === 'approved'), rid: r.id, bench: r.status === 'Bench' };
   });
-  members.forEach(m => { if (!m.is_coach && !roster.some(r => r.claimed_by === m.id)) out.push({ key: 'u' + m.id, name: m.display_name || m.discord, ign: m.ign, role: m.role, is_igl: m.is_igl, is_trial: m.is_trial, discord: m.discord, avatar_url: m.avatar_url, user_id: m.id, joined: true }); });
+  members.forEach(m => { if (!m.is_coach && !roster.some(r => r.claimed_by === m.id)) out.push({ key: 'u' + m.id, name: nameOf(m), ign: m.ign, role: m.role, is_igl: m.is_igl, is_trial: m.is_trial, discord: m.discord, avatar_url: m.avatar_url, user_id: m.id, joined: true }); });
   const coaches = members.filter(m => m.is_coach);
   return { players: out.sort((a, b) => (a.is_trial ? 1 : 0) - (b.is_trial ? 1 : 0) || String(a.name).localeCompare(String(b.name))), coaches: coaches };
 }
@@ -684,7 +685,7 @@ PAGES.home = async function (el) {
   }
   // roster
   const rosterHtml = panel('The team', '<a class="small" href="#/team">Roster &amp; stats →</a>',
-    (team.coaches.length ? '<div class="small muted" style="margin-bottom:6px">Coach' + (team.coaches.length > 1 ? 'es' : '') + ': ' + team.coaches.map(c => esc(c.display_name || c.discord)).join(', ') + '</div>' : '') +
+    (team.coaches.length ? '<div class="small muted" style="margin-bottom:6px">Coach' + (team.coaches.length > 1 ? 'es' : '') + ': ' + team.coaches.map(c => esc(nameOf(c))).join(', ') + '</div>' : '') +
     (players.length ? '<div class="plist compact">' + players.slice().sort((a, b) => (a.bench ? 1 : 0) - (b.bench ? 1 : 0)).map(p => '<div class="prow' + (p.bench ? ' benched' : '') + '">' + avatar(p, 28) + '<div class="grow t">' + esc(p.name) + (p.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (p.is_trial ? ' <span class="pill yellow">Trial</span>' : '') + (p.bench ? ' <span class="pill">Bench</span>' : '') + '</div>' + rolePill(p.role) + '</div>').join('') + '</div>' : '<p class="muted small">No players yet.</p>'));
   const annHtml = panel('From the coach', coach ? '<a class="small" href="#/coach/announce">Post →</a>' : '',
     anns.length ? anns.slice(0, 5).map(a => '<div class="ann">' + (a.pinned ? '<span class="pill red">Pinned</span> ' : '') + '<b>' + esc(a.title) + '</b> <span class="muted small">' + fmtDate(a.created_at) + '</span><div class="md">' + md(a.body) + '</div></div>').join('') : '<p class="muted small">Nothing posted yet.</p>');
@@ -779,7 +780,7 @@ PAGES.team = async function (el) {
   const rw = sum(matches, 'rounds_won'), rl = sum(matches, 'rounds_lost');
   let body = '';
   if (tab === 'roster' || !showStats) {
-    body = (team.coaches.length ? '<div class="small muted" style="margin:4px 0 12px">Coaching staff: ' + team.coaches.map(c => '<span class="chip">' + avatar(c, 20) + esc(c.display_name || c.discord) + '</span>').join(' ') + '</div>' : '') +
+    body = (team.coaches.length ? '<div class="small muted" style="margin:4px 0 12px">Coaching staff: ' + team.coaches.map(c => '<span class="chip">' + avatar(c, 20) + esc(nameOf(c)) + '</span>').join(' ') + '</div>' : '') +
       (team.players.length ? ['Active roster', 'Bench'].map(sec => { const list = team.players.filter(p => (sec === 'Bench') === !!p.bench);
         if (sec === 'Bench' && !list.length && !S.me.is_coach) return '';
         return '<div class="sec-h"><h2>' + sec + ' <span class="muted small">' + list.length + '</span></h2>' + (sec === 'Bench' ? '<span class="small muted">Bench players keep their access and check-ins.</span>' : '') + '</div>' +
@@ -1091,7 +1092,7 @@ PAGES.patches = async function (el) {
 // ---- Account
 PAGES.account = async function (el) {
   const me = S.me;
-  el.innerHTML = '<div class="page-h"><h1>Account</h1></div><div class="card stack" style="max-width:520px"><div><b>' + esc(me.display_name || '') + '</b><div class="muted small">' + esc(me.email || '') + '</div></div>' +
+  el.innerHTML = '<div class="page-h"><h1>Account</h1></div><div class="card stack" style="max-width:520px"><div><b>' + esc(nameOf(me)) + '</b></div>' +
     '<div class="small">In-game name: <b>' + esc(me.ign || '—') + '</b> · Role: <b>' + esc(me.role || '—') + '</b>' + (me.is_igl ? ' · IGL' : '') + '</div>' +
     '<div class="small">Team: <b>' + esc(teamName()) + '</b>' + (me.is_coach ? ' · Coach' : '') + '</div>' +
     '<p class="muted small">The coach manages your name, role and what you can see.</p>' +
@@ -1141,7 +1142,7 @@ COACH.members = async function (box) {
     e.preventDefault();
     const id = f.dataset.id;
     const vis = {}; Object.keys(SECTIONS).forEach(k => vis[k] = !!f.querySelector('[data-vis="' + k + '"]').checked);
-    const patch = { display_name: f.display_name.value, ign: f.ign.value || null, role: f.role.value, is_igl: f.is_igl.checked, is_trial: f.is_trial.checked, approved: f.approved.checked, visibility: vis };
+    const patch = { ign: f.ign.value || null, role: f.role.value, is_igl: f.is_igl.checked, is_trial: f.is_trial.checked, approved: f.approved.checked, visibility: vis };
     if (f.is_coach) patch.is_coach = f.is_coach.checked;
     const { error } = await sb.from('profiles').update(patch).eq('id', id);
     toast(error ? 'Error: ' + error.message : 'Saved'); S.cache = {};
@@ -1168,15 +1169,14 @@ COACH.members = async function (box) {
 function memberCard(m, slot) {
   const me = m.id === S.me.id;
   const vis = m.visibility || {};
-  return '<details class="item"' + (!m.approved ? ' open' : '') + '><summary><div class="row spread"><div><span class="t">' + esc(m.display_name || m.email) + '</span> ' +
+  return '<details class="item"' + (!m.approved ? ' open' : '') + '><summary><div class="row spread"><div><span class="t">' + esc(nameOf(m)) + '</span> ' +
     (m.is_coach ? '<span class="pill red">Coach</span> ' : '') + (!m.approved ? '<span class="pill yellow">Waiting</span> ' : '') + (m.is_trial ? '<span class="pill yellow">Trial</span> ' : '') +
     '<span class="muted small">' + esc([m.discord ? '@' + m.discord : '', m.ign || 'no IGN', m.role || '', m.is_igl ? 'IGL' : ''].filter(Boolean).join(' · ')) + '</span>' +
     (slot ? ' <span class="pill ' + (slot.claim_status === 'approved' ? 'green' : 'yellow') + '">' + (slot.claim_status === 'approved' ? 'Linked to ' : 'Claims ') + esc(slot.name) + '</span>' : (m.is_coach ? '' : ' <span class="pill">No roster slot</span>')) + '</div>' +
     (!m.approved ? '<button class="btn small" data-approve="' + m.id + '">' + (slot ? 'Confirm' : 'Approve') + '</button>' : '') + '</div></summary>' +
-    '<div class="body"><form class="member" data-id="' + m.id + '"><div class="muted small" style="margin-bottom:8px">' + esc([m.discord ? 'Discord @' + m.discord : '', m.email || ''].filter(Boolean).join(' · ')) + ' · joined ' + fmtDate(m.created_at) + '</div>' +
+    '<div class="body"><form class="member" data-id="' + m.id + '"><div class="muted small" style="margin-bottom:8px">' + esc(m.discord ? 'Discord @' + m.discord : '') + ' · joined ' + fmtDate(m.created_at) + '</div>' +
     '<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">' +
-    '<label class="f"><span>Name</span><input name="display_name" value="' + esc(m.display_name || '') + '"></label>' +
-    '<label class="f"><span>In-game name (matches stats)</span><input name="ign" value="' + esc(m.ign || '') + '"></label>' +
+        '<label class="f"><span>In-game name (matches stats)</span><input name="ign" value="' + esc(m.ign || '') + '"></label>' +
     '<label class="f"><span>Role</span><select name="role">' + ROLES.map(r => '<option' + (r === m.role ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></label></div>' +
     '<div class="row" style="margin-bottom:10px">' +
     '<label class="row small"><input type="checkbox" name="approved"' + (m.approved ? ' checked' : '') + (me ? ' disabled' : '') + '> Approved</label>' +
@@ -1194,17 +1194,16 @@ function rosterTable(roster, members) {
     const who = r.claimed_by ? byId.get(r.claimed_by) : null;
     const status = !r.claimed_by ? '<span class="pill">Open</span>' : r.claim_status === 'approved' ? '<span class="pill green">Linked</span>' : '<span class="pill yellow">Waiting for you</span>';
     return '<tr data-rid="' + (r.id || '') + '">' +
-      '<td><input data-f="name" value="' + esc(r.name || '') + '" placeholder="Name"></td>' +
       '<td><input data-f="ign" value="' + esc(r.ign || '') + '" placeholder="In-game name"></td>' +
       '<td><input data-f="discord" value="' + esc(r.discord || '') + '" placeholder="discord username"></td>' +
       '<td><select data-f="role">' + ROLES.map(x => '<option' + (x === (r.role || 'Flex') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></td>' +
       '<td style="text-align:center"><input type="checkbox" data-f="is_igl"' + (r.is_igl ? ' checked' : '') + '></td>' +
       '<td style="text-align:center"><input type="checkbox" data-f="is_trial"' + (r.is_trial ? ' checked' : '') + '></td>' +
       '<td><select data-f="status" style="min-width:96px">' + ['Active', 'Bench'].map(x => '<option' + (x === (r.status || 'Active') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></td>' +
-      '<td>' + (r.id ? status + (who ? '<div class="small muted">' + esc(who.discord ? '@' + who.discord : who.display_name || '') + '</div>' : '') : '') + '</td>' +
+      '<td>' + (r.id ? status + (who ? '<div class="small muted">' + esc(nameOf(who)) + '</div>' : '') : '') + '</td>' +
       '<td style="white-space:nowrap">' + (r.id ? '<button class="btn small ghost" data-rsave>Save</button> ' + (r.claimed_by ? '<button class="btn small ghost" data-runlink>Unlink</button> <button class="btn small danger" data-rkick>Kick</button>' : '<button class="btn small danger" data-rdel title="Delete slot">×</button>') : '<button class="btn small" data-rsave>Add</button>') + '</td></tr>';
   };
-  return '<div class="tablewrap"><table><thead><tr><th>Name</th><th>In-game name</th><th>Discord username</th><th>Role</th><th>IGL</th><th>Trial</th><th>Roster</th><th>Status</th><th></th></tr></thead><tbody>' +
+  return '<div class="tablewrap"><table><thead><tr><th>In-game name</th><th>Discord username</th><th>Role</th><th>IGL</th><th>Trial</th><th>Roster</th><th>Status</th><th></th></tr></thead><tbody>' +
     roster.map(row).join('') + row({}) + '</tbody></table></div>';
 }
 function wireRoster(box, roster, refresh) {
@@ -1215,9 +1214,9 @@ function wireRoster(box, roster, refresh) {
   };
   $$('[data-rsave]', box).forEach(b => b.onclick = async () => {
     const tr = b.closest('tr'); const v = read(tr); const id = Number(tr.dataset.rid);
-    if (!v.name) { toast('Give the slot a name'); return; }
+    v.name = v.ign || v.discord; if (!v.name) { toast('Add an in-game name or Discord username'); return; }
     const res = id ? await sb.from('roster').update(v).eq('id', id) : await sb.from('roster').insert([v]);
-    if (!res.error && id) { const r = roster.find(x => x.id === id); if (r && r.claimed_by) await sb.from('profiles').update({ display_name: v.name, ign: v.ign, role: v.role, is_igl: v.is_igl, is_trial: v.is_trial }).eq('id', r.claimed_by); }
+    if (!res.error && id) { const r = roster.find(x => x.id === id); if (r && r.claimed_by) await sb.from('profiles').update({ ign: v.ign, role: v.role, is_igl: v.is_igl, is_trial: v.is_trial }).eq('id', r.claimed_by); }
     toast(res.error ? res.error.message : 'Saved'); S.cache = {}; refresh();
   });
   $$('[data-runlink]', box).forEach(b => b.onclick = async () => {
@@ -1228,7 +1227,7 @@ function wireRoster(box, roster, refresh) {
     toast('Unlinked'); refresh();
   });
   $$('[data-rkick]', box).forEach(b => b.onclick = () => { const r = roster.find(x => x.id === Number(b.closest('tr').dataset.rid));
-    kickPlayer({ name: r.name, rid: r.id, user_id: r.claimed_by }, refresh); });
+    kickPlayer({ name: nameOf(r), rid: r.id, user_id: r.claimed_by }, refresh); });
   $$('[data-rdel]', box).forEach(b => b.onclick = async () => {
     if (!confirm('Delete this roster slot?')) return;
     await sb.from('roster').delete().eq('id', Number(b.closest('tr').dataset.rid)); toast('Deleted'); refresh();
@@ -1296,10 +1295,10 @@ COACH.checkins = async function (box) {
   const days = []; for (let i = 6; i >= 0; i--) days.push(addDays(todayISO(), -i));
   const byKey = new Map(rows.map(r => [r.user_id + '|' + String(r.day).slice(0, 10), r]));
   const players = (members || []).filter(m => !m.is_coach || rows.some(r => r.user_id === m.id));
-  const name = id => { const m = (members || []).find(x => x.id === id); return m ? (m.display_name || m.ign || m.email) : 'Unknown'; };
+  const name = id => { const m = (members || []).find(x => x.id === id); return m ? nameOf(m) : 'Unknown'; };
   box.innerHTML = '<div class="row spread"><h2>Last 7 days</h2><button class="btn ghost small" id="csv">Download CSV (for the sheet)</button></div>' +
     '<div class="card" style="overflow-x:auto"><div class="daygrid"><div></div>' + days.map(d => '<div class="muted small" style="text-align:center">' + new Date(d + 'T12:00').toLocaleDateString(undefined, { weekday: 'short' }) + '</div>').join('') +
-    players.map(m => '<div>' + esc(m.display_name || m.email) + (m.is_trial ? ' <span class="pill yellow">Trial</span>' : '') + '</div>' + days.map(d => { const r = byKey.get(m.id + '|' + d); return '<div class="c ' + (r ? (r.role_drills === 'Done' && r.warmup === 'Done' ? 'y' : 'p') : '') + '">' + (r ? (r.minutes ? r.minutes + 'm' : '✓') : '–') + '</div>'; }).join('')).join('') +
+    players.map(m => '<div>' + esc(nameOf(m)) + (m.is_trial ? ' <span class="pill yellow">Trial</span>' : '') + '</div>' + days.map(d => { const r = byKey.get(m.id + '|' + d); return '<div class="c ' + (r ? (r.role_drills === 'Done' && r.warmup === 'Done' ? 'y' : 'p') : '') + '">' + (r ? (r.minutes ? r.minutes + 'm' : '✓') : '–') + '</div>'; }).join('')).join('') +
     '</div><p class="small muted">Green = warm-up and role drills done · amber = partial · – = no check-in.</p></div>' +
     '<h2 style="margin-top:20px">Latest takeaways</h2>' +
     (rows.length ? '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Player</th><th>Warm-up</th><th>Role drills</th><th class="num">Min</th><th class="num">Games</th><th class="num">Focus</th><th>Worked on</th><th>Takeaway</th></tr></thead><tbody>' +
