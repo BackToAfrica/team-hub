@@ -236,6 +236,10 @@ async function boot() {
   const jm = location.hash.match(/^#\/join\/([A-Za-z0-9]+)/);
   if (jm) { try { localStorage.setItem('th_join', jm[1].toUpperCase()); } catch (e) {} location.hash = '#/home'; }
   sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, { auth: { flowType: 'pkce', detectSessionInUrl: true, persistSession: true } });
+  if (/^#\/t\//.test(location.hash)) { // public team page: no sign-in
+    window.addEventListener('hashchange', () => { if (/^#\/t\//.test(location.hash)) renderPublic(); else location.reload(); });
+    await renderPublic(); return;
+  }
   sb.auth.onAuthStateChange(async (event, session) => {
     if (event === 'PASSWORD_RECOVERY') { S.session = session; renderSetPassword(); return; }
     if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
@@ -356,7 +360,14 @@ const ICONS = {
   target: '<circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.5"/>',
   cal: '<rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
   map: '<path d="M9 4L3 6.5v13.5L9 17.5l6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/>',
-  flag: '<path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>'
+  flag: '<path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>',
+  bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+  swap: '<path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/>',
+  cross: '<circle cx="12" cy="12" r="8"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
+  route: '<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+  pin: '<path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>'
 };
 function icon(n) { return '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[n] || '') + '</svg>'; }
 const NAV = [
@@ -366,13 +377,20 @@ const NAV = [
   { r: 'checkin', label: 'My check-ins', sec: 'checkin', i: 'check', g: 'Team' },
   { r: 'stats', label: 'My stats', sec: 'my_stats', i: 'chart', g: 'Team' },
   { r: 'workon', label: 'Work on', sec: 'reviews', i: 'target', g: 'Team' },
+  { r: 'live', label: 'Live match', sec: 'scouting', i: 'bolt', g: 'Prepare' },
   { r: 'plans', label: 'Game plans', sec: 'scouting', i: 'flag', g: 'Prepare' },
+  { r: 'veto', label: 'Veto simulator', sec: 'team_stats', i: 'swap', g: 'Prepare' },
   { r: 'maps', label: 'Map pool', sec: 'team_stats', i: 'map', g: 'Prepare' },
   { r: 'playbook', label: 'Playbook', sec: ['playbook', 'comms'], i: 'book', g: 'Prepare' },
+  { r: 'lineups', label: 'Lineups', sec: 'playbook', i: 'pin', g: 'Prepare' },
+  { r: 'comms', label: 'Comms', sec: 'comms', i: 'mic', g: 'Prepare' },
   { r: 'scouting', label: 'Scouting', sec: 'scouting', i: 'eye', g: 'Prepare' },
   { r: 'comps', label: 'Comp Checker', sec: 'comp_checker', i: 'shield', g: 'Prepare' },
   { r: 'reviews', label: 'VOD reviews', sec: 'reviews', i: 'play', g: 'Prepare' },
-  { r: 'patches', label: 'Patch notes', sec: 'patch_notes', i: 'doc', g: 'Prepare' }
+  { r: 'patches', label: 'Patch notes', sec: 'patch_notes', i: 'doc', g: 'Prepare' },
+  { r: 'aim', label: 'Aim tracker', sec: null, i: 'cross', g: 'Improve' },
+  { r: 'paths', label: 'Training path', sec: null, i: 'route', g: 'Improve' },
+  { r: 'notes', label: '1-on-1', sec: null, i: 'chat', g: 'Improve' }
 ];
 function navAllowed(n) {
   if (!n.sec) return true;
@@ -566,9 +584,9 @@ async function teamPlayers() {
   const out = roster.map(r => {
     const m = r.claimed_by ? byId.get(r.claimed_by) : null;
     return { key: 'r' + r.id, name: r.ign || (m && m.ign) || r.name, ign: r.ign || (m && m.ign), role: r.role || (m && m.role), is_igl: r.is_igl, is_trial: r.is_trial,
-      discord: r.discord || (m && m.discord), avatar_url: m && m.avatar_url, user_id: m ? m.id : null, joined: !!(m && r.claim_status === 'approved'), rid: r.id, bench: r.status === 'Bench' };
+      discord: r.discord || (m && m.discord), avatar_url: m && m.avatar_url, rank: m && m.rank, rank_rr: m && m.rank_rr, peak_rank: m && m.peak_rank, riot_id: m && m.riot_id, rank_updated: m && m.rank_updated, user_id: m ? m.id : null, joined: !!(m && r.claim_status === 'approved'), rid: r.id, bench: r.status === 'Bench' };
   });
-  members.forEach(m => { if (!m.is_coach && !m.staff_role && !roster.some(r => r.claimed_by === m.id)) out.push({ key: 'u' + m.id, name: nameOf(m), ign: m.ign, role: m.role, is_igl: m.is_igl, is_trial: m.is_trial, discord: m.discord, avatar_url: m.avatar_url, user_id: m.id, joined: true }); });
+  members.forEach(m => { if (!m.is_coach && !m.staff_role && !roster.some(r => r.claimed_by === m.id)) out.push({ key: 'u' + m.id, name: nameOf(m), ign: m.ign, role: m.role, is_igl: m.is_igl, is_trial: m.is_trial, discord: m.discord, avatar_url: m.avatar_url, rank: m.rank, rank_rr: m.rank_rr, peak_rank: m.peak_rank, riot_id: m.riot_id, rank_updated: m.rank_updated, user_id: m.id, joined: true }); });
   const staffIds = new Set(members.filter(m => m.is_coach || m.staff_role).map(m => m.id));
   const coaches = members.filter(m => m.is_coach).concat(members.filter(m => !m.is_coach && m.staff_role));
   return { players: out.filter(p => !(p.user_id && staffIds.has(p.user_id))).sort((a, b) => (a.is_trial ? 1 : 0) - (b.is_trial ? 1 : 0) || String(a.name).localeCompare(String(b.name))), coaches: coaches };
@@ -597,6 +615,7 @@ function pcard(p, ps) {
   return '<div class="pcard' + (p.bench ? ' bench' : '') + '">' + avatar(p, 52) + '<div class="nm">' + esc(p.name) + '</div>' +
     '<div class="sub">' + esc([p.ign && p.ign !== p.name ? p.ign : '', p.discord ? '@' + p.discord : ''].filter(Boolean).join(' · ')) + '</div>' +
     '<div class="row" style="justify-content:center;gap:4px">' + rolePill(p.role) + (p.is_igl ? '<span class="pill yellow">IGL</span>' : '') + (p.is_trial ? '<span class="pill yellow">Trial</span>' : '') + (p.bench ? '<span class="pill">Bench</span>' : '') + (!p.user_id ? '<span class="pill">Not joined</span>' : '') + '</div>' +
+    (p.rank ? '<div style="margin-top:6px">' + rankPill(p.rank, true) + '</div>' : '') +
     (ps ? '<div class="pstats">' + (s ? '<div><b>' + num(s.kd, 2) + '</b><span>K/D</span></div><div><b>' + pct(s.hs) + '</b><span>HS%</span></div><div><b>' + s.maps + '</b><span>Maps</span></div>' : '<div class="muted small" style="grid-column:1/-1">No stats yet</div>') + '</div>' : '') +
     (S.me.is_coach ? '<div class="pact"><button class="btn small ghost" data-bench="' + key + '">' + (p.bench ? 'Make active' : 'Bench') + '</button><button class="btn small ghost danger-t" data-kick="' + key + '">Kick</button></div>' : '') + '</div>';
 }
@@ -809,11 +828,13 @@ PAGES.team = async function (el) {
   const showStats = can('team_stats');
   const tab = location.hash.split('/')[2] || 'roster';
   const [team, ps, uu, matches] = await Promise.all([teamPlayers(), showStats ? cached('player_stats') : [], showStats ? cached('utility_usage') : [], showStats ? cached('matches') : []]);
-  const tabs = [['roster', 'Roster']].concat(showStats ? [['leaderboard', 'Leaderboard'], ['matches', 'Matches']] : []);
+  const tabs = [['roster', 'Roster']].concat(showStats ? [['leaderboard', 'Leaderboard'], ['matches', 'Matches']] : []).concat([['ranks', 'Ranks']]);
   const won = matches.filter(m => Number(m.rounds_won) > Number(m.rounds_lost)).length;
   const rw = sum(matches, 'rounds_won'), rl = sum(matches, 'rounds_lost');
   let body = '';
-  if (tab === 'roster' || !showStats) {
+  if (tab === 'ranks') {
+    body = await ranksTab();
+  } else if (tab === 'roster' || !showStats) {
     body = (team.coaches.length ? '<div class="small muted" style="margin:4px 0 12px">Coaching staff: ' + team.coaches.map(c => '<span class="chip">' + avatar(c, 20) + esc(nameOf(c)) + ' <span class="muted">' + esc(staffLabel(c)) + '</span></span>').join(' ') + '</div>' : '') +
       (team.players.length ? ['Active roster', 'Bench'].map(sec => { const list = team.players.filter(p => (sec === 'Bench') === !!p.bench);
         if (sec === 'Bench' && !list.length && !S.me.is_coach) return '';
@@ -1133,7 +1154,9 @@ PAGES.account = async function (el) {
     '<p class="muted small">The coach manages your name, role and what you can see.</p>' +
     '<form id="pw" class="stack"><label class="f"><span>New password</span><input name="p" type="password" minlength="6" required></label><button class="btn ghost">Change password</button></form>' +
     '<div class="row"><button class="btn danger" id="so">Sign out</button><button class="btn ghost" id="lt">Leave ' + esc(teamName()) + '</button></div></div>' +
+    '<div class="card" style="max-width:520px;margin-top:14px"><h2>Rank</h2><div id="rkbox"></div></div>' +
     '<div class="card" style="max-width:520px;margin-top:14px"><b>Install the app</b><p class="small muted">Phone: open this site in Safari (iPhone) or Chrome (Android) → Share / menu → <b>Add to Home Screen</b>. Computer: in Chrome or Edge click the install icon at the right end of the address bar.</p></div>';
+  rankForm($('#rkbox'), () => PAGES.account(el));
   $('#so').onclick = () => sb.auth.signOut();
   $('#lt').onclick = async () => {
     if (!confirm('Leave ' + teamName() + '? You\'ll lose access to its data until a coach lets you back in.')) return;
@@ -1147,7 +1170,7 @@ PAGES.account = async function (el) {
 PAGES.coach = async function (el) {
   if (!isStaff()) { el.innerHTML = '<p>Coaches only.</p>'; return; }
   const head = S.me.is_coach;
-  const tabs = head ? [['members', 'Members'], ['work', 'Work on'], ['team', 'Team & invites'], ['checkins', 'Check-ins'], ['announce', 'Announcements'], ['data', 'Content & import']]
+  const tabs = head ? [['members', 'Members'], ['work', 'Work on'], ['team', 'Team & invites'], ['publicpage', 'Public page & maps'], ['checkins', 'Check-ins'], ['announce', 'Announcements'], ['data', 'Content & import']]
     : [['work', 'Work on'], ['checkins', 'Check-ins'], ['data', 'Content & import']];
   let sub = location.hash.split('/')[2] || tabs[0][0];
   if (!tabs.some(t => t[0] === sub)) sub = tabs[0][0];
@@ -2034,11 +2057,439 @@ PAGES.explore = async function (el) {
     '<div class="tabs">' + tabs.map(x => '<a href="#/explore/' + tid + '/' + x[0] + '" class="' + (x[0] === tab ? 'active' : '') + '">' + x[1] + '</a>').join('') + '</div>' + body;
 };
 
+
+// =====================================================================
+//  Live match mode, veto simulator, lineups, aim tracker, training paths,
+//  comms recordings, 1-on-1 notes, public team page, ranks
+// =====================================================================
+const RANKS = ['Iron 1', 'Iron 2', 'Iron 3', 'Bronze 1', 'Bronze 2', 'Bronze 3', 'Silver 1', 'Silver 2', 'Silver 3', 'Gold 1', 'Gold 2', 'Gold 3',
+  'Platinum 1', 'Platinum 2', 'Platinum 3', 'Diamond 1', 'Diamond 2', 'Diamond 3', 'Ascendant 1', 'Ascendant 2', 'Ascendant 3', 'Immortal 1', 'Immortal 2', 'Immortal 3', 'Radiant'];
+const RANK_CLR = { Iron: '#6f7378', Bronze: '#a5733f', Silver: '#b8c0c4', Gold: '#e7b64b', Platinum: '#3fb6c8', Diamond: '#c08af2', Ascendant: '#3ec28f', Immortal: '#e2526b', Radiant: '#f5e9a8' };
+function rankPill(r, small) {
+  if (!r) return '';
+  const c = RANK_CLR[String(r).split(' ')[0]] || '#8796a5';
+  return '<span class="rankpill' + (small ? ' sm' : '') + '" style="--rk:' + c + '">' + esc(r) + '</span>';
+}
+function rankIdx(r) { return RANKS.indexOf(r); }
+function trackerUrl(riot) { return riot && riot.includes('#') ? 'https://tracker.gg/valorant/profile/riot/' + encodeURIComponent(riot.replace('#', '#')) + '/overview' : null; }
+function localStore(k, v) { try { if (v === undefined) return JSON.parse(localStorage.getItem(k) || 'null'); localStorage.setItem(k, JSON.stringify(v)); } catch (e) { return null; } }
+const AGENTS = ['Astra', 'Breach', 'Brimstone', 'Chamber', 'Clove', 'Cypher', 'Deadlock', 'Fade', 'Gekko', 'Harbor', 'Iso', 'Jett', 'KAY/O', 'Killjoy', 'Neon', 'Omen', 'Phoenix', 'Raze', 'Reyna', 'Sage', 'Skye', 'Sova', 'Tejo', 'Viper', 'Vyse', 'Waylay', 'Yoru'];
+
+// ---------------------------------------------------------------- Ranks
+async function rankForm(box, after) {
+  const me = S.me;
+  box.innerHTML = '<form id="rk" class="stack"><label class="f"><span>Riot ID</span><input name="riot" placeholder="Name#TAG" value="' + esc(me.riot_id || '') + '"></label>' +
+    '<div class="row"><label class="f grow"><span>Current rank</span><select name="rank"><option value="">—</option>' + RANKS.map(r => '<option' + (r === me.rank ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></label>' +
+    '<label class="f"><span>RR</span><input name="rr" inputmode="numeric" style="width:80px" value="' + esc(me.rank_rr == null ? '' : me.rank_rr) + '"></label></div>' +
+    '<label class="f"><span>Peak rank</span><select name="peak"><option value="">—</option>' + RANKS.map(r => '<option' + (r === me.peak_rank ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></label>' +
+    '<div class="row"><button class="btn small">Save rank</button>' + (trackerUrl(me.riot_id) ? '<a class="small" href="' + esc(trackerUrl(me.riot_id)) + '" target="_blank" rel="noopener">Check on tracker.gg →</a>' : '') + '</div>' +
+    '<p class="small muted" style="margin:0">Update it whenever your rank changes. Your history shows on the Team page.</p></form>';
+  $('#rk', box).onsubmit = async e => {
+    e.preventDefault(); const f = e.target;
+    const rr = f.rr.value === '' ? null : parseInt(f.rr.value, 10);
+    const { error } = await sb.rpc('set_my_rank', { p_riot_id: f.riot.value.trim(), p_rank: f.rank.value, p_rr: isNaN(rr) ? null : rr, p_peak: f.peak.value });
+    if (error) { toast(error.message); return; }
+    toast('Rank saved'); await loadMe(); S.cache = {}; if (after) after();
+  };
+}
+async function ranksTab() {
+  const [team, hist] = await Promise.all([teamPlayers(), db.list('rank_history', { order: 'date', asc: true, limit: 2000 })]);
+  const rows = team.players.filter(p => p.user_id).map(p => ({ p: p, h: hist.filter(h => h.user_id === p.user_id) })).sort((a, b) => rankIdx(b.p.rank) - rankIdx(a.p.rank));
+  const spark = h => { if (h.length < 2) return ''; const w = 120, hgt = 28, xs = h.map((x, i) => i / (h.length - 1) * w), ys = h.map(x => hgt - (Math.max(0, rankIdx(x.rank)) + (x.rr || 0) / 100) / RANKS.length * hgt);
+    return '<svg width="' + w + '" height="' + hgt + '" class="spark"><polyline fill="none" stroke="var(--accent-2)" stroke-width="2" points="' + xs.map((x, i) => x.toFixed(1) + ',' + ys[i].toFixed(1)).join(' ') + '"/></svg>'; };
+  return (S.me.rank || S.me.riot_id ? '' : '<div class="card alert" style="margin-bottom:12px"><b>Add your rank</b><span class="small muted">Account → Rank, so it shows here and on your player card.</span></div>') +
+    (rows.length ? '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Current</th><th>Peak</th><th>Riot ID</th><th>Trend</th><th>Updated</th></tr></thead><tbody>' +
+      rows.map(x => '<tr><td><div class="row" style="gap:8px;flex-wrap:nowrap">' + avatar(x.p, 26) + '<b>' + esc(x.p.name) + '</b> ' + rolePill(x.p.role) + '</div></td><td>' + (x.p.rank ? rankPill(x.p.rank) + (x.p.rank_rr != null ? ' <span class="small muted">' + x.p.rank_rr + ' RR</span>' : '') : '<span class="muted small">not set</span>') + '</td>' +
+        '<td>' + rankPill(x.p.peak_rank, true) + '</td><td class="small">' + (x.p.riot_id ? (trackerUrl(x.p.riot_id) ? '<a href="' + esc(trackerUrl(x.p.riot_id)) + '" target="_blank" rel="noopener">' + esc(x.p.riot_id) + '</a>' : esc(x.p.riot_id)) : '<span class="muted">—</span>') + '</td>' +
+        '<td>' + spark(x.h) + '</td><td class="small muted">' + (x.p.rank_updated ? fmtDate(x.p.rank_updated) : '—') + '</td></tr>').join('') + '</tbody></table></div>' : empty('No players have joined the app yet.')) +
+    '<p class="small muted">Players set their own Riot ID and rank in Account. Riot doesn\'t let apps read ranks automatically without an approved API key, so the tracker.gg link is there to double-check.</p>';
+}
+
+// ---------------------------------------------------------------- Live match mode
+const DEFAULT_CARDS = [
+  { category: 'Mid-round', title: 'Slow it down', body: 'Default, take info, don\'t give free picks. Hit with 40 seconds left on the site with fewer players.' },
+  { category: 'Mid-round', title: 'They\'re stacking a site', body: 'Fake the stacked site with util, then hit the other site fast. Lurk one player to punish rotations.' },
+  { category: 'Mid-round', title: 'We\'re losing opening duels', body: 'Stop dry peeking. Swing off util in pairs, trade within 2 seconds. Play for picks with the team close.' },
+  { category: 'Economy', title: 'Save properly', body: 'Full save: nobody buys, nobody forces alone. Play for info and exit frags. Next round full buy together.' },
+  { category: 'Economy', title: 'Force together', body: 'All five force (Spectre / Bulldog / Sheriff + util). Stack one site and play close angles.' },
+  { category: 'Mental', title: 'Reset', body: 'Forget the last rounds. One round at a time. Calm voices, short calls. Next plan only.' },
+  { category: 'Mental', title: 'Close it out', body: 'Don\'t play scared. Same plan that got us here, same discipline. Trade, play together, no hero plays.' },
+  { category: 'Anti-strat', title: 'They rush every round', body: 'Hold off-angles back, delay with util on their entry, stack 3 on their favorite site, crossfire after the first contact.' }
+];
+PAGES.live = async function (el) {
+  const parts = location.hash.split('/'); let pid = Number(parts[2]) || null; let mapSel = decodeURIComponent(parts[3] || '');
+  const [plans, cards, matches, nxt] = await Promise.all([can('scouting') ? db.list('game_plans', { order: 'match_date', asc: false, limit: 100 }) : [], db.list('timeout_cards', { order: 'sort', asc: true, limit: 200 }), can('team_stats') ? cached('matches') : [], nextScrim().catch(() => null)]);
+  if (!pid) { const p = (nxt && plans.find(x => x.scrim_id === nxt.id)) || plans.find(x => !x.match_date || String(x.match_date).slice(0, 10) >= todayISO()) || plans[0]; pid = p ? p.id : null; }
+  const plan = plans.find(p => p.id === pid);
+  const maps = plan ? mapList(plan.maps) : (nxt ? mapList(nxt.maps) : []);
+  if (!mapSel && maps.length) mapSel = maps[0];
+  const key = 'th_live_' + (pid || 0) + '_' + mapSel;
+  const score = localStore(key) || { us: 0, them: 0, to: 2 };
+  const st = mapSel ? mapStats(matches.filter(m => String(m.map).toLowerCase() === mapSel.toLowerCase())) : null;
+  const sec = (title, txt) => txt ? '<section class="livesec"><h3>' + title + '</h3><div class="md">' + md(txt) + '</div></section>' : '';
+  const allCards = cards.concat(DEFAULT_CARDS.filter(d => !cards.some(c => c.title === d.title)));
+  el.innerHTML = '<div class="live">' +
+    '<div class="row spread"><div><div class="eyebrow">Live match</div><h1 style="margin:0">' + (plan ? 'vs ' + esc(plan.opponent) : nxt ? 'vs ' + esc(nxt.opponent || 'TBD') : 'Match day') + '</h1></div>' +
+    (plans.length ? '<select id="lplan" style="max-width:220px">' + plans.map(p => '<option value="' + p.id + '"' + (p.id === pid ? ' selected' : '') + '>vs ' + esc(p.opponent) + (p.match_date ? ' · ' + fmtDate(p.match_date) : '') + '</option>').join('') + '</select>' : '') + '</div>' +
+    (maps.length ? '<div class="tabs" style="margin-top:10px">' + maps.map(m => '<a href="#/live/' + (pid || 0) + '/' + encodeURIComponent(m) + '" class="' + (m === mapSel ? 'active' : '') + '">' + esc(m) + '</a>').join('') + '</div>' : '') +
+    '<div class="score"><div class="sc"><span>US</span><b id="sus">' + score.us + '</b><div><button class="btn small" data-sc="us,1">+1</button><button class="btn small ghost" data-sc="us,-1">−</button></div></div>' +
+      '<div class="mid"><div class="small muted">Round ' + (score.us + score.them + 1) + ' · ' + ((score.us + score.them) < 12 ? 'first half' : 'second half') + '</div>' +
+      '<div class="small">Timeouts left: <b>' + score.to + '</b> <button class="linkbtn" data-sc="to,-1">use one</button></div><button class="linkbtn small" data-sc="reset">Reset score</button></div>' +
+      '<div class="sc"><span>THEM</span><b>' + score.them + '</b><div><button class="btn small" data-sc="them,1">+1</button><button class="btn small ghost" data-sc="them,-1">−</button></div></div></div>' +
+    (st && st.n ? '<div class="livestats small"><b>' + esc(mapSel) + '</b> for us: ' + pct(st.wp) + ' win (' + st.w + '–' + st.l + ') · attack ' + pct(st.ap) + ' · defense ' + pct(st.dp) + ' · pistols ' + (st.pn ? st.pw + '/' + st.pn : '–') + '</div>' : '') +
+    (plan ? sec('Our comp', plan.comp) + sec('Pistol rounds', plan.pistols) + sec('Attack', plan.attack_plan) + sec('Defense', plan.defense_plan) + sec('Their tendencies', plan.their_tendencies) + sec('Anti-strat', plan.anti_strat)
+      : '<div class="card" style="margin-top:12px"><p class="muted" style="margin:0">No game plan for this match yet.' + (isStaff() ? ' <a href="#/plans">Make one in Game plans</a> and it shows here.' : '') + '</p></div>') +
+    '<div class="row spread" style="margin-top:18px"><h2 style="margin:0">Timeout cards</h2>' + (isStaff() ? '<button class="btn small ghost" id="addcard">Add a card</button>' : '') + '</div>' +
+    '<div class="tcards">' + allCards.map((c, i) => '<button class="tcard" data-card="' + i + '"><span class="pill">' + esc(c.category || 'Call') + '</span><b>' + esc(c.title) + '</b></button>').join('') + '</div></div>';
+  const saveScore = () => { localStore(key, score); render(); };
+  $$('[data-sc]', el).forEach(b => b.onclick = () => { const [k, d] = b.dataset.sc.split(','); if (k === 'reset') { score.us = 0; score.them = 0; score.to = 2; } else score[k] = Math.max(0, score[k] + Number(d)); saveScore(); });
+  if ($('#lplan')) $('#lplan').onchange = e => { location.hash = '#/live/' + e.target.value; };
+  $$('[data-card]', el).forEach(b => b.onclick = () => { const c = allCards[Number(b.dataset.card)];
+    openModal('<div class="bigcard"><span class="pill">' + esc(c.category || 'Call') + '</span><h1>' + esc(c.title) + '</h1><div class="md">' + md(c.body || '') + '</div></div><div class="row"><button class="btn" data-close>Close</button>' +
+      (isStaff() && c.id ? '<button class="btn ghost" id="edcard">Edit</button><button class="btn danger" id="delcard">Delete</button>' : '') + '</div>', m => {
+      if ($('#edcard', m)) $('#edcard', m).onclick = () => cardForm(c);
+      if ($('#delcard', m)) $('#delcard', m).onclick = async () => { await db.remove('timeout_cards', c.id); closeModal(); render(); };
+    }); });
+  if ($('#addcard')) $('#addcard').onclick = () => cardForm({});
+};
+function cardForm(c) {
+  openModal('<h2>' + (c.id ? 'Edit' : 'Add') + ' timeout card</h2><form id="cf"><label class="f"><span>Category</span><select name="category">' + ['Mid-round', 'Economy', 'Mental', 'Anti-strat'].map(x => '<option' + (x === c.category ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label>' +
+    '<label class="f"><span>Title (what you tap)</span><input name="title" required value="' + esc(c.title || '') + '"></label><label class="f"><span>What to say</span><textarea name="body" rows="5">' + esc(c.body || '') + '</textarea></label>' +
+    '<div class="row"><button class="btn">Save</button><button type="button" class="btn ghost" data-close>Cancel</button></div></form>', m => {
+    $('#cf', m).onsubmit = async e => { e.preventDefault(); const rec = { category: e.target.category.value, title: e.target.title.value.trim(), body: e.target.body.value.trim() };
+      try { if (c.id) await db.update('timeout_cards', c.id, rec); else await db.insert('timeout_cards', [rec]); closeModal(); toast('Saved'); render(); } catch (err) { toast('Error: ' + err.message); } };
+  });
+}
+
+// ---------------------------------------------------------------- Veto simulator
+PAGES.veto = async function (el) {
+  const [matches, pool, scout, dir] = await Promise.all([cached('matches'), db.list('map_pool', { limit: 100 }), can('scouting') ? cached('opponent_scouting') : [], isStaff() ? sb.rpc('team_directory').then(r => r.data || []).catch(() => []) : Promise.resolve([])]);
+  const st = localStore('th_veto') || { opp: '', tid: '', fmt: 'BO1', first: 'us', steps: [] };
+  let active = (S.team && S.team.active_maps && S.team.active_maps.length) ? S.team.active_maps : Array.from(new Set(pool.filter(p => p.status !== null).map(p => p.map).concat(matches.map(m => m.map)))).filter(Boolean);
+  if (active.length < 3) active = MAPS.slice(0, 7);
+  let theirMatches = [];
+  if (st.tid) theirMatches = await db.list('matches', { eq: { team_id: Number(st.tid) } });
+  const vsThem = matches.filter(m => st.opp && sameOpp(m.opponent, st.opp));
+  const theirBans = scout.filter(s => st.opp && sameOpp(s.opponent, st.opp)).map(s => String(s.veto || '')).join(' ').toLowerCase();
+  const POOLB = { 'Main pick': .15, 'In pool': .05, Practising: -.05, Ban: -.3 };
+  const rate = list => (list.filter(isWin).length + 1) / (list.length + 2);
+  const score = m => {
+    const ours = matches.filter(x => String(x.map).toLowerCase() === m.toLowerCase());
+    const p = pool.find(x => x.map.toLowerCase() === m.toLowerCase());
+    const theirs = theirMatches.filter(x => String(x.map).toLowerCase() === m.toLowerCase());
+    const h2h = vsThem.filter(x => String(x.map).toLowerCase() === m.toLowerCase());
+    let s = rate(ours) + (p ? POOLB[p.status] || 0 : 0) - (theirs.length ? rate(theirs) - .5 : 0) + (h2h.length ? (rate(h2h) - .5) * .5 : 0) + (theirBans.includes(m.toLowerCase()) ? .1 : 0);
+    return { m: m, s: s, ours: ours, theirs: theirs, h2h: h2h, status: p && p.status };
+  };
+  const seq = st.fmt === 'BO3' ? ['ban', 'ban', 'pick', 'pick', 'ban', 'ban', 'decider'] : ['ban', 'ban', 'ban', 'ban', 'ban', 'ban', 'decider'];
+  const who = i => seq[i] === 'decider' ? 'decider' : ((i % 2 === 0) === (st.first === 'us') ? 'us' : 'them');
+  const used = new Set(st.steps.map(s => s.map));
+  const remaining = active.filter(m => !used.has(m));
+  const i = st.steps.length;
+  const scored = remaining.map(score).sort((a, b) => b.s - a.s);
+  let advice = '';
+  if (i < seq.length && remaining.length) {
+    const act = seq[i], w = who(i);
+    if (act === 'decider' || remaining.length === 1) advice = 'Decider: <b>' + esc(remaining[0]) + '</b>';
+    else if (w === 'us') { const pick = act === 'ban' ? scored[scored.length - 1] : scored[0]; advice = 'Our ' + act + ': <b>' + esc(pick.m) + '</b> <span class="muted">— ' + (act === 'ban' ? 'our weakest of what\'s left' : 'our strongest of what\'s left') + '</span>'; }
+    else advice = 'Their ' + act + ' — click the map they ' + (act === 'ban' ? 'banned' : 'picked') + '. They\'ll likely ' + act + ' <b>' + esc((act === 'ban' ? scored[0] : scored[scored.length - 1]).m) + '</b>.';
+  }
+  const card = x => '<button class="vmap" data-vm="' + esc(x.m) + '"><b>' + esc(x.m) + '</b>' + (x.status ? ' <span class="pill ' + (POOL_PILL[x.status] || '') + '">' + esc(x.status) + '</span>' : '') +
+    '<div class="small muted">Us ' + (x.ours.length ? x.ours.filter(isWin).length + '–' + (x.ours.length - x.ours.filter(isWin).length) : 'unplayed') + (st.tid ? ' · them ' + (x.theirs.length ? x.theirs.filter(isWin).length + '–' + (x.theirs.length - x.theirs.filter(isWin).length) : 'unplayed') : '') + (x.h2h.length ? ' · vs them ' + x.h2h.filter(isWin).length + '–' + (x.h2h.length - x.h2h.filter(isWin).length) : '') + '</div>' +
+    '<div class="bar"><div style="width:' + Math.round(Math.max(0, Math.min(1, x.s)) * 100) + '%"></div></div></button>';
+  el.innerHTML = '<div class="page-h"><div><h1>Veto simulator</h1><p class="muted">Picks and bans suggested from our results, map pool and what we know about the opponent.</p></div></div>' +
+    '<div class="card stack" style="margin-bottom:14px"><div class="row"><label class="f grow"><span>Opponent</span><input id="vopp" list="voppl" value="' + esc(st.opp) + '" placeholder="Team name"><datalist id="voppl">' + dir.filter(t => t.id !== S.me.team_id).map(t => '<option value="' + esc(t.name) + '">').join('') + '</datalist></label>' +
+      '<label class="f"><span>Format</span><select id="vfmt"><option' + (st.fmt === 'BO1' ? ' selected' : '') + '>BO1</option><option' + (st.fmt === 'BO3' ? ' selected' : '') + '>BO3</option></select></label>' +
+      '<label class="f"><span>First ban</span><select id="vfirst"><option value="us"' + (st.first === 'us' ? ' selected' : '') + '>Us</option><option value="them"' + (st.first === 'them' ? ' selected' : '') + '>Them</option></select></label></div>' +
+      '<div class="small muted">' + (st.tid ? 'Using their logged results from Team Hub. ' : st.opp ? 'They\'re not on Team Hub (or not matched), so only our results' + (vsThem.length ? ' and past games vs them' : '') + ' are used. ' : '') +
+      'Map pool: ' + active.map(esc).join(', ') + (S.me.is_coach ? ' · <a href="#/coach/publicpage">change</a>' : '') + '</div></div>' +
+    '<div class="vetosteps">' + seq.map((a, k) => { const s = st.steps[k]; return '<div class="vstep' + (k === i ? ' now' : '') + (s ? ' done ' + a : '') + '"><span>' + (a === 'decider' ? 'Decider' : (who(k) === 'us' ? 'Us' : 'Them') + ' ' + a) + '</span><b>' + (s ? esc(s.map) : k === seq.length - 1 && remaining.length === 1 && i === k ? esc(remaining[0]) : '—') + '</b></div>'; }).join('') + '</div>' +
+    (advice ? '<div class="card alert" style="margin:12px 0"><span>' + advice + '</span></div>' : '<div class="card" style="margin:12px 0"><b>Veto done.</b> Maps: ' + st.steps.filter(s => s.act !== 'ban').map(s => esc(s.map)).join(', ') + '</div>') +
+    '<div class="vmaps">' + scored.map(card).join('') + '</div>' +
+    '<div class="row" style="margin-top:12px"><button class="btn small ghost" id="vundo"' + (i ? '' : ' disabled') + '>Undo</button><button class="btn small ghost" id="vreset">Start over</button>' +
+      (isStaff() ? '<a class="btn small ghost" href="#/plans">Make a game plan</a>' : '') + '</div>';
+  const save = () => { localStore('th_veto', st); render(); };
+  $('#vopp').onchange = e => { st.opp = e.target.value.trim(); const t = dir.find(x => x.name.toLowerCase() === st.opp.toLowerCase() && x.id !== S.me.team_id); st.tid = t ? t.id : ''; save(); };
+  $('#vfmt').onchange = e => { st.fmt = e.target.value; st.steps = []; save(); };
+  $('#vfirst').onchange = e => { st.first = e.target.value; st.steps = []; save(); };
+  $$('[data-vm]', el).forEach(b => b.onclick = () => { if (i >= seq.length) return; st.steps.push({ map: b.dataset.vm, act: seq[i], by: who(i) });
+    const left = active.filter(m => !st.steps.some(s => s.map === m)); if (st.steps.length === seq.length - 1 && left.length === 1) st.steps.push({ map: left[0], act: 'decider', by: 'decider' }); save(); });
+  $('#vundo').onclick = () => { const last = st.steps.pop(); if (last && last.act === 'decider') st.steps.pop(); save(); };
+  $('#vreset').onclick = () => { st.steps = []; save(); };
+};
+
+// ---------------------------------------------------------------- Lineup library
+PAGES.lineups = async function (el) {
+  const [rows, learned, team] = await Promise.all([db.list('lineups', { order: 'created_at', asc: false, limit: 1000 }), sb.from('lineup_learned').select('*').eq('team_id', S.me.team_id).then(r => r.data || []), teamPlayers()]);
+  const f = localStore('th_lu') || {};
+  const mine = new Set(learned.filter(l => l.user_id === S.me.id).map(l => l.lineup_id));
+  const players = team.players.filter(p => p.user_id);
+  const opts = (k, list) => '<select data-lf="' + k + '"><option value="">All ' + k + 's</option>' + list.map(x => '<option' + (f[k] === x ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select>';
+  const agents = Array.from(new Set(rows.map(r => r.agent).filter(Boolean))).sort(), maps = Array.from(new Set(rows.map(r => r.map).filter(Boolean))).sort();
+  const list = rows.filter(r => (!f.agent || r.agent === f.agent) && (!f.map || r.map === f.map) && (!f.show || (f.show === 'todo' ? !mine.has(r.id) : mine.has(r.id))));
+  const card = r => { const vi = videoInfo(r.link); const who = learned.filter(l => l.lineup_id === r.id).map(l => players.find(p => p.user_id === l.user_id)).filter(Boolean);
+    return '<div class="lcard' + (mine.has(r.id) ? ' got' : '') + '">' + (r.image ? '<img src="' + esc(r.image) + '" alt="" loading="lazy">' : vi ? thumbHtml(vi) : '') +
+      '<div class="lb"><div class="row" style="gap:6px">' + (r.agent ? '<span class="pill purple">' + esc(r.agent) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + sidePill(r.side) + (r.site ? '<span class="pill">' + esc(r.site) + '</span>' : '') + '</div>' +
+      '<div class="t">' + esc(r.title) + (r.ability ? ' <span class="muted small">· ' + esc(r.ability) + '</span>' : '') + '</div>' + (r.purpose ? '<div class="small">' + inlineMd(r.purpose) + '</div>' : '') +
+      (r.stand ? '<div class="small"><span class="muted">Stand:</span> ' + inlineMd(r.stand) + '</div>' : '') + (r.aim ? '<div class="small"><span class="muted">Aim / throw:</span> ' + inlineMd(r.aim) + '</div>' : '') +
+      '<div class="row small" style="margin-top:8px;gap:8px">' + (vi ? '<a href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch</a>' : r.link ? linkHtml(r.link, 'Open') : '') +
+        '<button class="btn small ' + (mine.has(r.id) ? '' : 'ghost') + '" data-learn="' + r.id + '">' + (mine.has(r.id) ? '✓ I know it' : 'I learned this') + '</button>' +
+        ((isStaff() || r.created_by === S.me.id) ? '<button class="linkbtn" data-led="' + r.id + '">Edit</button>' : '') + '</div>' +
+      (who.length ? '<div class="small muted" style="margin-top:6px">Knows it: ' + who.map(p => esc(p.name)).join(', ') + '</div>' : '') + '</div></div>'; };
+  el.innerHTML = '<div class="page-h"><div><h1>Lineup library</h1><p class="muted">Utility lineups for our agents and maps. Mark the ones you\'ve learned; the coach sees who knows what.</p></div><button class="btn small" id="addlu">Add a lineup</button></div>' +
+    '<div class="row" style="margin-bottom:12px">' + opts('agent', agents) + opts('map', maps) + '<select data-lf="show"><option value="">All lineups</option><option value="todo"' + (f.show === 'todo' ? ' selected' : '') + '>Not learned yet</option><option value="done"' + (f.show === 'done' ? ' selected' : '') + '>Learned</option></select>' +
+    '<span class="small muted">You know ' + mine.size + ' of ' + rows.length + '</span></div>' +
+    (isStaff() && rows.length && players.length ? '<details class="item" style="margin-bottom:12px"><summary><span class="t">Who knows what</span></summary><div class="body"><div class="tablewrap"><table><thead><tr><th>Player</th><th class="num">Learned</th><th>Missing (first 4)</th></tr></thead><tbody>' +
+      players.map(p => { const got = new Set(learned.filter(l => l.user_id === p.user_id).map(l => l.lineup_id)); const rel = rows.filter(r => !p.role || !r.agent || true);
+        return '<tr><td><b>' + esc(p.name) + '</b> ' + rolePill(p.role) + '</td><td class="num">' + got.size + ' / ' + rel.length + '</td><td class="small">' + rel.filter(r => !got.has(r.id)).slice(0, 4).map(r => esc(r.title)).join(', ') + '</td></tr>'; }).join('') + '</tbody></table></div></div></details>' : '') +
+    (list.length ? '<div class="lgrid">' + list.map(card).join('') + '</div>' : empty(rows.length ? 'Nothing matches that filter.' : 'No lineups yet. Add the first one: agent, map, where to stand, where to aim, and a clip or screenshot link.'));
+  $$('[data-lf]', el).forEach(s => s.onchange = () => { f[s.dataset.lf] = s.value; localStore('th_lu', f); render(); });
+  $$('[data-learn]', el).forEach(b => b.onclick = async () => { const id = Number(b.dataset.learn);
+    const { error } = mine.has(id) ? await sb.from('lineup_learned').delete().eq('lineup_id', id).eq('user_id', S.me.id) : await sb.from('lineup_learned').insert([{ lineup_id: id, user_id: S.me.id }]);
+    if (error) toast(error.message); render(); });
+  $('#addlu').onclick = () => lineupForm({});
+  $$('[data-led]', el).forEach(b => b.onclick = () => lineupForm(rows.find(r => r.id === Number(b.dataset.led))));
+};
+function lineupForm(r) {
+  const sel = (n, list, v) => '<select name="' + n + '"><option value=""></option>' + list.map(x => '<option' + (x === v ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select>';
+  openModal('<h2>' + (r.id ? 'Edit' : 'Add') + ' lineup</h2><form id="lf"><label class="f"><span>Name</span><input name="title" required value="' + esc(r.title || '') + '" placeholder="e.g. Viper A main molly for post-plant"></label>' +
+    '<div class="row"><label class="f grow"><span>Agent</span>' + sel('agent', AGENTS, r.agent) + '</label><label class="f grow"><span>Ability</span><input name="ability" value="' + esc(r.ability || '') + '" placeholder="Snake Bite"></label></div>' +
+    '<div class="row"><label class="f grow"><span>Map</span>' + sel('map', MAPS, r.map) + '</label><label class="f"><span>Side</span>' + sel('side', ['Attack', 'Defense'], r.side) + '</label><label class="f"><span>Site</span><input name="site" style="width:90px" value="' + esc(r.site || '') + '" placeholder="A"></label></div>' +
+    '<label class="f"><span>What it\'s for</span><input name="purpose" value="' + esc(r.purpose || '') + '" placeholder="Stops the defuse on default plant"></label>' +
+    '<label class="f"><span>Where to stand</span><input name="stand" value="' + esc(r.stand || '') + '"></label><label class="f"><span>Where to aim / how to throw</span><input name="aim" value="' + esc(r.aim || '') + '" placeholder="Top of the pillar, jump throw"></label>' +
+    '<label class="f"><span>Clip link (YouTube, Medal, Twitch…)</span><input name="link" value="' + esc(r.link || '') + '"></label><label class="f"><span>Screenshot link (optional)</span><input name="image" value="' + esc(r.image || '') + '" placeholder="https://i.imgur.com/…"></label>' +
+    '<div class="row"><button class="btn">Save</button><button type="button" class="btn ghost" data-close>Cancel</button>' + (r.id ? '<span class="grow"></span><button type="button" class="btn small danger" id="ldel">Delete</button>' : '') + '</div></form>', m => {
+    $('#lf', m).onsubmit = async e => { e.preventDefault(); const f = e.target; const rec = {}; ['title', 'agent', 'ability', 'map', 'side', 'site', 'purpose', 'stand', 'aim', 'link', 'image'].forEach(k => rec[k] = f[k].value.trim() || null);
+      try { if (r.id) await db.update('lineups', r.id, rec); else await db.insert('lineups', [Object.assign({ created_by: S.me.id }, rec)]); closeModal(); toast('Saved'); render(); } catch (err) { toast('Error: ' + err.message); } };
+    if ($('#ldel', m)) $('#ldel', m).onclick = async () => { if (!confirm('Delete this lineup?')) return; await db.remove('lineups', r.id); closeModal(); render(); };
+  });
+}
+
+// ---------------------------------------------------------------- Aim tracker
+const AIM_KINDS = ['Aim Lab', 'Kovaak\'s', 'Deathmatch', 'Team Deathmatch', 'Range'];
+PAGES.aim = async function (el) {
+  const who = location.hash.split('/')[2] || (isStaff() && !S.me.ign ? 'team' : 'me');
+  const [logs, team] = await Promise.all([db.list('aim_logs', { order: 'date', asc: true, limit: 5000 }), teamPlayers()]);
+  const players = team.players.filter(p => p.user_id);
+  const nameOfId = id => { const p = players.find(x => x.user_id === id); return p ? p.name : (id === S.me.id ? nameOf(S.me) : 'Player'); };
+  const tab = (k, l) => '<a href="#/aim/' + k + '" class="' + (who === k ? 'active' : '') + '">' + esc(l) + '</a>';
+  let body = '';
+  if (who === 'team') {
+    const recent = addDays(todayISO(), -14);
+    body = players.length ? '<div class="tablewrap"><table><thead><tr><th>Player</th><th class="num">Sessions (14 days)</th><th>Last logged</th><th>Best improvement</th></tr></thead><tbody>' +
+      players.map(p => { const mine = logs.filter(l => l.user_id === p.user_id); const n = mine.filter(l => String(l.date) >= recent).length; const imp = bestImprovement(mine);
+        return '<tr><td><a href="#/aim/' + p.user_id + '"><b>' + esc(p.name) + '</b></a></td><td class="num">' + n + '</td><td class="small">' + (mine.length ? fmtDate(mine[mine.length - 1].date) : '—') + '</td><td class="small">' + (imp ? esc(imp.scenario) + ' <b class="' + (imp.pct >= 0 ? 'up' : 'down') + '">' + (imp.pct >= 0 ? '+' : '') + Math.round(imp.pct * 100) + '%</b>' : '<span class="muted">—</span>') + '</td></tr>'; }).join('') +
+      '</tbody></table></div>' : empty('No players yet.');
+  } else {
+    const uid = who === 'me' ? S.me.id : who;
+    const mine = logs.filter(l => l.user_id === uid);
+    const groups = groupBy(mine, 'scenario');
+    body = (uid === S.me.id ? '<div class="card" style="margin-bottom:14px"><form id="aimf" class="row" style="align-items:flex-end">' +
+      '<label class="f"><span>Date</span><input type="date" name="date" value="' + todayISO() + '"></label><label class="f"><span>Type</span><select name="kind">' + AIM_KINDS.map(k => '<option>' + esc(k) + '</option>').join('') + '</select></label>' +
+      '<label class="f grow"><span>Scenario</span><input name="scenario" list="aimsc" required placeholder="Gridshot, Range hard 30 bots, DM kills…"><datalist id="aimsc">' + groups.map(g => '<option value="' + esc(g[0]) + '">').join('') + '</datalist></label>' +
+      '<label class="f"><span>Score</span><input name="score" inputmode="decimal" style="width:110px" required></label><label class="f"><span>Accuracy %</span><input name="acc" inputmode="decimal" style="width:90px"></label>' +
+      '<button class="btn">Log</button></form></div>' : '<h2>' + esc(nameOfId(uid)) + '</h2>') +
+      (groups.length ? '<div class="aimgrid">' + groups.map(([sc, list]) => { const first = Number(list[0].score), last = Number(list[list.length - 1].score), best = Math.max.apply(null, list.map(x => Number(x.score)));
+        return '<div class="card"><div class="row spread"><b>' + esc(sc) + '</b><span class="pill">' + esc(list[0].kind || '') + '</span></div>' + aimChart(list) +
+          '<div class="row small" style="gap:14px"><span>Best <b>' + num(best, 0) + '</b></span><span>Last <b>' + num(last, 0) + '</b></span>' + (list.length > 1 && first ? '<span class="' + (last >= first ? 'up' : 'down') + '">' + (last >= first ? '+' : '') + Math.round((last - first) / first * 100) + '% since first</span>' : '') + '<span class="muted">' + list.length + ' sessions</span></div></div>'; }).join('') + '</div>'
+        : empty('No scores logged yet. Log your aim trainer or deathmatch scores after each session to see your progress.'));
+  }
+  el.innerHTML = '<div class="page-h"><div><h1>Aim tracker</h1><p class="muted">Log aim trainer and deathmatch scores and watch them climb.</p></div></div>' +
+    '<div class="tabs">' + (S.me.ign || !isStaff() ? tab('me', 'Mine') : '') + (isStaff() ? tab('team', 'Team') : '') + (isStaff() ? players.map(p => tab(p.user_id, p.name)).join('') : '') + '</div>' + body;
+  if ($('#aimf')) $('#aimf').onsubmit = async e => { e.preventDefault(); const f = e.target; const acc = f.acc.value === '' ? null : Number(f.acc.value) / 100;
+    try { await db.insert('aim_logs', [{ user_id: S.me.id, date: f.date.value, kind: f.kind.value, scenario: f.scenario.value.trim(), score: Number(f.score.value), accuracy: acc }]); toast('Logged'); render(); } catch (err) { toast('Error: ' + err.message); } };
+};
+function bestImprovement(logs) {
+  let best = null; groupBy(logs, 'scenario').forEach(([sc, list]) => { if (list.length < 2) return; const a = Number(list[0].score), b = Number(list[list.length - 1].score); if (!a) return; const p = (b - a) / a; if (!best || p > best.pct) best = { scenario: sc, pct: p }; }); return best;
+}
+function aimChart(list) {
+  const w = 300, h = 90, pad = 4; const v = list.map(x => Number(x.score)); const mn = Math.min.apply(null, v), mx = Math.max.apply(null, v); const rng = mx - mn || 1;
+  const pts = v.map((y, i) => [pad + (list.length === 1 ? (w - 2 * pad) / 2 : i / (list.length - 1) * (w - 2 * pad)), h - pad - (y - mn) / rng * (h - 2 * pad)]);
+  return '<svg viewBox="0 0 ' + w + ' ' + h + '" class="aimchart" preserveAspectRatio="none"><polyline fill="none" stroke="var(--accent-2)" stroke-width="2" points="' + pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '"/>' +
+    pts.map((p, i) => '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3" fill="var(--accent)"><title>' + esc(fmtDate(list[i].date) + ': ' + list[i].score) + '</title></circle>').join('') + '</svg>';
+}
+
+// ---------------------------------------------------------------- Role training paths
+const PATHS = {
+  Everyone: [['xhair', 'Crosshair placement', 'Crosshair at head height on every angle you clear, never on the floor.'], ['strafe', 'Counter-strafing', 'Stop fully before the first bullet; tap the opposite key.'],
+    ['trade', 'Trade within 2 seconds', 'Be close enough that when a teammate dies, you kill the enemy who got him.'], ['callout', 'Clean callouts', 'Number + spot + health, every time ("two B main, one\'s one-shot").'],
+    ['eco', 'Buy discipline', 'Follow the team buy: save together, force together, no solo buys.']],
+  Duelist: [['entry', 'Entry off utility', 'Only take the first fight after a flash, dash or smoke — never dry.'], ['space', 'Create space on the take', 'Clear close angles fast so the team can follow in.'],
+    ['pair', 'Swing with the initiator', 'Peek on their flash/recon timing ("flash on 3").'], ['early', 'Early map control', 'Take space safely at round start without dying first.'],
+    ['retake', 'Retake with util', 'Use your movement util to re-enter sites, not to run in alone.']],
+  Initiator: [['flashtime', 'Flash timing for the entry', 'Pop flashes so the duelist can swing instantly; call the timing.'], ['info', 'Round-start info', 'Use recon early to find where they are before the team commits.'],
+    ['clear', 'Clear common angles with util', 'Use util on the angles the entry can\'t check.'], ['saveutil', 'Save util for retakes', 'Keep one info/flash ability for the retake on defense.'],
+    ['postplant', 'Post-plant denial', 'Stun / recon / flash on the defuser.'], ['call', 'Call what your util found', 'Every recon or flash hit = an instant callout.']],
+  Controller: [['oneway', 'One-way smokes on every site', 'Know at least one one-way smoke per site on each map in our pool.'], ['exec', 'Smoke timing on executes', 'Smokes land together on the call, not early.'],
+    ['ppsmoke', 'Post-plant smokes and mollies', 'Molly or smoke the spike to stop the defuse.'], ['midround', 'Mid-round smokes', 'Keep a smoke to cut rotations or cover a retake.'],
+    ['alive', 'Stay alive', 'Play behind the team; a dead controller means no smokes.'], ['retakesmoke', 'Retake smokes', 'Smoke off angles that cover the spike on retakes.']],
+  Sentinel: [['setup', 'Site setups on every map', 'A setup per site per map (trips, cams, alarms) that you can place in seconds.'], ['flank', 'Flank watch on attack', 'Watch the flank and call when it\'s clear.'],
+    ['anchor', 'Anchor without dying', 'Delay on site and fall back; buy time for the rotate.'], ['reposition', 'Change setups after rounds', 'Don\'t leave the same setup every round.'],
+    ['retakeutil', 'Retake utility', 'Use your util to win the retake, not just to hold.']],
+  IGL: [['default', 'Defaults and mid-round calls', 'One clear plan in the buy phase, one call mid-round.'], ['econcall', 'Economy calls', 'Call buy/save/force for the team every round.'],
+    ['timeout', 'Timeouts with a fix', 'Every timeout ends with one concrete change.'], ['anti', 'Anti-strat adjustments', 'Spot their pattern and adjust within 3 rounds.'], ['calm', 'Short, calm comms', 'Same voice when losing; no blame mid-match.']]
+};
+PAGES.paths = async function (el) {
+  const [prog, team] = await Promise.all([db.list('skill_progress', { order: 'updated_at', limit: 5000 }), teamPlayers()]);
+  const players = team.players.filter(p => p.user_id);
+  const sub = location.hash.split('/')[2] || (isStaff() && !S.me.ign ? 'team' : 'me');
+  const tab = (k, l) => '<a href="#/paths/' + k + '" class="' + (sub === k ? 'active' : '') + '">' + esc(l) + '</a>';
+  const pathFor = p => ['Everyone', (p && p.role && PATHS[p.role]) ? p.role : null, p && p.is_igl ? 'IGL' : null].filter(Boolean);
+  let body = '';
+  if (sub === 'team') {
+    body = players.length ? '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Path</th><th class="num">Practising</th><th class="num">Can do</th><th class="num">Verified</th><th>Progress</th></tr></thead><tbody>' +
+      players.map(p => { const keys = pathFor(p).flatMap(r => PATHS[r].map(s => r + ':' + s[0])); const mine = prog.filter(x => x.user_id === p.user_id && keys.includes(x.skill));
+        const v = mine.filter(x => x.verified).length, c = mine.filter(x => x.status === 'I can do it').length, pr = mine.filter(x => x.status === 'Practising' && !x.verified).length;
+        return '<tr><td><a href="#/paths/' + p.user_id + '"><b>' + esc(p.name) + '</b></a></td><td>' + rolePill(p.role) + (p.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + '</td><td class="num">' + pr + '</td><td class="num">' + c + '</td><td class="num">' + v + '</td><td style="min-width:140px"><div class="bar"><div style="width:' + Math.round(v / (keys.length || 1) * 100) + '%"></div></div><span class="small muted">' + v + ' / ' + keys.length + ' verified</span></td></tr>'; }).join('') +
+      '</tbody></table></div>' : empty('No players yet.');
+  } else {
+    const uid = sub === 'me' ? S.me.id : sub;
+    const p = uid === S.me.id ? { role: S.me.role, is_igl: S.me.is_igl, name: nameOf(S.me), user_id: S.me.id } : players.find(x => x.user_id === uid);
+    const canSelf = uid === S.me.id, canVerify = isStaff();
+    body = !p ? empty('Player not found.') : pathFor(p).map(r => { const skills = PATHS[r]; const done = skills.filter(s => (prog.find(x => x.user_id === uid && x.skill === r + ':' + s[0]) || {}).verified).length;
+      return '<section class="card panel"><div class="card-h"><h2>' + esc(r === 'Everyone' ? 'Core skills (everyone)' : r) + '</h2><span class="small muted">' + done + ' / ' + skills.length + ' verified</span></div>' +
+        skills.map(s => { const k = r + ':' + s[0]; const x = prog.find(y => y.user_id === uid && y.skill === k) || {};
+          const state = x.verified ? 'verified' : x.status === 'I can do it' ? 'can' : x.status ? 'practising' : 'todo';
+          return '<div class="skill ' + state + '"><div class="sk-ic">' + (state === 'verified' ? '★' : state === 'can' ? '✓' : state === 'practising' ? '…' : '') + '</div><div class="grow"><b>' + esc(s[1]) + '</b><div class="small muted">' + esc(s[2]) + '</div>' + (x.note ? '<div class="small quote">' + esc(x.note) + '</div>' : '') + '</div>' +
+            '<div class="row" style="gap:6px;justify-content:flex-end">' + (canSelf ? '<select class="skst" data-k="' + k + '"><option value=""' + (!x.status ? ' selected' : '') + '>Not started</option><option' + (x.status === 'Practising' ? ' selected' : '') + '>Practising</option><option' + (x.status === 'I can do it' ? ' selected' : '') + '>I can do it</option></select>' : '<span class="pill ' + (state === 'can' ? 'green' : state === 'practising' ? 'yellow' : '') + '">' + esc(x.status || 'Not started') + '</span>') +
+            (canVerify ? '<button class="btn small ' + (x.verified ? '' : 'ghost') + '" data-ver="' + k + '">' + (x.verified ? '★ Verified' : 'Verify (seen in scrim)') + '</button>' : (x.verified ? '<span class="pill green">★ Coach verified</span>' : '')) + '</div></div>'; }).join('') + '</section>'; }).join('');
+  }
+  el.innerHTML = '<div class="page-h"><div><h1>Training path</h1><p class="muted">Skills for each role. Mark what you\'re practising and what you can do; the coach verifies it once they see it in a scrim.</p></div></div>' +
+    '<div class="tabs">' + (S.me.ign || !isStaff() ? tab('me', 'Mine') : '') + (isStaff() ? tab('team', 'Team') + players.map(p => tab(p.user_id, p.name)).join('') : '') + '</div>' + body;
+  const uidNow = sub === 'me' ? S.me.id : sub;
+  const upsert = async (k, patch) => { const x = prog.find(y => y.user_id === uidNow && y.skill === k);
+    const res = x ? await sb.from('skill_progress').update(patch).eq('id', x.id) : await sb.from('skill_progress').insert([Object.assign({ user_id: uidNow, skill: k, status: 'Practising' }, patch)]);
+    if (res.error) toast(res.error.message); else toast('Saved'); render(); };
+  $$('.skst', el).forEach(s => s.onchange = () => s.value ? upsert(s.dataset.k, { status: s.value }) : (async () => { const x = prog.find(y => y.user_id === uidNow && y.skill === s.dataset.k); if (x && !x.verified) await sb.from('skill_progress').delete().eq('id', x.id); render(); })());
+  $$('[data-ver]', el).forEach(b => b.onclick = () => { const x = prog.find(y => y.user_id === uidNow && y.skill === b.dataset.ver) || {}; upsert(b.dataset.ver, { verified: !x.verified, verified_by: S.me.id }); });
+};
+
+// ---------------------------------------------------------------- Comms recordings
+const COMMS_RATINGS = [['clarity', 'Clarity'], ['brevity', 'Brevity'], ['calm', 'Calm'], ['info', 'Info'], ['calls', 'Calls']];
+PAGES.comms = async function (el) {
+  const id = Number(location.hash.split('/')[2]) || null;
+  const [rows, guides] = await Promise.all([db.list('comms_recordings', { order: 'date', asc: false, limit: 500 }), cached('guides')]);
+  const guide = guides.find(g => /clean comms/i.test(g.title || ''));
+  if (id) return commsDetail(el, rows.find(r => r.id === id), guide);
+  const avgR = k => { const v = rows.map(r => Number((r.ratings || {})[k])).filter(x => x > 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  el.innerHTML = '<div class="page-h"><div><h1>Comms</h1><p class="muted">Recordings of our voice comms with notes on what to clean up, plus how we want our comms to sound.</p></div>' + (isStaff() ? '<button class="btn small" id="addcm">Add a recording</button>' : '') + '</div>' +
+    (rows.length ? '<div class="kpis">' + COMMS_RATINGS.map(([k, l]) => kpi(avgR(k) ? num(avgR(k), 1) + '/5' : '–', l)).join('') + '</div>' : '') +
+    '<div class="home-grid"><div class="col">' + panel('Recordings', '', rows.length ? '<div class="slist">' + rows.map(r => { const sc = COMMS_RATINGS.map(([k]) => Number((r.ratings || {})[k])).filter(x => x > 0);
+      return '<a class="srow" href="#/comms/' + r.id + '" style="color:inherit;text-decoration:none"><div class="grow"><div class="t">' + esc(r.title) + (!r.published ? ' <span class="pill purple">Draft</span>' : '') + '</div><div class="row small" style="gap:6px;margin-top:4px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + (r.opponent ? '<span class="muted">vs ' + esc(r.opponent) + '</span>' : '') + '</div></div>' +
+        (sc.length ? '<span class="pill ' + (sc.reduce((a, b) => a + b, 0) / sc.length >= 4 ? 'green' : sc.reduce((a, b) => a + b, 0) / sc.length >= 3 ? 'yellow' : 'red') + '">' + num(sc.reduce((a, b) => a + b, 0) / sc.length, 1) + '/5</span>' : '') + '</a>'; }).join('') + '</div>'
+      : empty('No recordings yet. Record comms in Discord (e.g. with Craig bot or OBS), upload to YouTube (unlisted) or Google Drive, and add the link here.')) + '</div>' +
+    '<div class="col">' + (guide ? panel('How we want our comms', '', '<div class="md small">' + md(guide.body) + '</div>') : '') + '</div></div>';
+  if ($('#addcm')) $('#addcm').onclick = () => commsForm({ date: todayISO(), published: true });
+};
+async function commsDetail(el, r, guide) {
+  if (!r) { el.innerHTML = empty('That recording isn\'t here.', '<a class="btn small" href="#/comms">All recordings</a>'); return; }
+  const vi = videoInfo(r.link), audio = r.link && /\.(mp3|m4a|ogg|wav|webm|aac)(\?|$)/i.test(r.link);
+  const canEmbed = vi && (vi.kind === 'yt' || vi.kind === 'tw');
+  el.innerHTML = '<div class="page-h"><div><a href="#/comms" class="small">← Comms</a><h1 style="margin-top:6px">' + esc(r.title) + '</h1><div class="row small" style="gap:6px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + (r.opponent ? '<span class="muted">vs ' + esc(r.opponent) + '</span>' : '') + (r.vod ? linkHtml(r.vod, 'Gameplay VOD') : '') + '</div></div>' +
+    (isStaff() ? '<button class="btn small ghost" id="edcm">Edit</button>' : '') + '</div>' +
+    '<div class="review-grid"><div class="vcol"><div class="player' + (audio ? ' audio' : '') + '">' + (audio ? '<audio id="cplayer" controls src="' + esc(r.link) + '"></audio>' : canEmbed ? '<iframe id="vplayer" src="' + esc(embedSrc(vi, vi.t || 0)) + '" allow="autoplay; fullscreen" allowfullscreen></iframe>' : '<div class="noembed">' + (r.link ? '<a class="btn" href="' + esc(r.link) + '" target="_blank" rel="noopener">Open the recording</a>' : 'No recording link.') + '</div>') + '</div>' +
+      '<div class="ratings">' + COMMS_RATINGS.map(([k, l]) => { const v = Number((r.ratings || {})[k]) || 0; return '<div><span>' + l + '</span><b>' + (v ? '★'.repeat(v) + '<i>' + '★'.repeat(5 - v) + '</i>' : '<i>not rated</i>') + '</b></div>'; }).join('') + '</div></div>' +
+    '<div class="ncol">' + panel('How to clean up our comms', '', r.notes ? '<div class="md notes">' + md(r.notes) + '</div>' : '<p class="muted small">No notes yet.</p>') + '</div></div>';
+  // timestamps jump the recording
+  $$('.notes', el).forEach(box => { const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT); const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(n => { if (n.parentNode.closest('a,button') || !/\b\d{1,2}:\d{2}(?::\d{2})?\b/.test(n.nodeValue)) return; const span = document.createElement('span');
+      span.innerHTML = esc(n.nodeValue).replace(/\b(\d{1,2}:\d{2}(?::\d{2})?)\b/g, (m0, t) => '<button type="button" class="ts" data-seek="' + tsToSec(t) + '">' + t + '</button>'); n.parentNode.replaceChild(span, n); }); });
+  el.addEventListener('click', e => { const t = e.target.closest('[data-seek]'); if (!t) return; const sec = Number(t.dataset.seek);
+    if ($('#cplayer')) { $('#cplayer').currentTime = sec; $('#cplayer').play(); } else if ($('#vplayer')) $('#vplayer').src = embedSrc(vi, sec); });
+  if ($('#edcm')) $('#edcm').onclick = () => commsForm(r);
+}
+function commsForm(r) {
+  const tpl = '## What went well\n- \n\n## Where comms broke down\n- 0:00 — \n\n## Fix for next time\n- ';
+  openModal('<h2>' + (r.id ? 'Edit' : 'Add') + ' comms recording</h2><form id="cmf"><div class="row"><label class="f grow"><span>Title</span><input name="title" required value="' + esc(r.title || '') + '" placeholder="Scrim vs Night Owls — Lotus"></label><label class="f"><span>Date</span><input type="date" name="date" value="' + esc(r.date ? String(r.date).slice(0, 10) : '') + '"></label></div>' +
+    '<div class="row"><label class="f grow"><span>Opponent</span><input name="opponent" value="' + esc(r.opponent || '') + '"></label><label class="f grow"><span>Map</span><select name="map"><option value=""></option>' + MAPS.map(m => '<option' + (m === r.map ? ' selected' : '') + '>' + m + '</option>').join('') + '</select></label></div>' +
+    '<label class="f"><span>Recording link (YouTube / Twitch / Drive / .mp3)</span><input name="link" value="' + esc(r.link || '') + '"></label><label class="f"><span>Gameplay VOD link (optional)</span><input name="vod" value="' + esc(r.vod || '') + '"></label>' +
+    '<div class="f"><span>Ratings (1–5)</span><div class="row">' + COMMS_RATINGS.map(([k, l]) => '<label class="small">' + l + ' <select name="r_' + k + '"><option value=""></option>' + [1, 2, 3, 4, 5].map(n => '<option' + (Number((r.ratings || {})[k]) === n ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></label>').join('') + '</div></div>' +
+    '<label class="f"><span>Notes on how to improve (timestamps like 12:34 become buttons)</span><textarea name="notes" rows="10">' + esc(r.notes || tpl) + '</textarea></label>' +
+    '<label class="row small"><input type="checkbox" name="published"' + (r.published !== false ? ' checked' : '') + '> Players can see it</label>' +
+    '<div class="row" style="margin-top:10px"><button class="btn">Save</button><button type="button" class="btn ghost" data-close>Cancel</button>' + (r.id ? '<span class="grow"></span><button type="button" class="btn small danger" id="cmdel">Delete</button>' : '') + '</div></form>', m => {
+    $('#cmf', m).onsubmit = async e => { e.preventDefault(); const f = e.target; const ratings = {}; COMMS_RATINGS.forEach(([k]) => { if (f['r_' + k].value) ratings[k] = Number(f['r_' + k].value); });
+      const rec = { title: f.title.value.trim(), date: f.date.value || null, opponent: f.opponent.value.trim() || null, map: f.map.value || null, link: f.link.value.trim() || null, vod: f.vod.value.trim() || null, ratings: ratings, notes: f.notes.value.trim() || null, published: f.published.checked };
+      try { if (r.id) await db.update('comms_recordings', r.id, rec); else await db.insert('comms_recordings', [rec]); closeModal(); toast('Saved'); render(); } catch (err) { toast('Error: ' + err.message); } };
+    if ($('#cmdel', m)) $('#cmdel', m).onclick = async () => { if (!confirm('Delete this recording?')) return; await db.remove('comms_recordings', r.id); closeModal(); location.hash = '#/comms'; };
+  });
+}
+
+// ---------------------------------------------------------------- 1-on-1 notes
+const NOTE_KINDS = ['Note', 'Goal', 'Feedback', 'Concern'];
+const NOTE_PILL = { Goal: 'blue', Feedback: 'green', Concern: 'red', Note: '' };
+PAGES.notes = async function (el) {
+  const head = S.me.is_coach;
+  const team = await teamPlayers();
+  const players = team.players.filter(p => p.user_id);
+  let uid = location.hash.split('/')[2] || null;
+  if (!head) uid = S.me.id;
+  const notes = await db.list('one_on_one', { order: 'created_at', asc: true, limit: 2000 });
+  if (head && !uid) {
+    el.innerHTML = '<div class="page-h"><div><h1>1-on-1 notes</h1><p class="muted">Private notes between you and each player. Only you and that player can see them.</p></div></div>' +
+      (players.length ? '<div class="plist">' + players.map(p => { const mine = notes.filter(n => n.player_id === p.user_id); const last = mine[mine.length - 1]; const goals = mine.filter(n => n.kind === 'Goal' && !n.done).length;
+        return '<a class="prow" href="#/notes/' + p.user_id + '" style="color:inherit;text-decoration:none">' + avatar(p, 36) + '<div class="grow"><div class="t">' + esc(p.name) + ' ' + rolePill(p.role) + '</div><div class="small muted">' + (last ? fmtDate(last.created_at) + ' · ' + esc(String(last.body).slice(0, 80)) : 'No notes yet') + '</div></div>' + (goals ? '<span class="pill blue">' + goals + ' open goal' + (goals > 1 ? 's' : '') + '</span>' : '') + '</a>'; }).join('') + '</div>' : empty('No players have joined yet.'));
+    return;
+  }
+  const p = uid === S.me.id ? { name: nameOf(S.me) } : players.find(x => x.user_id === uid) || { name: 'Player' };
+  const thread = notes.filter(n => n.player_id === uid);
+  const coachIds = new Set(team.coaches.filter(c => c.is_coach).map(c => c.id));
+  el.innerHTML = '<div class="page-h"><div>' + (head ? '<a href="#/notes" class="small">← All players</a>' : '') + '<h1 style="margin-top:6px">' + (head ? '1-on-1 with ' + esc(p.name) : 'My 1-on-1 with the coach') + '</h1><p class="muted">Private: only ' + (head ? esc(p.name) + ' and you' : 'you and the head coach') + ' can see this.</p></div></div>' +
+    '<div class="thread">' + (thread.length ? thread.map(n => '<div class="msg ' + (n.author_id === S.me.id ? 'me' : '') + (n.done ? ' done' : '') + '"><div class="row small" style="gap:6px"><span class="pill ' + (NOTE_PILL[n.kind] || '') + '">' + esc(n.kind || 'Note') + '</span><b>' + (coachIds.has(n.author_id) ? 'Coach' : esc(p.name)) + '</b><span class="muted">' + fmtDate(n.created_at) + '</span>' +
+        (n.kind === 'Goal' ? '<button class="linkbtn" data-done="' + n.id + '">' + (n.done ? '✓ Done' : 'Mark done') + '</button>' : '') + (n.author_id === S.me.id ? '<button class="linkbtn" data-ndel="' + n.id + '">Delete</button>' : '') + '</div><div class="md">' + md(n.body) + '</div></div>').join('') : '<p class="muted">Nothing here yet. ' + (head ? 'Write the first note: feedback, a goal, or something to talk about.' : 'Write something for your coach: a goal, a question or anything on your mind.') + '</p>') + '</div>' +
+    '<form id="nf" class="card stack" style="margin-top:14px"><div class="row"><select name="kind" style="max-width:160px">' + NOTE_KINDS.map(k => '<option>' + k + '</option>').join('') + '</select></div><textarea name="body" rows="3" required placeholder="Write a note…"></textarea><div><button class="btn small">Add note</button></div></form>';
+  $('#nf').onsubmit = async e => { e.preventDefault(); try { await db.insert('one_on_one', [{ player_id: uid, author_id: S.me.id, kind: e.target.kind.value, body: e.target.body.value.trim() }]); render(); } catch (err) { toast('Error: ' + err.message); } };
+  $$('[data-done]', el).forEach(b => b.onclick = async () => { const n = thread.find(x => x.id === Number(b.dataset.done)); await db.update('one_on_one', n.id, { done: !n.done }); render(); });
+  $$('[data-ndel]', el).forEach(b => b.onclick = async () => { if (!confirm('Delete this note?')) return; await db.remove('one_on_one', Number(b.dataset.ndel)); render(); });
+};
+
+// ---------------------------------------------------------------- Public team page (no sign-in)
+async function renderPublic() {
+  const slug = decodeURIComponent((location.hash.match(/^#\/t\/([^/?]+)/) || [])[1] || '');
+  $('#app').innerHTML = '<div class="pub"><p class="muted">Loading…</p></div>';
+  const { data, error } = await sb.rpc('public_team', { p_slug: slug });
+  if (error || !data) { $('#app').innerHTML = '<div class="pub"><div class="card"><h1>Team not found</h1><p class="muted">This team page doesn\'t exist or isn\'t public.</p><a class="btn small" href="' + esc(location.pathname) + '">Team Hub</a></div></div>'; return; }
+  const t = data, L = t.links || {};
+  const linkBtn = (k, label) => L[k] ? '<a class="btn small ghost" href="' + esc(L[k]) + '" target="_blank" rel="noopener">' + label + '</a>' : '';
+  const res = t.results || []; const w = res.filter(m => Number(m.rounds_won) > Number(m.rounds_lost)).length;
+  document.title = t.name + ' — Team Hub';
+  $('#app').innerHTML = '<div class="pub"><div class="pubhero"><div class="dot"></div><div class="grow"><h1>' + esc(t.name) + (t.tag ? ' <span class="pill">' + esc(t.tag) + '</span>' : '') + '</h1>' + (t.bio ? '<p>' + esc(t.bio) + '</p>' : '') +
+    '<div class="row">' + linkBtn('twitter', 'X / Twitter') + linkBtn('twitch', 'Twitch') + linkBtn('youtube', 'YouTube') + linkBtn('discord', 'Discord') + linkBtn('website', 'Website') + linkBtn('vlr', 'VLR.gg') + '</div></div>' +
+    (res.length ? '<div class="hero-stats">' + statLine(w + '–' + (res.length - w), 'recent maps') + '</div>' : '') + '</div>' +
+    '<h2>Roster</h2><div class="pcards">' + (t.roster || []).map(p => '<div class="pcard"><span class="av" style="width:52px;height:52px;font-size:21px">' + esc(String(p.ign || '?').slice(0, 2).toUpperCase()) + '</span><div class="nm">' + esc(p.ign || '') + '</div>' +
+      '<div class="row" style="justify-content:center;gap:4px">' + rolePill(p.role) + (p.igl ? '<span class="pill yellow">IGL</span>' : '') + '</div>' + (p.rank ? '<div style="margin-top:8px">' + rankPill(p.rank) + '</div>' : '') + (p.peak ? '<div class="small muted">Peak ' + esc(p.peak) + '</div>' : '') + (p.riot_id ? '<div class="small muted">' + esc(p.riot_id) + '</div>' : '') + '</div>').join('') + '</div>' +
+    ((t.staff || []).length ? '<p class="small muted" style="margin-top:10px">Staff: ' + t.staff.map(s => esc(s.name) + ' (' + esc(s.role) + ')').join(', ') + '</p>' : '') +
+    (res.length ? '<h2 style="margin-top:20px">Recent results</h2><div class="tablewrap"><table><thead><tr><th>Date</th><th>Event</th><th>Opponent</th><th>Map</th><th class="num">Score</th></tr></thead><tbody>' +
+      res.map(m => '<tr><td>' + (m.date ? fmtDate(m.date) : '') + '</td><td>' + esc(m.event || '') + '</td><td>' + esc(m.opponent || '') + '</td><td>' + esc(m.map || '') + '</td><td class="num"><span class="fdot ' + (Number(m.rounds_won) > Number(m.rounds_lost) ? 'w' : 'l') + '"></span> ' + (m.rounds_won ?? '') + '–' + (m.rounds_lost ?? '') + '</td></tr>').join('') + '</tbody></table></div>' : '') +
+    '<p class="small muted" style="margin-top:24px">Powered by Team Hub · <a href="' + esc(location.pathname) + '">Run your team on Team Hub</a></p></div>';
+}
+COACH.publicpage = async function (box) {
+  const t = S.team || {}; const L = t.public_links || {};
+  const url = location.origin + location.pathname + '#/t/' + encodeURIComponent(t.public_slug || '');
+  box.innerHTML = '<div class="card stack" style="max-width:640px"><h2>Public team page</h2><p class="small muted">A page anyone can open without signing in: roster (in-game names, roles, ranks), staff, bio, links and recent official results. Scrims, stats, plans and everything else stay private.</p>' +
+    '<form id="pf" class="stack"><label class="row"><input type="checkbox" name="on"' + (t.public_enabled ? ' checked' : '') + '> <b>Page is public</b></label>' +
+    '<label class="f"><span>Page address</span><div class="row"><span class="small muted">' + esc(location.host) + '/#/t/</span><input name="slug" value="' + esc(t.public_slug || '') + '" placeholder="' + esc(String(t.tag || t.name || 'team').toLowerCase().replace(/[^a-z0-9]+/g, '')) + '" style="max-width:200px" pattern="[A-Za-z0-9-]{2,30}"></div></label>' +
+    '<label class="f"><span>Bio</span><textarea name="bio" rows="3" placeholder="NA Valorant team chasing VCT. Looking for scrims.">' + esc(t.public_bio || '') + '</textarea></label>' +
+    ['twitter', 'twitch', 'youtube', 'discord', 'website', 'vlr'].map(k => '<label class="f"><span>' + ({ twitter: 'X / Twitter', twitch: 'Twitch', youtube: 'YouTube', discord: 'Discord invite', website: 'Website', vlr: 'VLR.gg team page' })[k] + '</span><input name="l_' + k + '" value="' + esc(L[k] || '') + '" placeholder="https://…"></label>').join('') +
+    '<label class="row small"><input type="checkbox" name="results"' + (L.show_results !== false ? ' checked' : '') + '> Show recent official results (scrims are never shown)</label>' +
+    '<label class="row small"><input type="checkbox" name="riot"' + (L.show_riot_ids ? ' checked' : '') + '> Show players\' Riot IDs</label>' +
+    '<div class="row"><button class="btn">Save</button>' + (t.public_enabled && t.public_slug ? '<a class="btn ghost small" href="' + esc(url) + '" target="_blank" rel="noopener">Open page</a><button type="button" class="btn ghost small" id="cpp">Copy link</button>' : '') + '</div></form></div>' +
+    '<div class="card stack" style="max-width:640px;margin-top:14px"><h2>Map pool for the veto simulator</h2><p class="small muted">The maps currently in competitive rotation. Used by the Veto simulator.</p><div id="am">' + mapChecks((t.active_maps || []).join(', ')) + '</div><div><button class="btn small" id="amsave">Save map pool</button></div></div>';
+  $('#pf').onsubmit = async e => { e.preventDefault(); const f = e.target; const links = {}; ['twitter', 'twitch', 'youtube', 'discord', 'website', 'vlr'].forEach(k => { const v = f['l_' + k].value.trim(); if (v) links[k] = v; });
+    links.show_results = f.results.checked; links.show_riot_ids = f.riot.checked;
+    const slug = f.slug.value.trim().toLowerCase();
+    if (f.on.checked && !slug) { toast('Pick a page address first'); return; }
+    const { error } = await sb.from('teams').update({ public_enabled: f.on.checked, public_slug: slug || null, public_bio: f.bio.value.trim() || null, public_links: links }).eq('id', t.id);
+    if (error) { toast(/duplicate|unique/i.test(error.message) ? 'That address is taken — try another' : error.message); return; }
+    toast('Saved'); await loadMe(); COACH.publicpage(box); };
+  if ($('#cpp')) $('#cpp').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch (e) { toast(url); } };
+  $('#amsave').onclick = async () => { const maps = $$('#am [name=maps]:checked').map(c => c.value); const { error } = await sb.from('teams').update({ active_maps: maps.length ? maps : null }).eq('id', t.id); toast(error ? error.message : 'Saved'); if (!error) await loadMe(); };
+};
+
 // ----- cached member list for the leaderboard (names/roles of teammates)
 const _origCached = cached;
 cached = async function (table, opts) {
   if (table === 'profiles_list') {
-    if (!S.cache.profiles_list) { const { data } = await sb.from('profiles').select('id,display_name,ign,role,is_igl,is_trial,is_coach,staff_role,approved,discord,avatar_url').eq('approved', true); S.cache.profiles_list = data || []; }
+    if (!S.cache.profiles_list) { const { data } = await sb.from('profiles').select('id,display_name,ign,role,is_igl,is_trial,is_coach,staff_role,approved,discord,avatar_url,riot_id,rank,rank_rr,peak_rank,rank_updated').eq('approved', true); S.cache.profiles_list = data || []; }
     return S.cache.profiles_list;
   }
   return _origCached(table, opts);

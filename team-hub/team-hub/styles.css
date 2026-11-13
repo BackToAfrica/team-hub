@@ -365,3 +365,86 @@ table.avail td.cell:not(.past):hover { filter: brightness(1.25); }
 .sched-grid > *, .plan-grid > *, .sched-grid .col > * { min-width: 0; }
 .sched-grid .card-h { flex-wrap: wrap; }
 @media (max-width: 600px) { .srow > .row:last-child { width: 100%; justify-content: flex-start !important; } .mgrid { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---------- Ranks ---------- */
+.rankpill { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: .78rem; font-weight: 700; color: var(--rk); border: 1px solid var(--rk); background: color-mix(in srgb, var(--rk) 14%, transparent); white-space: nowrap; }
+.rankpill.sm { font-size: .7rem; padding: 1px 8px; }
+.spark { display: block; }
+
+/* ---------- Live match ---------- */
+.live { max-width: 860px; margin: 0 auto; }
+.score { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 10px; align-items: center; margin: 14px 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+.score .sc { text-align: center; }
+.score .sc span { display: block; font-size: .72rem; letter-spacing: 1px; color: var(--muted); font-weight: 700; }
+.score .sc b { display: block; font-size: 2.6rem; line-height: 1.1; font-weight: 800; }
+.score .sc div { display: flex; gap: 6px; justify-content: center; margin-top: 6px; }
+.score .mid { text-align: center; }
+.livestats { margin-bottom: 10px; color: var(--muted); }
+.livesec { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin-bottom: 10px; }
+.livesec h3 { margin: 0 0 6px; font-size: .8rem; text-transform: uppercase; letter-spacing: .8px; color: var(--accent-2); }
+.livesec .md { font-size: 1.02rem; }
+.tcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-top: 10px; }
+.tcard { text-align: left; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 12px; padding: 12px; color: var(--text); font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px; min-height: 84px; }
+.tcard:hover { border-color: var(--accent); }
+.tcard b { font-size: 1rem; }
+.bigcard h1 { font-size: 2rem; margin: 10px 0; }
+.bigcard .md { font-size: 1.15rem; margin-bottom: 16px; }
+
+/* ---------- Veto ---------- */
+.vetosteps { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.vstep { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px; text-align: center; }
+.vstep span { display: block; font-size: .68rem; text-transform: uppercase; color: var(--muted); letter-spacing: .4px; }
+.vstep b { display: block; margin-top: 2px; }
+.vstep.now { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.vstep.done.ban b { color: #ff8a94; text-decoration: line-through; }
+.vstep.done.pick b, .vstep.done.decider b { color: var(--good); }
+.vmaps { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.vmap { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; color: var(--text); font: inherit; cursor: pointer; }
+.vmap:hover { border-color: var(--accent); }
+@media (max-width: 700px) { .vetosteps { grid-template-columns: repeat(4, 1fr); } }
+
+/* ---------- Lineups ---------- */
+.lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.lcard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.lcard.got { border-color: #1f5d46; }
+.lcard > img, .lcard > .thumb { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+.lcard .lb { padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.lcard .t { font-weight: 700; margin-top: 4px; }
+
+/* ---------- Aim ---------- */
+.aimgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.aimchart { width: 100%; height: 90px; margin: 8px 0; background: var(--bg-2); border-radius: 8px; }
+.up { color: var(--good); } .down { color: #ff8a94; }
+
+/* ---------- Training path ---------- */
+.skill { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.skill:first-of-type { border-top: 0; }
+.skill .grow { min-width: 200px; }
+.sk-ic { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-3); font-weight: 800; flex-shrink: 0; }
+.skill.practising .sk-ic { background: #42321a; color: var(--warn); }
+.skill.can .sk-ic { background: #143b2d; color: var(--good); }
+.skill.verified .sk-ic { background: var(--good); color: #062; }
+.skill select.skst { width: auto; padding: 4px 8px; font-size: .82rem; }
+
+/* ---------- Comms ---------- */
+.player.audio { aspect-ratio: auto; padding: 20px; display: flex; align-items: center; }
+.player.audio audio { width: 100%; }
+.ratings { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 10px; }
+.ratings > div { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; text-align: center; }
+.ratings span { display: block; font-size: .68rem; text-transform: uppercase; color: var(--muted); }
+.ratings b { color: var(--warn); font-size: .85rem; letter-spacing: 1px; }
+.ratings b i { color: var(--panel-3); font-style: normal; }
+@media (max-width: 600px) { .ratings { grid-template-columns: repeat(3, 1fr); } }
+
+/* ---------- 1-on-1 ---------- */
+.thread { display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
+.msg { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; max-width: 90%; }
+.msg.me { align-self: flex-end; background: var(--panel-2); border-color: var(--line-2); }
+.msg.done { opacity: .6; }
+.msg .md { margin-top: 4px; }
+
+/* ---------- Public team page ---------- */
+.pub { max-width: 980px; margin: 0 auto; padding: 32px 20px; }
+.pubhero { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; background: linear-gradient(135deg, #2a1420, #141f2b); border: 1px solid var(--line); border-radius: 18px; padding: 24px; margin-bottom: 22px; }
+.pubhero .dot { width: 22px; height: 22px; margin-top: 10px; }
+.pubhero h1 { font-size: 2.1rem; margin: 0 0 6px; }
