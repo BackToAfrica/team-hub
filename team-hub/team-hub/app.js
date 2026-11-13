@@ -698,11 +698,32 @@ PAGES.home = async function (el) {
     can('my_stats') || can('team_stats') ? cached('player_stats') : Promise.resolve([]),
     can('reviews') ? cached('work_on') : Promise.resolve([]),
     nextScrim().catch(() => null), db.list('availability', { eq: { user_id: me.id } }).catch(() => []),
-    can('scouting') ? db.list('game_plans', { limit: 200 }).catch(() => []) : Promise.resolve([])
+    can('scouting') ? db.list('game_plans', { limit: 200 }).catch(() => []) : Promise.resolve([]),
+    can('team_stats') ? cached('matches') : Promise.resolve([])
   ]);
   const doneToday = myHist.some(h => String(h.day).slice(0, 10) === today);
   const streak = calcStreak(myHist.map(h => h.day));
   const players = team.players;
+  const matchRows = (matches || []).slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const matchWins = matchRows.filter(isWin).length;
+  const matchLosses = matchRows.length - matchWins;
+  const matchWinRate = matchRows.length ? Math.round(matchWins / matchRows.length * 100) : null;
+  const roundsFor = sum(matchRows, 'rounds_won'), roundsAgainst = sum(matchRows, 'rounds_lost');
+  const roundDiff = roundsFor - roundsAgainst;
+  const mapCount = new Set(matchRows.map(m => m.map).filter(Boolean)).size;
+  const recentForm = matchRows.slice(0, 5);
+  const performanceHtml = can('team_stats')
+    ? '<section class="command-center"><div class="command-head"><div><div class="eyebrow">TEAM PERFORMANCE</div><h2>Command center</h2><p class="muted small">' + (matchRows.length ? 'A quick read on your recorded match results.' : 'Your team overview will build as results are logged.') + '</p></div><a class="btn small ghost" href="#/team/matches">Match history →</a></div>' +
+      (matchRows.length
+        ? '<div class="command-kpis">' +
+          '<div class="command-stat"><span>Match record</span><b>' + matchWins + '<i>W</i> · ' + matchLosses + '<i>L</i></b><small>' + matchWinRate + '% win rate</small></div>' +
+          '<div class="command-stat"><span>Maps recorded</span><b>' + matchRows.length + '</b><small>Across ' + mapCount + ' unique maps</small></div>' +
+          '<div class="command-stat"><span>Round differential</span><b class="' + (roundDiff > 0 ? 'up' : roundDiff < 0 ? 'down' : '') + '">' + (roundDiff > 0 ? '+' : '') + roundDiff + '</b><small>' + roundsFor + ' for · ' + roundsAgainst + ' against</small></div>' +
+          '<div class="command-stat command-form"><span>Recent form</span><div class="form-dots">' + recentForm.map(m => '<span class="fdot ' + (isWin(m) ? 'w' : 'l') + '" title="' + esc((m.opponent || 'Opponent') + ' · ' + m.rounds_won + '–' + m.rounds_lost) + '"></span>').join('') + '</div><small>Last ' + recentForm.length + ' maps</small></div>' +
+          '</div>'
+        : '<div class="command-empty"><div><b>No match results yet</b><p class="small muted">Log your first map result to unlock win rate, round differential, and recent form.</p></div>' + (isStaff() ? '<a class="btn small" href="#/coach/data">Add match results</a>' : '') + '</div>') +
+      '</section>'
+    : '';
   const byUser = new Map(todayRows.map(r => [r.user_id, r]));
   const joined = players.filter(p => p.user_id);
   const doneCount = joined.filter(p => byUser.has(p.user_id)).length;
@@ -777,7 +798,7 @@ PAGES.home = async function (el) {
       (plan ? '<a class="btn small" href="#/plans/' + plan.id + '">Game plan</a>' : '') + '</div>') : (coach ? panel('Next scrim', '<a class="small" href="#/schedule">Schedule →</a>', '<p class="muted small">Nothing booked. See when everyone is free and book one.</p>') : ''));
   }
   const ciHtml = doCheckin ? panel('Today\'s check-in', '<span class="muted small">' + new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) + '</span>', '<div id="ci-box"><p class="muted">Loading…</p></div>', 'ci-panel') : '';
-  el.innerHTML = hero + '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + schedHtml + (coach ? '' : focusHtml) + annHtml + statsHtml + rosterHtml + '</div></div>';
+  el.innerHTML = hero + performanceHtml + '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + schedHtml + (coach ? '' : focusHtml) + annHtml + statsHtml + rosterHtml + '</div></div>';
   if (doCheckin) {
     const mineToday = myHist.find(h => String(h.day).slice(0, 10) === today);
     const showForm = () => checkinForm($('#ci-box'), today, () => { S.cache = {}; render(); });
