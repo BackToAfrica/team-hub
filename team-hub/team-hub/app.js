@@ -2073,7 +2073,8 @@ PAGES.prep = async function (el) {
     { label: 'Opponent scouting', done: scoutRows.length > 0, href: '#/scouting', detail: scoutRows.length ? scoutRows.length + ' report(s) saved' : 'No opponent report linked yet' },
     { label: 'Game plan', done: !!plan, href: '#/plans', detail: plan ? 'Plan ' + (plan.published ? 'published' : 'draft') : 'No plan linked to this match' },
     { label: 'Map veto', done: !!(localStore('th_veto') || {}).steps?.length, href: '#/veto', detail: ((localStore('th_veto') || {}).steps || []).length ? 'Veto has progress saved on this device' : 'Veto not started on this device' },
-    { label: 'Agent compositions', done: maps.length > 0 && maps.every(m => compRows.some(x => String(x.map || '').toLowerCase() === m.toLowerCase())), href: '#/comps', detail: compRows.length ? compRows.length + ' opponent comp note(s) saved' : 'No opponent comps saved' },
+    { label: 'Agent compositions', done: maps.length > 0 && !!plan && maps.every(m => ((plan.agent_comps || {})[m] || []).length === 5), href: '#/plans' + (plan ? '/' + plan.id : ''), detail: plan && Object.keys(plan.agent_comps || {}).length ? Object.keys(plan.agent_comps).length + ' map composition(s) saved' : 'No five-agent compositions saved' },
+    { label: 'Starting five', done: maps.length > 0 && !!plan && maps.every(m => ((plan.starting_lineup || {})[m] || []).length === 5), href: '#/plans' + (plan ? '/' + plan.id : ''), detail: plan && Object.keys(plan.starting_lineup || {}).length ? Object.keys(plan.starting_lineup).length + ' map lineup(s) saved' : 'No starting five saved' },
     { label: 'Utility lineups', done: maps.length > 0 && maps.every(m => lineupRows.some(x => String(x.map || '').toLowerCase() === m.toLowerCase())), href: '#/lineups', detail: lineupRows.length ? lineupRows.length + ' lineup(s) in library' : 'No lineups saved' }
   ];
   const done = ready.filter(x => x.done).length;
