@@ -3,7 +3,7 @@
 ## Fresh installation
 
 1. Create a new Supabase project.
-2. Open **SQL Editor** and run `schema.sql` once. It is the complete, schema-only snapshot of the current Team Hub database. It creates all 30 app tables, constraints, indexes, functions, triggers, RLS policies, and grants.
+2. Open **SQL Editor** and run `schema.sql` once. It is the complete, schema-only snapshot of the current Team Hub database. It creates all app tables, constraints, indexes, functions, triggers, RLS policies, and grants.
 3. In **Authentication → Sign In / Providers**, enable Discord and enter the Discord OAuth client ID and secret.
 4. In Supabase Auth URL configuration, set the deployed Team Hub URL as the Site URL and add the deployed URL (and any development URL) to the redirect allow list.
 5. Configure `config.js` with the project's URL and publishable/anon key. Never put a Supabase service-role or secret key in browser code.
@@ -13,7 +13,7 @@ The SQL snapshot contains no player accounts, team records, VODs, scrims, match 
 
 ## Existing installation
 
-Do **not** run `schema.sql` against an existing populated project. Use only the timestamped files in `migrations/` that are not already present in that project's migration history. The connected `team-hub` project has already received the six migrations represented in this branch.
+Do **not** run `schema.sql` against an existing populated project. Use only the timestamped files in `migrations/` that are not already present in that project's migration history. The connected `team-hub` project has received the security hardening, match-preparation, and YouTube VOD-analysis migrations represented in this branch.
 
 The migration filenames use the exact 14-digit versions recorded by Supabase. Keep those versions unchanged when applying the migrations through the Supabase CLI.
 
