@@ -1154,11 +1154,11 @@ PAGES.reviews = async function (el) {
 function vodUploadModal() {
   openModal('<div class="vod-upload-modal"><div class="eyebrow">NEW VIDEO REVIEW</div><h2>Add a VOD in seconds</h2><p class="muted small">Paste the share link. Add match details now or fill them in later.</p><form id="vodupload">' +
     '<label class="f"><span>Video link *</span><input type="url" name="vod" required placeholder="https://www.youtube.com/watch?v=…"></label>' +
-    '<div class="vod-provider-hint">Works with YouTube, Twitch VODs, and direct video URLs. The link must be accessible to your reviewers.</div>' +
+    '<div class="vod-provider-hint">Paste a YouTube watch, Shorts, or live link. Team Hub will validate it, retrieve available video metadata, and create an analysis job for your team.</div>' +
     '<div class="vod-form-grid"><label class="f"><span>Review title</span><input name="title" placeholder="e.g. vs Sentinels · Scrim 2"></label><label class="f"><span>Date played</span><input type="date" name="date" value="' + todayISO() + '"></label>' +
     '<label class="f"><span>Opponent</span><input name="opponent" placeholder="Opponent team"></label><label class="f"><span>Map</span><input name="map" placeholder="Ascent, Haven…"></label>' +
     '<label class="f"><span>Recording type</span><select name="type"><option>Scrim</option><option>Official match</option><option>Pro reference</option><option>Practice</option></select></label><label class="f"><span>POV player (optional)</span><input name="pov" placeholder="Player IGN"></label></div>' +
-    '<div class="vod-upload-note"><b>What happens next?</b><span>The video is added to your review library and opens in its review room. Coaches can add timestamped notes and convert observations into player assignments. Automated match-stat extraction requires a video-analysis processor; this link form does not pretend to have analyzed the footage.</span></div>' +
+    '<div class="vod-upload-note"><b>What happens next?</b><span>Team Hub checks the YouTube link, saves the VOD, and creates a trackable analysis job. Actual round and player-stat extraction starts once an authorized video asset and analysis provider are connected. A YouTube share link alone is not treated as a downloadable video.</span></div>' +
     '<div class="row"><button class="btn" type="submit">Add video to library</button><button class="btn ghost" type="button" data-close>Cancel</button></div></form></div>', m => {
       $('#vodupload', m).onsubmit = async e => {
         e.preventDefault();
@@ -1166,20 +1166,23 @@ function vodUploadModal() {
         let parsed;
         try { parsed = new URL(url); } catch (_) { toast('Enter a valid video URL'); return; }
         if (!/^https?:$/.test(parsed.protocol)) { toast('Use an http or https video link'); return; }
-        const info = videoInfo(url);
         const title = form.title.value.trim() || [form.opponent.value.trim(), form.type.value].filter(Boolean).join(' · ') || 'VOD review';
-        const rec = { vod:url, title, date:form.date.value || todayISO(), opponent:form.opponent.value.trim() || null, map:form.map.value.trim() || null, type:form.type.value, pov:form.pov.value.trim() || null, whose:'Our team', summary:null, body:null };
-        const submit = $('button[type="submit"]', form); submit.disabled = true; submit.textContent = 'Adding video…';
+        const submit = $('button[type="submit"]', form); submit.disabled = true; submit.textContent = 'Checking YouTube & creating job…';
         try {
-          await db.insert('reviews', [rec]);
+          const { data, error } = await sb.functions.invoke('youtube-vod-ingest', { body: {
+            url, title, date:form.date.value || todayISO(), opponent:form.opponent.value.trim(),
+            map:form.map.value.trim(), type:form.type.value, pov:form.pov.value.trim()
+          }});
+          if (error) throw error;
+          if (!data || !data.ok) throw new Error(data?.error || 'The VOD import could not be completed.');
           S.cache = {};
           closeModal();
-          toast(info && info.kind !== 'link' ? 'VOD added to your review library' : 'Video link added to your review library');
-          location.hash = '#/reviews';
+          toast('YouTube VOD imported · analysis job #' + data.job.id + ' awaiting video access');
+          location.hash = '#/reviews/' + data.review_id;
           render();
         } catch (err) {
           submit.disabled = false; submit.textContent = 'Add video to library';
-          toast('Could not add VOD: ' + err.message);
+          toast('Could not import VOD: ' + (err.message || 'Unknown error'));
         }
       };
     });
