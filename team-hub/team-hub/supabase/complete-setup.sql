@@ -558,137 +558,6 @@ ALTER TABLE public.utility_usage ADD CONSTRAINT utility_usage_team_id_fkey FOREI
 ALTER TABLE public.work_on ADD CONSTRAINT work_on_pkey PRIMARY KEY (id);
 ALTER TABLE public.work_on ADD CONSTRAINT work_on_team_id_fkey FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE;
 
--- Row-level security
-
-
--- Table indexes
-CREATE INDEX aim_logs_team_idx ON public.aim_logs USING btree (team_id, user_id, date);
-CREATE INDEX aim_logs_user_id_idx ON public.aim_logs USING btree (user_id);
-CREATE INDEX announcements_team_idx ON public.announcements USING btree (team_id);
-CREATE INDEX availability_user_id_idx ON public.availability USING btree (user_id);
-CREATE INDEX checkins_team_idx ON public.checkins USING btree (team_id);
-CREATE INDEX comms_recordings_team_id_idx ON public.comms_recordings USING btree (team_id);
-CREATE INDEX comp_notes_team_idx ON public.comp_notes USING btree (team_id);
-CREATE INDEX drills_team_idx ON public.drills USING btree (team_id);
-CREATE INDEX game_plans_team_idx ON public.game_plans USING btree (team_id, match_date);
-CREATE INDEX game_plans_scrim_id_idx ON public.game_plans USING btree (scrim_id);
-CREATE INDEX guides_team_idx ON public.guides USING btree (team_id);
-CREATE INDEX lineup_learned_team_id_idx ON public.lineup_learned USING btree (team_id);
-CREATE INDEX lineup_learned_user_id_idx ON public.lineup_learned USING btree (user_id);
-CREATE INDEX lineups_created_by_idx ON public.lineups USING btree (created_by);
-CREATE INDEX lineups_team_id_idx ON public.lineups USING btree (team_id);
-CREATE INDEX matches_team_idx ON public.matches USING btree (team_id);
-CREATE INDEX matches_scrim_id_idx ON public.matches USING btree (scrim_id);
-CREATE INDEX one_on_one_idx ON public.one_on_one USING btree (team_id, player_id, created_at);
-CREATE INDEX one_on_one_author_id_idx ON public.one_on_one USING btree (author_id);
-CREATE INDEX one_on_one_player_id_idx ON public.one_on_one USING btree (player_id);
-CREATE INDEX opponent_scouting_team_idx ON public.opponent_scouting USING btree (team_id);
-CREATE INDEX pistol_rounds_team_idx ON public.pistol_rounds USING btree (team_id);
-CREATE INDEX player_stats_team_idx ON public.player_stats USING btree (team_id);
-CREATE INDEX profiles_team_id_idx ON public.profiles USING btree (team_id);
-CREATE INDEX rank_history_team_id_idx ON public.rank_history USING btree (team_id);
-CREATE INDEX reviews_team_idx ON public.reviews USING btree (team_id);
-CREATE INDEX roster_team_idx ON public.roster USING btree (team_id);
-CREATE INDEX scrims_team_idx ON public.scrims USING btree (team_id, starts_at);
-CREATE INDEX set_plays_team_idx ON public.set_plays USING btree (team_id);
-CREATE INDEX skill_progress_team_id_idx ON public.skill_progress USING btree (team_id);
-CREATE INDEX skill_progress_verified_by_idx ON public.skill_progress USING btree (verified_by);
-CREATE UNIQUE INDEX teams_public_slug_idx ON public.teams USING btree (lower(public_slug));
-CREATE INDEX teams_owner_id_idx ON public.teams USING btree (owner_id);
-CREATE INDEX timeout_cards_team_id_idx ON public.timeout_cards USING btree (team_id);
-CREATE INDEX utility_usage_team_idx ON public.utility_usage USING btree (team_id);
-CREATE INDEX work_on_team_idx ON public.work_on USING btree (team_id);
-
--- Row-level security policies
-CREATE POLICY agent_counters_coach ON public.agent_counters AS PERMISSIVE FOR ALL TO public USING (is_admin()) WITH CHECK (is_admin());
-CREATE POLICY agent_counters_read ON public.agent_counters AS PERMISSIVE FOR SELECT TO public USING (can_see('comp_checker'::text));
-CREATE POLICY aim_logs_own ON public.aim_logs AS PERMISSIVE FOR ALL TO public USING ((user_id = ( SELECT auth.uid() AS uid))) WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team()) AND is_member()));
-CREATE POLICY aim_logs_read ON public.aim_logs AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
-CREATE POLICY aim_logs_staff_delete ON public.aim_logs AS PERMISSIVE FOR DELETE TO public USING (((team_id = my_team()) AND is_staff()));
-CREATE POLICY announcements_coach ON public.announcements AS PERMISSIVE FOR ALL TO public USING ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin()))) WITH CHECK ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin())));
-CREATE POLICY announcements_read ON public.announcements AS PERMISSIVE FOR SELECT TO public USING ((((team_id IS NULL) OR (team_id = my_team())) AND is_member()));
-CREATE POLICY availability_delete ON public.availability AS PERMISSIVE FOR DELETE TO public USING (((user_id = ( SELECT auth.uid() AS uid)) OR ((team_id = my_team()) AND is_coach())));
-CREATE POLICY availability_insert ON public.availability AS PERMISSIVE FOR INSERT TO public WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team()) AND is_member()));
-CREATE POLICY availability_read ON public.availability AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
-CREATE POLICY availability_update ON public.availability AS PERMISSIVE FOR UPDATE TO public USING ((user_id = ( SELECT auth.uid() AS uid))) WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team())));
-CREATE POLICY checkins_delete ON public.checkins AS PERMISSIVE FOR DELETE TO public USING (((user_id = ( SELECT auth.uid() AS uid)) OR ((team_id = my_team()) AND is_coach())));
-CREATE POLICY checkins_insert ON public.checkins AS PERMISSIVE FOR INSERT TO public WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team()) AND can_see('checkin'::text)));
-CREATE POLICY checkins_read ON public.checkins AS PERMISSIVE FOR SELECT TO public USING (((user_id = ( SELECT auth.uid() AS uid)) OR ((team_id = my_team()) AND is_coach())));
-CREATE POLICY checkins_staff_read ON public.checkins AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_staff()));
-CREATE POLICY checkins_update ON public.checkins AS PERMISSIVE FOR UPDATE TO public USING (((user_id = ( SELECT auth.uid() AS uid)) AND can_see('checkin'::text))) WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team())));
-CREATE POLICY comms_read ON public.comms_recordings AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member() AND (published OR is_staff())));
-CREATE POLICY comms_staff ON public.comms_recordings AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY comp_notes_coach ON public.comp_notes AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY comp_notes_other_coaches ON public.comp_notes AS PERMISSIVE FOR SELECT TO public USING ((is_staff() AND (team_id IS NOT NULL)));
-CREATE POLICY comp_notes_read ON public.comp_notes AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('scouting'::text)));
-CREATE POLICY comp_notes_staff ON public.comp_notes AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY drills_coach ON public.drills AS PERMISSIVE FOR ALL TO public USING ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin()))) WITH CHECK ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin())));
-CREATE POLICY drills_read ON public.drills AS PERMISSIVE FOR SELECT TO public USING ((((team_id IS NULL) OR (team_id = my_team())) AND is_member()));
-CREATE POLICY game_plans_coach ON public.game_plans AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY game_plans_read ON public.game_plans AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND (is_coach() OR (published AND can_see('scouting'::text)))));
-CREATE POLICY game_plans_staff ON public.game_plans AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY guides_coach ON public.guides AS PERMISSIVE FOR ALL TO public USING ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin()))) WITH CHECK ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin())));
-CREATE POLICY guides_read ON public.guides AS PERMISSIVE FOR SELECT TO public USING ((((team_id IS NULL) OR (team_id = my_team())) AND can_see(COALESCE(section, 'comms'::text))));
-CREATE POLICY lineup_learned_own ON public.lineup_learned AS PERMISSIVE FOR ALL TO public USING ((user_id = ( SELECT auth.uid() AS uid))) WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team()) AND is_member()));
-CREATE POLICY lineup_learned_read ON public.lineup_learned AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
-CREATE POLICY lineups_delete ON public.lineups AS PERMISSIVE FOR DELETE TO public USING (((team_id = my_team()) AND (is_staff() OR (created_by = ( SELECT auth.uid() AS uid)))));
-CREATE POLICY lineups_edit ON public.lineups AS PERMISSIVE FOR UPDATE TO public USING (((team_id = my_team()) AND (is_staff() OR (created_by = ( SELECT auth.uid() AS uid))))) WITH CHECK ((team_id = my_team()));
-CREATE POLICY lineups_insert ON public.lineups AS PERMISSIVE FOR INSERT TO public WITH CHECK (((team_id = my_team()) AND is_member() AND (created_by = ( SELECT auth.uid() AS uid))));
-CREATE POLICY lineups_read ON public.lineups AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
-CREATE POLICY map_pool_coach ON public.map_pool AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY map_pool_read ON public.map_pool AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('team_stats'::text)));
-CREATE POLICY matches_coach ON public.matches AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY matches_other_coaches ON public.matches AS PERMISSIVE FOR SELECT TO public USING ((is_staff() AND (team_id IS NOT NULL)));
-CREATE POLICY matches_read ON public.matches AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('team_stats'::text)));
-CREATE POLICY matches_staff ON public.matches AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY one_on_one_delete ON public.one_on_one AS PERMISSIVE FOR DELETE TO public USING (((team_id = my_team()) AND (author_id = ( SELECT auth.uid() AS uid))));
-CREATE POLICY one_on_one_insert ON public.one_on_one AS PERMISSIVE FOR INSERT TO public WITH CHECK (((team_id = my_team()) AND (author_id = ( SELECT auth.uid() AS uid)) AND (is_coach() OR ((player_id = ( SELECT auth.uid() AS uid)) AND is_member()))));
-CREATE POLICY one_on_one_read ON public.one_on_one AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND ((player_id = ( SELECT auth.uid() AS uid)) OR is_coach())));
-CREATE POLICY one_on_one_update ON public.one_on_one AS PERMISSIVE FOR UPDATE TO public USING (((team_id = my_team()) AND ((author_id = ( SELECT auth.uid() AS uid)) OR is_coach() OR (player_id = ( SELECT auth.uid() AS uid))))) WITH CHECK ((team_id = my_team()));
-CREATE POLICY opponent_scouting_coach ON public.opponent_scouting AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY opponent_scouting_read ON public.opponent_scouting AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('scouting'::text)));
-CREATE POLICY opponent_scouting_staff ON public.opponent_scouting AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY patch_notes_coach ON public.patch_notes AS PERMISSIVE FOR ALL TO public USING (is_admin()) WITH CHECK (is_admin());
-CREATE POLICY patch_notes_read ON public.patch_notes AS PERMISSIVE FOR SELECT TO public USING (can_see('patch_notes'::text));
-CREATE POLICY pistol_rounds_coach ON public.pistol_rounds AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY pistol_rounds_read ON public.pistol_rounds AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('playbook'::text)));
-CREATE POLICY pistol_rounds_staff ON public.pistol_rounds AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY player_stats_coach ON public.player_stats AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY player_stats_other_coaches ON public.player_stats AS PERMISSIVE FOR SELECT TO public USING ((is_staff() AND (team_id IS NOT NULL)));
-CREATE POLICY player_stats_read ON public.player_stats AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND (can_see('team_stats'::text) OR (can_see('my_stats'::text) AND (norm_name(player) = my_ign())))));
-CREATE POLICY player_stats_staff ON public.player_stats AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY profiles_coach_update ON public.profiles AS PERMISSIVE FOR UPDATE TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK ((team_id = my_team()));
-CREATE POLICY profiles_select ON public.profiles AS PERMISSIVE FOR SELECT TO public USING (((id = ( SELECT auth.uid() AS uid)) OR ((team_id = my_team()) AND is_member() AND ((NOT is_admin) OR (EXISTS ( SELECT 1
-   FROM teams t
-  WHERE ((t.id = profiles.team_id) AND (t.owner_id = profiles.id))))))));
-CREATE POLICY rank_history_read ON public.rank_history AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
-CREATE POLICY reviews_coach ON public.reviews AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY reviews_other_coaches ON public.reviews AS PERMISSIVE FOR SELECT TO public USING ((is_staff() AND (team_id IS NOT NULL)));
-CREATE POLICY reviews_read ON public.reviews AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('reviews'::text)));
-CREATE POLICY reviews_staff ON public.reviews AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY roster_coach ON public.roster AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY roster_read ON public.roster AS PERMISSIVE FOR SELECT TO public USING ((team_id = my_team()));
-CREATE POLICY scrims_coach ON public.scrims AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY scrims_read ON public.scrims AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
-CREATE POLICY scrims_staff ON public.scrims AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY set_plays_coach ON public.set_plays AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY set_plays_read ON public.set_plays AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('playbook'::text)));
-CREATE POLICY set_plays_staff ON public.set_plays AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY skill_progress_own ON public.skill_progress AS PERMISSIVE FOR ALL TO public USING ((user_id = ( SELECT auth.uid() AS uid))) WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team()) AND is_member()));
-CREATE POLICY skill_progress_read ON public.skill_progress AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
-CREATE POLICY skill_progress_staff ON public.skill_progress AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY teams_coach ON public.teams AS PERMISSIVE FOR UPDATE TO public USING ((((id = my_team()) AND is_coach()) OR is_admin())) WITH CHECK ((((id = my_team()) AND is_coach()) OR is_admin()));
-CREATE POLICY teams_read ON public.teams AS PERMISSIVE FOR SELECT TO public USING (((id = my_team()) OR is_admin()));
-CREATE POLICY timeout_cards_read ON public.timeout_cards AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
-CREATE POLICY timeout_cards_staff ON public.timeout_cards AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY utility_usage_coach ON public.utility_usage AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY utility_usage_other_coaches ON public.utility_usage AS PERMISSIVE FOR SELECT TO public USING ((is_staff() AND (team_id IS NOT NULL)));
-CREATE POLICY utility_usage_read ON public.utility_usage AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND (can_see('team_stats'::text) OR (can_see('my_stats'::text) AND (norm_name(player) = my_ign())))));
-CREATE POLICY utility_usage_staff ON public.utility_usage AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-CREATE POLICY work_on_coach ON public.work_on AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
-CREATE POLICY work_on_read ON public.work_on AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND (is_coach() OR (approved AND can_see('reviews'::text) AND ((COALESCE(TRIM(BOTH FROM player), ''::text) = ''::text) OR (lower(TRIM(BOTH FROM player)) = ANY (ARRAY['team'::text, 'whole team'::text, 'everyone'::text, 'all'::text])) OR (norm_name(player) = my_ign()))))));
-CREATE POLICY work_on_staff ON public.work_on AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
-
 -- Functions and RPCs
 SET check_function_bodies = off;
 CREATE OR REPLACE FUNCTION public.admin_delete_team(tid bigint)
@@ -1180,11 +1049,147 @@ end $function$
 ;
 SET check_function_bodies = on;
 
+
+-- Table indexes
+CREATE INDEX aim_logs_team_idx ON public.aim_logs USING btree (team_id, user_id, date);
+CREATE INDEX aim_logs_user_id_idx ON public.aim_logs USING btree (user_id);
+CREATE INDEX announcements_team_idx ON public.announcements USING btree (team_id);
+CREATE INDEX availability_user_id_idx ON public.availability USING btree (user_id);
+CREATE INDEX checkins_team_idx ON public.checkins USING btree (team_id);
+CREATE INDEX comms_recordings_team_id_idx ON public.comms_recordings USING btree (team_id);
+CREATE INDEX comp_notes_team_idx ON public.comp_notes USING btree (team_id);
+CREATE INDEX drills_team_idx ON public.drills USING btree (team_id);
+CREATE INDEX game_plans_team_idx ON public.game_plans USING btree (team_id, match_date);
+CREATE INDEX game_plans_scrim_id_idx ON public.game_plans USING btree (scrim_id);
+CREATE INDEX guides_team_idx ON public.guides USING btree (team_id);
+CREATE INDEX lineup_learned_team_id_idx ON public.lineup_learned USING btree (team_id);
+CREATE INDEX lineup_learned_user_id_idx ON public.lineup_learned USING btree (user_id);
+CREATE INDEX lineups_created_by_idx ON public.lineups USING btree (created_by);
+CREATE INDEX lineups_team_id_idx ON public.lineups USING btree (team_id);
+CREATE INDEX matches_team_idx ON public.matches USING btree (team_id);
+CREATE INDEX matches_scrim_id_idx ON public.matches USING btree (scrim_id);
+CREATE INDEX one_on_one_idx ON public.one_on_one USING btree (team_id, player_id, created_at);
+CREATE INDEX one_on_one_author_id_idx ON public.one_on_one USING btree (author_id);
+CREATE INDEX one_on_one_player_id_idx ON public.one_on_one USING btree (player_id);
+CREATE INDEX opponent_scouting_team_idx ON public.opponent_scouting USING btree (team_id);
+CREATE INDEX pistol_rounds_team_idx ON public.pistol_rounds USING btree (team_id);
+CREATE INDEX player_stats_team_idx ON public.player_stats USING btree (team_id);
+CREATE INDEX profiles_team_id_idx ON public.profiles USING btree (team_id);
+CREATE INDEX rank_history_team_id_idx ON public.rank_history USING btree (team_id);
+CREATE INDEX reviews_team_idx ON public.reviews USING btree (team_id);
+CREATE INDEX roster_team_idx ON public.roster USING btree (team_id);
+CREATE INDEX scrims_team_idx ON public.scrims USING btree (team_id, starts_at);
+CREATE INDEX set_plays_team_idx ON public.set_plays USING btree (team_id);
+CREATE INDEX skill_progress_team_id_idx ON public.skill_progress USING btree (team_id);
+CREATE INDEX skill_progress_verified_by_idx ON public.skill_progress USING btree (verified_by);
+CREATE UNIQUE INDEX teams_public_slug_idx ON public.teams USING btree (lower(public_slug));
+CREATE INDEX teams_owner_id_idx ON public.teams USING btree (owner_id);
+CREATE INDEX timeout_cards_team_id_idx ON public.timeout_cards USING btree (team_id);
+CREATE INDEX utility_usage_team_idx ON public.utility_usage USING btree (team_id);
+CREATE INDEX work_on_team_idx ON public.work_on USING btree (team_id);
+
+
 -- Triggers
 CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION handle_new_user();
 CREATE TRIGGER profiles_roster_slot AFTER INSERT OR UPDATE OF approved, team_id, is_coach, staff_role ON profiles FOR EACH ROW EXECUTE FUNCTION ensure_roster_slot();
 CREATE TRIGGER protect_profile BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION protect_profile();
 CREATE TRIGGER protect_skill BEFORE INSERT OR UPDATE ON skill_progress FOR EACH ROW EXECUTE FUNCTION protect_skill();
+
+
+
+-- Row-level security
+
+
+
+-- Row-level security policies
+CREATE POLICY agent_counters_coach ON public.agent_counters AS PERMISSIVE FOR ALL TO public USING (is_admin()) WITH CHECK (is_admin());
+CREATE POLICY agent_counters_read ON public.agent_counters AS PERMISSIVE FOR SELECT TO public USING (can_see('comp_checker'::text));
+CREATE POLICY aim_logs_own ON public.aim_logs AS PERMISSIVE FOR ALL TO public USING ((user_id = ( SELECT auth.uid() AS uid))) WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team()) AND is_member()));
+CREATE POLICY aim_logs_read ON public.aim_logs AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
+CREATE POLICY aim_logs_staff_delete ON public.aim_logs AS PERMISSIVE FOR DELETE TO public USING (((team_id = my_team()) AND is_staff()));
+CREATE POLICY announcements_coach ON public.announcements AS PERMISSIVE FOR ALL TO public USING ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin()))) WITH CHECK ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin())));
+CREATE POLICY announcements_read ON public.announcements AS PERMISSIVE FOR SELECT TO public USING ((((team_id IS NULL) OR (team_id = my_team())) AND is_member()));
+CREATE POLICY availability_delete ON public.availability AS PERMISSIVE FOR DELETE TO public USING (((user_id = ( SELECT auth.uid() AS uid)) OR ((team_id = my_team()) AND is_coach())));
+CREATE POLICY availability_insert ON public.availability AS PERMISSIVE FOR INSERT TO public WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team()) AND is_member()));
+CREATE POLICY availability_read ON public.availability AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
+CREATE POLICY availability_update ON public.availability AS PERMISSIVE FOR UPDATE TO public USING ((user_id = ( SELECT auth.uid() AS uid))) WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team())));
+CREATE POLICY checkins_delete ON public.checkins AS PERMISSIVE FOR DELETE TO public USING (((user_id = ( SELECT auth.uid() AS uid)) OR ((team_id = my_team()) AND is_coach())));
+CREATE POLICY checkins_insert ON public.checkins AS PERMISSIVE FOR INSERT TO public WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team()) AND can_see('checkin'::text)));
+CREATE POLICY checkins_read ON public.checkins AS PERMISSIVE FOR SELECT TO public USING (((user_id = ( SELECT auth.uid() AS uid)) OR ((team_id = my_team()) AND is_coach())));
+CREATE POLICY checkins_staff_read ON public.checkins AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_staff()));
+CREATE POLICY checkins_update ON public.checkins AS PERMISSIVE FOR UPDATE TO public USING (((user_id = ( SELECT auth.uid() AS uid)) AND can_see('checkin'::text))) WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team())));
+CREATE POLICY comms_read ON public.comms_recordings AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member() AND (published OR is_staff())));
+CREATE POLICY comms_staff ON public.comms_recordings AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY comp_notes_coach ON public.comp_notes AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY comp_notes_other_coaches ON public.comp_notes AS PERMISSIVE FOR SELECT TO public USING ((is_staff() AND (team_id IS NOT NULL)));
+CREATE POLICY comp_notes_read ON public.comp_notes AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('scouting'::text)));
+CREATE POLICY comp_notes_staff ON public.comp_notes AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY drills_coach ON public.drills AS PERMISSIVE FOR ALL TO public USING ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin()))) WITH CHECK ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin())));
+CREATE POLICY drills_read ON public.drills AS PERMISSIVE FOR SELECT TO public USING ((((team_id IS NULL) OR (team_id = my_team())) AND is_member()));
+CREATE POLICY game_plans_coach ON public.game_plans AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY game_plans_read ON public.game_plans AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND (is_coach() OR (published AND can_see('scouting'::text)))));
+CREATE POLICY game_plans_staff ON public.game_plans AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY guides_coach ON public.guides AS PERMISSIVE FOR ALL TO public USING ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin()))) WITH CHECK ((((team_id = my_team()) AND is_coach()) OR ((team_id IS NULL) AND is_admin())));
+CREATE POLICY guides_read ON public.guides AS PERMISSIVE FOR SELECT TO public USING ((((team_id IS NULL) OR (team_id = my_team())) AND can_see(COALESCE(section, 'comms'::text))));
+CREATE POLICY lineup_learned_own ON public.lineup_learned AS PERMISSIVE FOR ALL TO public USING ((user_id = ( SELECT auth.uid() AS uid))) WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team()) AND is_member()));
+CREATE POLICY lineup_learned_read ON public.lineup_learned AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
+CREATE POLICY lineups_delete ON public.lineups AS PERMISSIVE FOR DELETE TO public USING (((team_id = my_team()) AND (is_staff() OR (created_by = ( SELECT auth.uid() AS uid)))));
+CREATE POLICY lineups_edit ON public.lineups AS PERMISSIVE FOR UPDATE TO public USING (((team_id = my_team()) AND (is_staff() OR (created_by = ( SELECT auth.uid() AS uid))))) WITH CHECK ((team_id = my_team()));
+CREATE POLICY lineups_insert ON public.lineups AS PERMISSIVE FOR INSERT TO public WITH CHECK (((team_id = my_team()) AND is_member() AND (created_by = ( SELECT auth.uid() AS uid))));
+CREATE POLICY lineups_read ON public.lineups AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
+CREATE POLICY map_pool_coach ON public.map_pool AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY map_pool_read ON public.map_pool AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('team_stats'::text)));
+CREATE POLICY matches_coach ON public.matches AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY matches_other_coaches ON public.matches AS PERMISSIVE FOR SELECT TO public USING ((is_staff() AND (team_id IS NOT NULL)));
+CREATE POLICY matches_read ON public.matches AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('team_stats'::text)));
+CREATE POLICY matches_staff ON public.matches AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY one_on_one_delete ON public.one_on_one AS PERMISSIVE FOR DELETE TO public USING (((team_id = my_team()) AND (author_id = ( SELECT auth.uid() AS uid))));
+CREATE POLICY one_on_one_insert ON public.one_on_one AS PERMISSIVE FOR INSERT TO public WITH CHECK (((team_id = my_team()) AND (author_id = ( SELECT auth.uid() AS uid)) AND (is_coach() OR ((player_id = ( SELECT auth.uid() AS uid)) AND is_member()))));
+CREATE POLICY one_on_one_read ON public.one_on_one AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND ((player_id = ( SELECT auth.uid() AS uid)) OR is_coach())));
+CREATE POLICY one_on_one_update ON public.one_on_one AS PERMISSIVE FOR UPDATE TO public USING (((team_id = my_team()) AND ((author_id = ( SELECT auth.uid() AS uid)) OR is_coach() OR (player_id = ( SELECT auth.uid() AS uid))))) WITH CHECK ((team_id = my_team()));
+CREATE POLICY opponent_scouting_coach ON public.opponent_scouting AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY opponent_scouting_read ON public.opponent_scouting AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('scouting'::text)));
+CREATE POLICY opponent_scouting_staff ON public.opponent_scouting AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY patch_notes_coach ON public.patch_notes AS PERMISSIVE FOR ALL TO public USING (is_admin()) WITH CHECK (is_admin());
+CREATE POLICY patch_notes_read ON public.patch_notes AS PERMISSIVE FOR SELECT TO public USING (can_see('patch_notes'::text));
+CREATE POLICY pistol_rounds_coach ON public.pistol_rounds AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY pistol_rounds_read ON public.pistol_rounds AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('playbook'::text)));
+CREATE POLICY pistol_rounds_staff ON public.pistol_rounds AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY player_stats_coach ON public.player_stats AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY player_stats_other_coaches ON public.player_stats AS PERMISSIVE FOR SELECT TO public USING ((is_staff() AND (team_id IS NOT NULL)));
+CREATE POLICY player_stats_read ON public.player_stats AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND (can_see('team_stats'::text) OR (can_see('my_stats'::text) AND (norm_name(player) = my_ign())))));
+CREATE POLICY player_stats_staff ON public.player_stats AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY profiles_coach_update ON public.profiles AS PERMISSIVE FOR UPDATE TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK ((team_id = my_team()));
+CREATE POLICY profiles_select ON public.profiles AS PERMISSIVE FOR SELECT TO public USING (((id = ( SELECT auth.uid() AS uid)) OR ((team_id = my_team()) AND is_member() AND ((NOT is_admin) OR (EXISTS ( SELECT 1
+   FROM teams t
+  WHERE ((t.id = profiles.team_id) AND (t.owner_id = profiles.id))))))));
+CREATE POLICY rank_history_read ON public.rank_history AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
+CREATE POLICY reviews_coach ON public.reviews AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY reviews_other_coaches ON public.reviews AS PERMISSIVE FOR SELECT TO public USING ((is_staff() AND (team_id IS NOT NULL)));
+CREATE POLICY reviews_read ON public.reviews AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('reviews'::text)));
+CREATE POLICY reviews_staff ON public.reviews AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY roster_coach ON public.roster AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY roster_read ON public.roster AS PERMISSIVE FOR SELECT TO public USING ((team_id = my_team()));
+CREATE POLICY scrims_coach ON public.scrims AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY scrims_read ON public.scrims AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
+CREATE POLICY scrims_staff ON public.scrims AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY set_plays_coach ON public.set_plays AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY set_plays_read ON public.set_plays AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND can_see('playbook'::text)));
+CREATE POLICY set_plays_staff ON public.set_plays AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY skill_progress_own ON public.skill_progress AS PERMISSIVE FOR ALL TO public USING ((user_id = ( SELECT auth.uid() AS uid))) WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (team_id = my_team()) AND is_member()));
+CREATE POLICY skill_progress_read ON public.skill_progress AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
+CREATE POLICY skill_progress_staff ON public.skill_progress AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY teams_coach ON public.teams AS PERMISSIVE FOR UPDATE TO public USING ((((id = my_team()) AND is_coach()) OR is_admin())) WITH CHECK ((((id = my_team()) AND is_coach()) OR is_admin()));
+CREATE POLICY teams_read ON public.teams AS PERMISSIVE FOR SELECT TO public USING (((id = my_team()) OR is_admin()));
+CREATE POLICY timeout_cards_read ON public.timeout_cards AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND is_member()));
+CREATE POLICY timeout_cards_staff ON public.timeout_cards AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY utility_usage_coach ON public.utility_usage AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY utility_usage_other_coaches ON public.utility_usage AS PERMISSIVE FOR SELECT TO public USING ((is_staff() AND (team_id IS NOT NULL)));
+CREATE POLICY utility_usage_read ON public.utility_usage AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND (can_see('team_stats'::text) OR (can_see('my_stats'::text) AND (norm_name(player) = my_ign())))));
+CREATE POLICY utility_usage_staff ON public.utility_usage AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
+CREATE POLICY work_on_coach ON public.work_on AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_coach())) WITH CHECK (((team_id = my_team()) AND is_coach()));
+CREATE POLICY work_on_read ON public.work_on AS PERMISSIVE FOR SELECT TO public USING (((team_id = my_team()) AND (is_coach() OR (approved AND can_see('reviews'::text) AND ((COALESCE(TRIM(BOTH FROM player), ''::text) = ''::text) OR (lower(TRIM(BOTH FROM player)) = ANY (ARRAY['team'::text, 'whole team'::text, 'everyone'::text, 'all'::text])) OR (norm_name(player) = my_ign()))))));
+CREATE POLICY work_on_staff ON public.work_on AS PERMISSIVE FOR ALL TO public USING (((team_id = my_team()) AND is_staff())) WITH CHECK (((team_id = my_team()) AND is_staff()));
 
 
 -- Data API privileges. RLS policies below enforce row-level access.
