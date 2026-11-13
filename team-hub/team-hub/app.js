@@ -691,7 +691,7 @@ PAGES.home = async function (el) {
   const me = S.me, coach = isStaff(), head = me.is_coach;
   const doCheckin = can('checkin') && !(coach && !me.ign);
   const today = todayISO();
-  const [ann, team, myHist, todayRows, ps, work, nxt, avail, plans] = await Promise.all([
+  const [ann, team, myHist, todayRows, ps, work, nxt, avail, plans, matches] = await Promise.all([
     cached('announcements'), teamPlayers(),
     doCheckin ? db.list('checkins', { eq: { user_id: me.id }, order: 'day', asc: false, limit: 60 }) : Promise.resolve([]),
     coach ? db.list('checkins', { eq: { day: today } }) : Promise.resolve([]),
