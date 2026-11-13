@@ -170,7 +170,14 @@ let sb = null;
 const S = { session: null, me: null, team: null, route: 'home', cache: {} };
 function teamName() { return (S.team && S.team.name) || TEAM; }
 // can this person edit a table (shared tables: owner only)
-function canEdit(table) { return !!(S.me && S.me.is_coach && (!(TABLES[table] || {}).shared || S.me.is_admin)); }
+// Assistant coaches and analysts can add and edit these (not the roster, members, team settings or map picks)
+const STAFF_TABLES = ['reviews', 'work_on', 'matches', 'player_stats', 'utility_usage', 'set_plays', 'pistol_rounds', 'opponent_scouting', 'comp_notes', 'game_plans'];
+// Other teams' coaches can read these, so always filter them to our own team
+const CROSS_TABLES = ['matches', 'player_stats', 'utility_usage', 'reviews', 'comp_notes'];
+const STAFF_ROLES = ['Assistant coach', 'Analyst'];
+function isStaff() { return !!(S.me && (S.me.is_coach || S.me.staff_role)); }
+function staffLabel(m) { return m.is_coach ? 'Head coach' : (m.staff_role || ''); }
+function canEdit(table) { return !!(S.me && ((S.me.is_coach && (!(TABLES[table] || {}).shared || S.me.is_admin)) || (S.me.staff_role && STAFF_TABLES.includes(table)))); }
 
 const db = {
   async list(table, opts) {
@@ -179,6 +186,7 @@ const db = {
     let q = sb.from(table).select('*');
     if (opts.eq) for (const k in opts.eq) q = q.eq(k, opts.eq[k]);
     if (opts.gte) for (const k in opts.gte) q = q.gte(k, opts.gte[k]);
+    if (CROSS_TABLES.includes(table) && S.me && S.me.team_id && !(opts.eq && 'team_id' in opts.eq)) q = q.eq('team_id', S.me.team_id);
     const order = opts.order || cfg.order || 'id';
     q = q.order(order, { ascending: opts.asc != null ? opts.asc : !!cfg.asc, nullsFirst: false });
     if (order !== 'id') q = q.order('id', { ascending: true });
@@ -209,7 +217,7 @@ const db = {
 
 function can(sec) {
   const me = S.me; if (!me || !me.approved) return false;
-  if (me.is_coach) return true;
+  if (me.is_coach || me.staff_role) return true;
   const v = me.visibility || {};
   return v[sec] !== false;
 }
@@ -368,7 +376,7 @@ const NAV = [
 ];
 function navAllowed(n) {
   if (!n.sec) return true;
-  if (S.me.is_coach && !S.me.ign && (n.r === 'checkin' || n.r === 'stats')) return false; // coach without an IGN doesn't need these
+  if (isStaff() && !S.me.ign && (n.r === 'checkin' || n.r === 'stats')) return false; // coach without an IGN doesn't need these
   return Array.isArray(n.sec) ? n.sec.some(can) : can(n.sec);
 }
 
@@ -377,13 +385,13 @@ function render() {
   if (me && !me.team_id) { renderOnboard(); return; }
   if (!me || !me.approved) { renderPending(); return; }
   const items = NAV.filter(navAllowed);
-  if (!items.some(n => n.r === S.route) && !(S.route === 'coach' && me.is_coach) && !(S.route === 'owner' && me.is_admin) && S.route !== 'account') S.route = 'home';
+  if (!items.some(n => n.r === S.route) && !((S.route === 'coach' || S.route === 'explore') && isStaff()) && !(S.route === 'owner' && me.is_admin) && S.route !== 'account') S.route = 'home';
   const ownerView = me.is_admin && S.team && S.team.owner_id !== me.id;
   const link = (r, label, i) => '<a href="#/' + r + '" class="' + (S.route === r ? 'active' : '') + '">' + icon(i) + '<span>' + esc(label) + '</span></a>';
   const groups = groupBy(items, 'g');
   const navHtml = groups.map(([g, list]) => '<div class="nav-g">' + esc(g) + '</div>' + list.map(n => link(n.r, n.label, n.i)).join('')).join('') +
-    (me.is_coach || me.is_admin ? '<div class="nav-g">Manage</div>' : '') +
-    (me.is_coach ? link('coach', 'Coach panel', 'gear') : '') +
+    (isStaff() || me.is_admin ? '<div class="nav-g">Manage</div>' : '') +
+    (isStaff() ? link('coach', me.is_coach ? 'Coach panel' : 'Staff panel', 'gear') + link('explore', 'Other teams', 'eye') : '') +
     (me.is_admin ? link('owner', 'All teams', 'globe') : '');
   $('#app').innerHTML =
     '<div class="topbar"><button id="menubtn" aria-label="Menu">☰</button><span class="dot"></span><b>' + esc(teamName()) + '</b></div>' +
@@ -391,7 +399,7 @@ function render() {
     (ownerView ? '<a href="#/owner" class="ownerbar">Owner view: another team.<br><b>Back to all teams</b></a>' : '') +
     '<nav class="nav">' + navHtml + '</nav>' +
     '<a href="#/account" class="me' + (S.route === 'account' ? ' active' : '') + '">' + avatar(me, 34) + '<div class="grow"><div class="t">' + esc(nameOf(me)) + '</div><div class="small muted">' +
-      esc([me.discord ? '@' + me.discord : '', me.is_coach ? 'Coach' : me.role].filter(Boolean).join(' · ')) + '</div></div></a></aside>' +
+      esc([me.discord ? '@' + me.discord : '', isStaff() ? staffLabel(me) : me.role].filter(Boolean).join(' · ')) + '</div></div></a></aside>' +
     '<main class="main" id="main"><div class="muted">Loading…</div></main></div>';
   $('#menubtn').onclick = () => $('#sidebar').classList.toggle('open');
   $$('#sidebar a').forEach(a => a.addEventListener('click', () => $('#sidebar').classList.remove('open')));
@@ -560,9 +568,10 @@ async function teamPlayers() {
     return { key: 'r' + r.id, name: r.ign || (m && m.ign) || r.name, ign: r.ign || (m && m.ign), role: r.role || (m && m.role), is_igl: r.is_igl, is_trial: r.is_trial,
       discord: r.discord || (m && m.discord), avatar_url: m && m.avatar_url, user_id: m ? m.id : null, joined: !!(m && r.claim_status === 'approved'), rid: r.id, bench: r.status === 'Bench' };
   });
-  members.forEach(m => { if (!m.is_coach && !roster.some(r => r.claimed_by === m.id)) out.push({ key: 'u' + m.id, name: nameOf(m), ign: m.ign, role: m.role, is_igl: m.is_igl, is_trial: m.is_trial, discord: m.discord, avatar_url: m.avatar_url, user_id: m.id, joined: true }); });
-  const coaches = members.filter(m => m.is_coach);
-  return { players: out.sort((a, b) => (a.is_trial ? 1 : 0) - (b.is_trial ? 1 : 0) || String(a.name).localeCompare(String(b.name))), coaches: coaches };
+  members.forEach(m => { if (!m.is_coach && !m.staff_role && !roster.some(r => r.claimed_by === m.id)) out.push({ key: 'u' + m.id, name: nameOf(m), ign: m.ign, role: m.role, is_igl: m.is_igl, is_trial: m.is_trial, discord: m.discord, avatar_url: m.avatar_url, user_id: m.id, joined: true }); });
+  const staffIds = new Set(members.filter(m => m.is_coach || m.staff_role).map(m => m.id));
+  const coaches = members.filter(m => m.is_coach).concat(members.filter(m => !m.is_coach && m.staff_role));
+  return { players: out.filter(p => !(p.user_id && staffIds.has(p.user_id))).sort((a, b) => (a.is_trial ? 1 : 0) - (b.is_trial ? 1 : 0) || String(a.name).localeCompare(String(b.name))), coaches: coaches };
 }
 async function kickPlayer(p, done) {
   if (!confirm('Kick ' + p.name + ' from ' + teamName() + '?\n\nThey lose access to the team and their roster spot is removed. Their past stats stay.')) return;
@@ -638,7 +647,7 @@ async function checkinForm(box, day, onSaved) {
 
 // ---- Home
 PAGES.home = async function (el) {
-  const me = S.me, coach = me.is_coach;
+  const me = S.me, coach = isStaff(), head = me.is_coach;
   const doCheckin = can('checkin') && !(coach && !me.ign);
   const today = todayISO();
   const [ann, team, myHist, todayRows, ps, work, nxt, avail, plans] = await Promise.all([
@@ -683,11 +692,11 @@ PAGES.home = async function (el) {
     coachHtml = panel('Today\'s check-ins', '<a class="btn small ghost" href="#/coach/checkins">Week view</a>',
       (joined.length ? '<div class="progress"><div style="width:' + Math.round(doneCount / joined.length * 100) + '%"></div></div>' : '') +
       (players.length ? '<div class="plist">' + list + '</div>' : empty('No players on the roster yet.', '<a class="btn small" href="#/coach/members">Add players</a>'))) +
-      '<div class="quick">' +
+      (head ? '<div class="quick">' +
       '<a href="#/coach/team" class="qa"><b>Invite players</b><span>Team code &amp; link</span></a>' +
       '<a href="#/coach/members" class="qa"><b>Roster</b><span>Slots, roles, access</span></a>' +
       '<a href="#/coach/announce" class="qa"><b>Post an update</b><span>Announcement</span></a>' +
-      '<a href="#/coach/data" class="qa"><b>Import sheet</b><span>Stats, plays, reviews</span></a></div>';
+      '<a href="#/coach/data" class="qa"><b>Import sheet</b><span>Stats, plays, reviews</span></a></div>' : '<div class="quick"><a href="#/reviews" class="qa"><b>Add a VOD review</b><span>VOD reviews</span></a><a href="#/coach/work" class="qa"><b>Work on</b><span>Suggestions to approve</span></a><a href="#/coach/data" class="qa"><b>Import sheet</b><span>Stats, reviews</span></a><a href="#/explore" class="qa"><b>Other teams</b><span>Results &amp; stats</span></a></div>');
   }
 
   // my stats
@@ -698,7 +707,7 @@ PAGES.home = async function (el) {
   }
   // roster
   const rosterHtml = panel('The team', '<a class="small" href="#/team">Roster &amp; stats →</a>',
-    (team.coaches.length ? '<div class="small muted" style="margin-bottom:6px">Coach' + (team.coaches.length > 1 ? 'es' : '') + ': ' + team.coaches.map(c => esc(nameOf(c))).join(', ') + '</div>' : '') +
+    (team.coaches.length ? '<div class="small muted" style="margin-bottom:6px">Coaching staff: ' + team.coaches.map(c => esc(nameOf(c)) + ' <span class="muted">(' + esc(staffLabel(c)) + ')</span>').join(', ') + '</div>' : '') +
     (players.length ? '<div class="plist compact">' + players.slice().sort((a, b) => (a.bench ? 1 : 0) - (b.bench ? 1 : 0)).map(p => '<div class="prow' + (p.bench ? ' benched' : '') + '">' + avatar(p, 28) + '<div class="grow t">' + esc(p.name) + (p.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (p.is_trial ? ' <span class="pill yellow">Trial</span>' : '') + (p.bench ? ' <span class="pill">Bench</span>' : '') + '</div>' + rolePill(p.role) + '</div>').join('') + '</div>' : '<p class="muted small">No players yet.</p>'));
   const annHtml = panel('From the coach', coach ? '<a class="small" href="#/coach/announce">Post →</a>' : '',
     anns.length ? anns.slice(0, 5).map(a => '<div class="ann">' + (a.pinned ? '<span class="pill red">Pinned</span> ' : '') + '<b>' + esc(a.title) + '</b> <span class="muted small">' + fmtDate(a.created_at) + '</span><div class="md">' + md(a.body) + '</div></div>').join('') : '<p class="muted small">Nothing posted yet.</p>');
@@ -805,7 +814,7 @@ PAGES.team = async function (el) {
   const rw = sum(matches, 'rounds_won'), rl = sum(matches, 'rounds_lost');
   let body = '';
   if (tab === 'roster' || !showStats) {
-    body = (team.coaches.length ? '<div class="small muted" style="margin:4px 0 12px">Coaching staff: ' + team.coaches.map(c => '<span class="chip">' + avatar(c, 20) + esc(nameOf(c)) + '</span>').join(' ') + '</div>' : '') +
+    body = (team.coaches.length ? '<div class="small muted" style="margin:4px 0 12px">Coaching staff: ' + team.coaches.map(c => '<span class="chip">' + avatar(c, 20) + esc(nameOf(c)) + ' <span class="muted">' + esc(staffLabel(c)) + '</span></span>').join(' ') + '</div>' : '') +
       (team.players.length ? ['Active roster', 'Bench'].map(sec => { const list = team.players.filter(p => (sec === 'Bench') === !!p.bench);
         if (sec === 'Bench' && !list.length && !S.me.is_coach) return '';
         return '<div class="sec-h"><h2>' + sec + ' <span class="muted small">' + list.length + '</span></h2>' + (sec === 'Bench' ? '<span class="small muted">Bench players keep their access and check-ins.</span>' : '') + '</div>' +
@@ -1021,7 +1030,7 @@ PAGES.reviews = async function (el) {
   const f = location.hash.split('/')[3] || '';
   const filt = f === 'ours' ? rows.filter(isOurs) : f === 'pro' ? rows.filter(r => !isOurs(r)) : rows;
   el.innerHTML = '<div class="page-h"><div><h1>VOD reviews</h1><p class="muted">Watch the VOD with the notes beside it. Timestamps jump the video to that moment.</p></div>' +
-    (S.me.is_coach ? '<button class="btn small" id="addrev">Add a review</button>' : '') + '</div>' +
+    (isStaff() ? '<button class="btn small" id="addrev">Add a review</button>' : '') + '</div>' +
     '<div class="tabs"><a href="#/reviews" class="' + (!f ? 'active' : '') + '">All</a><a href="#/reviews/0/ours" class="' + (f === 'ours' ? 'active' : '') + '">Our scrims &amp; matches</a><a href="#/reviews/0/pro" class="' + (f === 'pro' ? 'active' : '') + '">Pro &amp; other teams</a></div>' +
     (filt.length ? '<div class="vgrid">' + filt.map(r => { const vi = videoInfo(r.vod); const n = workFor(r, work).filter(w => w.status !== 'Fixed').length;
       return '<a class="vcard" href="#/reviews/' + r.id + '">' + thumbHtml(vi) + '<div class="vb"><div class="t">' + esc(r.title || 'VOD review') + '</div>' +
@@ -1038,12 +1047,12 @@ async function reviewDetail(el, r, work) {
     '<div class="row small" style="gap:6px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.type ? '<span class="pill">' + esc(r.type) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') +
     (r.pov ? '<span class="pill">POV: ' + esc(r.pov) + '</span>' : '') + (r.whose ? '<span class="pill ' + (isOurs(r) ? 'green' : '') + '">' + esc(r.whose) + '</span>' : '') + '</div></div>' +
     '<div class="row">' + (vi ? '<a class="btn small ghost" href="' + esc(vi.url) + '" target="_blank" rel="noopener">Open on ' + (vi.kind === 'tw' ? 'Twitch' : vi.kind === 'yt' ? 'YouTube' : 'site') + '</a>' : '') +
-    (S.me.is_coach && r.link ? linkHtml(r.link, 'Full review (coach)').replace('<a ', '<a class="btn small ghost" ') : '') + (S.me.is_coach ? '<button class="btn small ghost" id="editrev">Edit</button>' : '') + '</div></div>' +
+    (isStaff() && r.link ? linkHtml(r.link, 'Full review (coach)').replace('<a ', '<a class="btn small ghost" ') : '') + (isStaff() ? '<button class="btn small ghost" id="editrev">Edit</button>' : '') + '</div></div>' +
     '<div class="review-grid"><div class="vcol"><div class="player">' + (canEmbed ? '<iframe id="vplayer" src="' + esc(embedSrc(vi, start)) + '" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>' : '<div class="noembed">' + (vi ? '<a class="btn" href="' + esc(vi.url) + '" target="_blank" rel="noopener">Watch the VOD</a>' : 'No video link on this review.') + '</div>') + '</div>' +
       (start ? '<div class="small muted" style="margin-top:6px">Game starts at <button class="linkbtn" data-seek="' + start + '">' + fmtTs(start) + '</button></div>' : '') + '</div>' +
     '<div class="ncol">' +
       (r.summary ? panel('Key takeaways', '', '<div class="md takeaways">' + md(String(r.summary).replace(/\s(\d\))\s/g, '\n$1 ')) + '</div>') : '') +
-      (items.length ? panel('What we need to work on', '<a class="small" href="#/workon">All →</a>', items.map(w => workCard(w, { onSeek: true, coachView: S.me.is_coach })).join('')) : '') +
+      (items.length ? panel('What we need to work on', '<a class="small" href="#/workon">All →</a>', items.map(w => workCard(w, { onSeek: true, coachView: isStaff() })).join('')) : '') +
       (r.body ? panel('Notes &amp; tips', '', '<div class="md notes">' + md(r.body) + '</div>') : (!r.summary && !items.length ? empty('No notes on this review yet.') : '')) +
     '</div></div>';
   // timestamps in the notes become buttons that seek the video
@@ -1065,7 +1074,7 @@ async function reviewDetail(el, r, work) {
 
 // ---- Work on: mistakes from VODs and how to avoid them
 PAGES.workon = async function (el) {
-  const me = S.me, coach = me.is_coach;
+  const me = S.me, coach = isStaff();
   const items = (await cached('work_on')).filter(w => coach ? w.approved : true);
   const who = location.hash.split('/')[2] || (coach ? 'all' : 'me');
   const showFixed = location.hash.split('/')[3] === 'fixed';
@@ -1136,12 +1145,15 @@ PAGES.account = async function (el) {
 
 // ------------------------------------------------------------ coach panel
 PAGES.coach = async function (el) {
-  if (!S.me.is_coach) { el.innerHTML = '<p>Coach only.</p>'; return; }
-  const sub = location.hash.split('/')[2] || 'members';
-  const tabs = [['members', 'Members'], ['work', 'Work on'], ['team', 'Team & invites'], ['checkins', 'Check-ins'], ['announce', 'Announcements'], ['data', 'Content & import']];
-  el.innerHTML = '<div class="page-h"><h1>Coach panel</h1></div><div class="tabs">' + tabs.map(t => '<button data-t="' + t[0] + '" class="' + (t[0] === sub ? 'active' : '') + '">' + t[1] + '</button>').join('') + '</div><div id="cp"></div>';
+  if (!isStaff()) { el.innerHTML = '<p>Coaches only.</p>'; return; }
+  const head = S.me.is_coach;
+  const tabs = head ? [['members', 'Members'], ['work', 'Work on'], ['team', 'Team & invites'], ['checkins', 'Check-ins'], ['announce', 'Announcements'], ['data', 'Content & import']]
+    : [['work', 'Work on'], ['checkins', 'Check-ins'], ['data', 'Content & import']];
+  let sub = location.hash.split('/')[2] || tabs[0][0];
+  if (!tabs.some(t => t[0] === sub)) sub = tabs[0][0];
+  el.innerHTML = '<div class="page-h"><div><h1>' + (head ? 'Coach panel' : 'Staff panel') + '</h1>' + (head ? '' : '<p class="muted">You\'re ' + esc(S.me.staff_role === 'Analyst' ? 'an analyst' : 'an assistant coach') + ': you can add VOD reviews, work-on items, stats and plays. Members, the roster, invites and map picks are managed by the head coach.</p>') + '</div></div><div class="tabs">' + tabs.map(t => '<button data-t="' + t[0] + '" class="' + (t[0] === sub ? 'active' : '') + '">' + t[1] + '</button>').join('') + '</div><div id="cp"></div>';
   $$('.tabs button', el).forEach(b => b.onclick = () => { location.hash = '#/coach/' + b.dataset.t; });
-  await (COACH[sub] || COACH.members)($('#cp'));
+  await (COACH[sub] || COACH[tabs[0][0]])($('#cp'));
 };
 
 const COACH = {};
@@ -1170,6 +1182,7 @@ COACH.members = async function (box) {
     const vis = {}; Object.keys(SECTIONS).forEach(k => vis[k] = !!f.querySelector('[data-vis="' + k + '"]').checked);
     const patch = { ign: f.ign.value || null, role: f.role.value, is_igl: f.is_igl.checked, is_trial: f.is_trial.checked, approved: f.approved.checked, visibility: vis };
     if (f.is_coach) patch.is_coach = f.is_coach.checked;
+    if (f.staff_role) patch.staff_role = patch.is_coach ? null : (f.staff_role.value || null);
     const { error } = await sb.from('profiles').update(patch).eq('id', id);
     toast(error ? 'Error: ' + error.message : 'Saved'); S.cache = {};
     if (!error && id === S.me.id) await loadMe();
@@ -1196,9 +1209,9 @@ function memberCard(m, slot) {
   const me = m.id === S.me.id;
   const vis = m.visibility || {};
   return '<details class="item"' + (!m.approved ? ' open' : '') + '><summary><div class="row spread"><div><span class="t">' + esc(nameOf(m)) + '</span> ' +
-    (m.is_coach ? '<span class="pill red">Coach</span> ' : '') + (!m.approved ? '<span class="pill yellow">Waiting</span> ' : '') + (m.is_trial ? '<span class="pill yellow">Trial</span> ' : '') +
+    (m.is_coach ? '<span class="pill red">Coach</span> ' : '') + (!m.is_coach && m.staff_role ? '<span class="pill purple">' + esc(m.staff_role) + '</span> ' : '') + (!m.approved ? '<span class="pill yellow">Waiting</span> ' : '') + (m.is_trial ? '<span class="pill yellow">Trial</span> ' : '') +
     '<span class="muted small">' + esc([m.discord ? '@' + m.discord : '', m.ign || 'no IGN', m.role || '', m.is_igl ? 'IGL' : ''].filter(Boolean).join(' · ')) + '</span>' +
-    (slot ? ' <span class="pill ' + (slot.claim_status === 'approved' ? 'green' : 'yellow') + '">' + (slot.claim_status === 'approved' ? 'Linked to ' : 'Claims ') + esc(slot.name) + '</span>' : (m.is_coach ? '' : ' <span class="pill">No roster slot</span>')) + '</div>' +
+    (m.staff_role ? '' : slot ? ' <span class="pill ' + (slot.claim_status === 'approved' ? 'green' : 'yellow') + '">' + (slot.claim_status === 'approved' ? 'Linked to ' : 'Claims ') + esc(slot.name) + '</span>' : (m.is_coach ? '' : ' <span class="pill">No roster slot</span>')) + '</div>' +
     (!m.approved ? '<button class="btn small" data-approve="' + m.id + '">' + (slot ? 'Confirm' : 'Approve') + '</button>' : '') + '</div></summary>' +
     '<div class="body"><form class="member" data-id="' + m.id + '"><div class="muted small" style="margin-bottom:8px">' + esc(m.discord ? 'Discord @' + m.discord : '') + ' · joined ' + fmtDate(m.created_at) + '</div>' +
     '<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">' +
@@ -1208,7 +1221,8 @@ function memberCard(m, slot) {
     '<label class="row small"><input type="checkbox" name="approved"' + (m.approved ? ' checked' : '') + (me ? ' disabled' : '') + '> Approved</label>' +
     '<label class="row small"><input type="checkbox" name="is_igl"' + (m.is_igl ? ' checked' : '') + '> IGL</label>' +
     '<label class="row small"><input type="checkbox" name="is_trial"' + (m.is_trial ? ' checked' : '') + '> Trial player</label>' +
-    (me ? '' : '<label class="row small"><input type="checkbox" name="is_coach"' + (m.is_coach ? ' checked' : '') + '> Coach (full access)</label>') + '</div>' +
+    (me ? '' : '<label class="row small"><input type="checkbox" name="is_coach"' + (m.is_coach ? ' checked' : '') + '> Head coach (full access)</label>') + '</div>' +
+    (me || m.is_coach ? '' : '<label class="f" style="max-width:320px"><span>Team role</span><select name="staff_role"><option value="">Player</option>' + STAFF_ROLES.map(r => '<option' + (r === m.staff_role ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></label>') +
     '<div class="lbl small muted" style="margin-bottom:6px">CAN SEE</div><div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px">' +
     Object.keys(SECTIONS).map(k => '<label class="row small"><input type="checkbox" data-vis="' + k + '"' + (vis[k] !== false ? ' checked' : '') + (m.is_coach ? ' disabled' : '') + '> ' + esc(SECTIONS[k]) + '</label>').join('') + '</div>' +
     '<div class="row" style="margin-top:12px"><button class="btn small">Save</button>' + (me ? '' : '<button type="button" class="btn small danger" data-remove="' + m.id + '">Kick from team</button>') + '</div></form></div></details>';
@@ -1320,7 +1334,7 @@ COACH.checkins = async function (box) {
   ]);
   const days = []; for (let i = 6; i >= 0; i--) days.push(addDays(todayISO(), -i));
   const byKey = new Map(rows.map(r => [r.user_id + '|' + String(r.day).slice(0, 10), r]));
-  const players = (members || []).filter(m => !m.is_coach || rows.some(r => r.user_id === m.id));
+  const players = (members || []).filter(m => (!m.is_coach && !m.staff_role) || rows.some(r => r.user_id === m.id));
   const name = id => { const m = (members || []).find(x => x.id === id); return m ? nameOf(m) : 'Unknown'; };
   box.innerHTML = '<div class="row spread"><h2>Last 7 days</h2><button class="btn ghost small" id="csv">Download CSV (for the sheet)</button></div>' +
     '<div class="card" style="overflow-x:auto"><div class="daygrid"><div></div>' + days.map(d => '<div class="muted small" style="text-align:center">' + new Date(d + 'T12:00').toLocaleDateString(undefined, { weekday: 'short' }) + '</div>').join('') +
@@ -1362,7 +1376,7 @@ COACH.announce = async function (box) {
 // ---- Content manager + workbook import
 COACH.data = async function (box) {
   const keys = Object.keys(TABLES).filter(canEdit);
-  const counts = await Promise.all(keys.map(async k => { const { count } = await sb.from(k).select('id', { count: 'exact', head: true }); return count || 0; }));
+  const counts = await Promise.all(keys.map(async k => { let q = sb.from(k).select('id', { count: 'exact', head: true }); if (CROSS_TABLES.includes(k)) q = q.eq('team_id', S.me.team_id); const { count } = await q; return count || 0; }));
   const cur = location.hash.split('/')[3] || '';
   box.innerHTML = '<div class="card"><h2>Import from your coaching workbook</h2>' +
     '<p class="small muted">Download your Team Hub sheet as an Excel file (.xlsx) and pick it here. Tabs with these names are read: ' +
@@ -1637,7 +1651,7 @@ async function nextScrim() { const now = Date.now() - 3 * 3600000; return (await
 
 // ---- Schedule page
 PAGES.schedule = async function (el) {
-  const me = S.me, coach = me.is_coach;
+  const me = S.me, coach = isStaff();
   const off = Number(location.hash.split('/')[2]) || 0;
   const monday = weekMonday(off);
   const [avail, scrims, team, plans] = await Promise.all([db.list('availability', { limit: 200 }), listScrims(), teamPlayers(),
@@ -1837,7 +1851,7 @@ PAGES.maps = async function (el) {
       : '<p class="muted small" style="margin:10px 0">Not played' + (since ? ' in this period' : ' yet') + '.</p>') +
     (coach ? '<input class="poolnote" data-map="' + esc(c.map) + '" placeholder="Coach note (e.g. need a B retake)" value="' + esc(c.pool.notes || '') + '">' : (c.pool.notes ? '<div class="small quote" style="margin-top:8px">' + esc(c.pool.notes) + '</div>' : '')) + '</div>';
   el.innerHTML = '<div class="page-h"><div><h1>Map pool</h1><p class="muted">How we do on every map, from logged scrims and matches.' + (coach ? ' Set each map\'s status to plan your pool and veto.' : '') + '</p></div>' +
-    (coach ? '<button class="btn small" id="logm">Log a match</button>' : '') + '</div>' +
+    (isStaff() ? '<button class="btn small" id="logm">Log a match</button>' : '') + '</div>' +
     '<div class="row spread" style="margin-bottom:6px"><div class="tabs" style="margin:0">' + tab('#/maps/all/' + per, 'All games', typ === 'all') + tab('#/maps/scrim/' + per, 'Scrims', typ === 'scrim') + tab('#/maps/official/' + per, 'Official', typ === 'official') + '</div>' +
     '<div class="tabs" style="margin:0">' + tab('#/maps/' + typ + '/all', 'All time', per === 'all') + tab('#/maps/' + typ + '/90', '90 days', per === '90') + tab('#/maps/' + typ + '/30', '30 days', per === '30') + '</div></div>' +
     '<div class="kpis">' + kpi(all.w + '–' + all.l, 'Map record') + kpi(pct(all.wp), 'Map win %') + kpi(pct(all.rp), 'Round win %') + kpi(best ? esc(best.map) : '–', 'Best map') + kpi(worst && worst !== best ? esc(worst.map) : '–', 'Weakest map') + '</div>' +
@@ -1869,7 +1883,7 @@ function newPlanFrom(s) {
 }
 PAGES.plans = async function (el) {
   const id = Number(location.hash.split('/')[2]) || null;
-  const coach = S.me.is_coach;
+  const coach = isStaff();
   const plans = await db.list('game_plans', { order: 'match_date', asc: false, limit: 500 });
   if (id) return planDetail(el, plans.find(p => p.id === id));
   const today = todayISO();
@@ -1886,7 +1900,7 @@ PAGES.plans = async function (el) {
 };
 async function planDetail(el, p) {
   if (!p) { el.innerHTML = empty('That game plan isn\'t here any more.', '<a class="btn small" href="#/plans">All game plans</a>'); return; }
-  const coach = S.me.is_coach;
+  const coach = isStaff();
   const [scout, comps, matches, scrims] = await Promise.all([can('scouting') ? cached('opponent_scouting') : [], can('scouting') ? cached('comp_notes') : [], can('team_stats') ? cached('matches') : [], p.scrim_id ? listScrims() : []]);
   const sc = scout.filter(r => sameOpp(r.opponent, p.opponent)), cn = comps.filter(r => sameOpp(r.team, p.opponent));
   const vs = matches.filter(m => sameOpp(m.opponent, p.opponent));
@@ -1964,11 +1978,67 @@ function workSummary(items, coach) {
   return html;
 }
 
+
+// ---- Other teams (coaches & staff): read-only results, stats, VODs and comps. Map picks, plans, playbook stay private.
+PAGES.explore = async function (el) {
+  if (!isStaff()) { el.innerHTML = '<p>Coaches only.</p>'; return; }
+  const parts = location.hash.split('/'); const tid = Number(parts[2]) || null; const tab = parts[3] || 'results';
+  const { data: teams, error } = await sb.rpc('team_directory');
+  if (error) { el.innerHTML = '<div class="card error">' + esc(error.message) + '</div>'; return; }
+  const others = (teams || []).filter(t => t.id !== S.me.team_id);
+  const note = '<p class="small muted">Read only. Each team\'s map pool &amp; picks, game plans, playbook, scouting, work-on list, check-ins and schedule stay private.</p>';
+  if (!tid) {
+    el.innerHTML = '<div class="page-h"><div><h1>Other teams</h1><p class="muted">Results, player stats, VOD reviews and comps from other teams using Team Hub.</p></div></div>' + note +
+      (others.length ? '<div class="plangrid">' + others.map(t => '<a class="plancard" href="#/explore/' + t.id + '"><div class="row spread"><div class="t">' + esc(t.name) + '</div>' + (t.tag ? '<span class="pill">' + esc(t.tag) + '</span>' : '') + '</div>' +
+        '<div class="small muted" style="margin-top:6px">' + t.players + ' player' + (t.players == 1 ? '' : 's') + ' · ' + t.maps_played + ' maps logged' + (t.last_match ? ' · last ' + fmtDate(t.last_match) : '') + '</div></a>').join('') + '</div>'
+        : empty('No other teams yet.'));
+    return;
+  }
+  const t = (teams || []).find(x => x.id === tid);
+  if (!t) { el.innerHTML = empty('That team isn\'t here.', '<a class="btn small" href="#/explore">All teams</a>'); return; }
+  const eq = { eq: { team_id: tid } };
+  const [rosterRes, matches, ps, uu, reviews, comps] = await Promise.all([sb.rpc('team_public_roster', { tid: tid }), db.list('matches', eq), db.list('player_stats', eq), db.list('utility_usage', eq), db.list('reviews', eq), db.list('comp_notes', eq)]);
+  const roster = rosterRes.data || [];
+  const tabs = [['results', 'Results'], ['players', 'Players'], ['vods', 'VOD reviews'], ['comps', 'Comps']];
+  let body = '';
+  if (tab === 'players') {
+    const names = new Map();
+    roster.forEach(r => names.set(normName(r.ign || r.name), r.ign || r.name));
+    ps.forEach(r => { const n = normName(r.player); if (n && !names.has(n)) names.set(n, String(r.player).replace(/\s*\*\s*trial\s*$/i, '')); });
+    const rows = Array.from(names.entries()).map(([n, name]) => { const s = statsFor(ps, name); const r = roster.find(x => normName(x.ign || x.name) === n); const u = uu.filter(x => normName(x.player) === n);
+      return { name: name, r: r, s: s, upr: avg(u, 'util_per_round') }; }).sort((a, b) => (b.s ? b.s.kd : -1) - (a.s ? a.s.kd : -1));
+    body = rows.length ? '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Role</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">HS kill %</th><th class="num">First K / D</th><th class="num">Util / round</th></tr></thead><tbody>' +
+      rows.map(x => '<tr><td><b>' + esc(x.name) + '</b>' + (x.r && x.r.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (x.r && x.r.status === 'Bench' ? ' <span class="pill">Bench</span>' : '') + '</td><td>' + rolePill(x.r && x.r.role) + '</td>' +
+        (x.s ? '<td class="num">' + x.s.maps + '</td><td class="num"><b>' + num(x.s.kd, 2) + '</b></td><td class="num">' + pct(x.s.hs) + '</td><td class="num">' + x.s.fk + ' / ' + x.s.fd + '</td>' : '<td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td>') +
+        '<td class="num">' + num(x.upr, 1) + '</td></tr>').join('') + '</tbody></table></div>' : empty('No players or stats yet.');
+  } else if (tab === 'vods') {
+    body = reviews.length ? '<div class="vgrid">' + reviews.map(r => { const vi = videoInfo(r.vod);
+      return '<div class="vcard">' + thumbHtml(vi) + '<div class="vb"><div class="t">' + esc(r.title || 'VOD review') + '</div><div class="row small" style="gap:6px;margin-top:6px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + (r.type ? '<span class="pill">' + esc(r.type) + '</span>' : '') + '</div>' +
+        (vi ? '<a class="small" href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch</a>' : '') +
+        (r.summary || r.body ? '<details style="margin-top:6px"><summary class="small">Notes</summary><div class="md small">' + md(r.summary || '') + md(r.body || '') + '</div></details>' : '') + '</div></div>'; }).join('') + '</div>' : empty('No VOD reviews yet.');
+  } else if (tab === 'comps') {
+    body = comps.length ? comps.map(r => '<div class="card" style="margin-bottom:10px"><div class="row" style="gap:6px"><b>' + esc(r.team || '') + '</b>' + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + (r.date ? '<span class="muted small">' + fmtDate(r.date) + '</span>' : '') + '</div>' +
+      '<div style="margin-top:4px">' + [r.a1, r.a2, r.a3, r.a4, r.a5].filter(Boolean).map(esc).join(', ') + '</div>' + (r.result ? '<div class="small muted">' + esc(r.result) + '</div>' : '') + (r.weaknesses ? '<div class="small" style="margin-top:4px">' + inlineMd(r.weaknesses) + '</div>' : '') + '</div>').join('') : empty('No comp notes yet.');
+  } else {
+    const all = mapStats(matches);
+    const maps = groupBy(matches.filter(m => m.map), 'map').map(([m, list]) => Object.assign({ map: m }, mapStats(list))).sort((a, b) => b.n - a.n);
+    body = matches.length ? '<div class="kpis">' + kpi(all.w + '–' + all.l, 'Map record') + kpi(pct(all.wp), 'Map win %') + kpi(pct(all.rp), 'Round win %') + kpi(matches.length, 'Maps logged') + '</div>' +
+      panel('By map', '', '<div class="tablewrap"><table><thead><tr><th>Map</th><th class="num">Played</th><th class="num">W–L</th><th class="num">Win %</th><th class="num">Rounds</th></tr></thead><tbody>' +
+        maps.map(x => '<tr><td><b>' + esc(x.map) + '</b></td><td class="num">' + x.n + '</td><td class="num">' + x.w + '–' + x.l + '</td><td class="num">' + pct(x.wp) + '</td><td class="num">' + x.rw + '–' + x.rl + '</td></tr>').join('') + '</tbody></table></div>') +
+      panel('Recent matches', '', '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Event</th><th>Opponent</th><th>Map</th><th class="num">Score</th></tr></thead><tbody>' +
+        matches.slice(0, 30).map(m => '<tr><td>' + (m.date ? fmtDate(m.date) : '') + '</td><td>' + esc(m.event || matchType(m)) + '</td><td>' + esc(m.opponent || '') + '</td><td>' + esc(m.map || '') + '</td><td class="num"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span> ' + (m.rounds_won ?? '') + '–' + (m.rounds_lost ?? '') + '</td></tr>').join('') + '</tbody></table></div>')
+      : empty('No matches logged yet.');
+  }
+  el.innerHTML = '<div class="page-h"><div><a href="#/explore" class="small">← Other teams</a><h1 style="margin-top:6px">' + esc(t.name) + (t.tag ? ' <span class="pill">' + esc(t.tag) + '</span>' : '') + '</h1>' +
+    '<p class="muted">' + roster.filter(r => r.status !== 'Bench').map(r => esc(r.name) + (r.role ? ' <span class="small">(' + esc(r.role) + ')</span>' : '')).join(' · ') + '</p></div></div>' + note +
+    '<div class="tabs">' + tabs.map(x => '<a href="#/explore/' + tid + '/' + x[0] + '" class="' + (x[0] === tab ? 'active' : '') + '">' + x[1] + '</a>').join('') + '</div>' + body;
+};
+
 // ----- cached member list for the leaderboard (names/roles of teammates)
 const _origCached = cached;
 cached = async function (table, opts) {
   if (table === 'profiles_list') {
-    if (!S.cache.profiles_list) { const { data } = await sb.from('profiles').select('id,display_name,ign,role,is_igl,is_trial,is_coach,approved,discord,avatar_url').eq('approved', true); S.cache.profiles_list = data || []; }
+    if (!S.cache.profiles_list) { const { data } = await sb.from('profiles').select('id,display_name,ign,role,is_igl,is_trial,is_coach,staff_role,approved,discord,avatar_url').eq('approved', true); S.cache.profiles_list = data || []; }
     return S.cache.profiles_list;
   }
   return _origCached(table, opts);
