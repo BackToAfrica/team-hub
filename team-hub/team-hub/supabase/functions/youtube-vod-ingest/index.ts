@@ -41,6 +41,23 @@ Deno.serve(async (req: Request) => {
     const { data: authData, error: authError } = await userClient.auth.getUser(token);
     if (authError || !authData.user) return response({ error: "Your session is invalid or expired. Please sign in again." }, 401);
     const body = await req.json();
+    if (body?.action === "provider_status") {
+      const { data: staff, error: staffError } = await userClient.rpc("is_staff");
+      if (staffError || staff !== true) return response({ error: "Only authorized team staff can check provider settings." }, 403);
+      const apiKey = Deno.env.get("TWELVELABS_API_KEY");
+      if (!apiKey) return response({ ok: false, configured: false, error: "TWELVELABS_API_KEY is not configured in Supabase Edge Function secrets." }, 503);
+      const providerCheck = await fetch("https://api.twelvelabs.io/v1.3/indexes", {
+        method: "GET", headers: { "x-api-key": apiKey, "Accept": "application/json" },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!providerCheck.ok) {
+        const providerError = await providerCheck.text();
+        return response({ ok: false, configured: true, error: providerCheck.status === 401 ? "TwelveLabs rejected the configured API key. Check that it is active." : "TwelveLabs returned HTTP " + providerCheck.status + (providerError ? ": " + providerError.slice(0, 220) : "") }, 502);
+      }
+      const providerData = await providerCheck.json();
+      const indexes = Array.isArray(providerData?.data) ? providerData.data : [];
+      return response({ ok: true, configured: true, provider: "TwelveLabs", index_count: indexes.length });
+    }
     const rawUrl = String(body?.url || "").trim();
     const videoId = youtubeId(rawUrl);
     if (!videoId) return response({ error: "Enter a valid YouTube video, Shorts, or live URL." }, 400);
