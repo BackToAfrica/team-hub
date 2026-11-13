@@ -559,9 +559,17 @@ function filterBar(rows, keys, onChange) {
 async function cached(table, opts) {
   const key = table + JSON.stringify(opts || {});
   if (S.cache[key]) return S.cache[key];
-  const rows = await db.list(table, opts);
-  S.cache[key] = rows;
-  return rows;
+  // Cache the in-flight request as well as its result so parallel page
+  // renders share one query instead of racing each other.
+  const pending = db.list(table, opts).then(rows => {
+    S.cache[key] = rows;
+    return rows;
+  }).catch(err => {
+    delete S.cache[key];
+    throw err;
+  });
+  S.cache[key] = pending;
+  return pending;
 }
 
 // ------------------------------------------------------------------ pages
@@ -2503,7 +2511,25 @@ COACH.publicpage = async function (box) {
 const _origCached = cached;
 cached = async function (table, opts) {
   if (table === 'profiles_list') {
-    if (!S.cache.profiles_list) { const { data } = await sb.from('profiles').select('id,display_name,ign,role,is_igl,is_trial,is_coach,staff_role,approved,discord,avatar_url,riot_id,rank,rank_rr,peak_rank,rank_updated').eq('approved', true); S.cache.profiles_list = data || []; }
+    if (!S.me || !S.me.team_id) return [];
+    if (!S.cache.profiles_list) {
+      // Never load every approved account into a team's roster view. Only
+      // profiles belonging to the active team may be joined to its roster.
+      const pending = sb.from('profiles')
+        .select('id,display_name,ign,role,is_igl,is_trial,is_coach,staff_role,approved,discord,avatar_url,riot_id,rank,rank_rr,peak_rank,rank_updated')
+        .eq('approved', true)
+        .eq('team_id', S.me.team_id)
+        .then(({ data, error }) => {
+          if (error) throw error;
+          const rows = data || [];
+          S.cache.profiles_list = rows;
+          return rows;
+        }).catch(err => {
+          delete S.cache.profiles_list;
+          throw err;
+        });
+      S.cache.profiles_list = pending;
+    }
     return S.cache.profiles_list;
   }
   return _origCached(table, opts);
