@@ -113,7 +113,8 @@ const TABLES = {
   player_stats: { label: 'Player stats', sheet: 'Player Stats', order: 'date', req: 'player', fields: [
     F('date', 'Date', 'date'), F('map', 'Map'), F('player', 'Player'), F('agent', 'Agent'), F('rounds', 'Rounds', 'int'), F('kills', 'Kills', 'int'), F('deaths', 'Deaths', 'int'),
     F('assists', 'Assists', 'int'), F('kd', 'K/D', 'num'), F('hs_kills', 'Headshot kills', 'int'), F('hs_kill_pct', 'Headshot kill %', 'pct'), F('true_hs_pct', 'True HS %', 'pct'),
-    F('first_kills', 'First kills', 'int'), F('first_deaths', 'First deaths', 'int'), F('source', 'Source'), F('notes', 'Notes', 'long')] },
+    F('first_kills', 'First kills', 'int'), F('first_deaths', 'First deaths', 'int'), F('trades', 'Trade kills', 'int', ['Trades', 'Trade kills']), F('traded_deaths', 'Deaths traded', 'int', ['Deaths traded']),
+    F('grade', 'Grade', 'text', ['Grade']), F('review_id', 'VOD review #', 'int'), F('source', 'Source'), F('notes', 'Notes', 'long')] },
   utility_usage: { label: 'Utility usage', sheet: 'Utility Usage', order: 'date', req: 'player', fields: [
     F('date', 'Date', 'date'), F('map', 'Map'), F('player', 'Player'), F('agent', 'Agent'), F('rounds', 'Rounds', 'int'), F('util_per_round', 'Util per round', 'num'),
     F('q_casts', 'Ability 1 (Q)', 'int'), F('e_casts', 'Ability 2 (E)', 'int'), F('c_casts', 'Grenade (C)', 'int'), F('ults_used', 'Ults used', 'int'), F('ults_available', 'Ults available', 'int'),
@@ -156,7 +157,7 @@ const TABLES = {
     F('seen', 'Seen in VODs', 'long'), F('updated', 'Last updated')] },
   roster: { label: 'Roster slots', sheet: 'Roster', order: 'name', asc: true, req: 'name', merge: true, fields: [
     F('name', 'Name', 'text', ['Player (IGN)', 'Player', 'Name']), F('ign', 'In-game name', 'text', ['Player (IGN)', 'IGN', 'In-game name']), F('discord', 'Discord username', 'text', ['Discord username', 'Discord']),
-    F('role', 'Role', 'select', ['Role'], { options: ROLES }), F('is_igl', 'IGL', 'bool', ['IGL?', 'IGL']), F('is_trial', 'Trial', 'bool', ['Trial', 'Trial player']), F('status', 'Status', 'select', ['Status'], { options: ['Active', 'Bench'] })] },
+    F('role', 'Role', 'select', ['Role'], { options: ROLES }), F('is_igl', 'IGL', 'bool', ['IGL?', 'IGL']), F('is_trial', 'Trial', 'bool', ['Trial', 'Trial player']), F('status', 'Status', 'select', ['Status'], { options: ['Active', 'Bench', 'Coach'] })] },
   game_plans: { label: 'Game plans', order: 'match_date', req: 'opponent', keepOnAdd: ['scrim_id'], fields: [
     F('opponent', 'Opponent'), F('match_date', 'Match date', 'date'), F('maps', 'Maps (comma separated)'), F('their_tendencies', 'Their tendencies (how they play)', 'long'),
     F('comp', 'Our comp (per map)', 'long'), F('attack_plan', 'Attack plan', 'long'), F('defense_plan', 'Defense plan', 'long'), F('pistols', 'Pistol rounds', 'long'),
@@ -240,12 +241,23 @@ async function boot() {
     window.addEventListener('hashchange', () => { if (/^#\/t\//.test(location.hash)) renderPublic(); else location.reload(); });
     await renderPublic(); return;
   }
-  sb.auth.onAuthStateChange(async (event, session) => {
+  // Keep the auth-state callback synchronous. Supabase holds an internal
+  // auth lock while notifying listeners; awaiting database work (start/loadMe)
+  // inside this callback can deadlock sign-in on some clients.
+  sb.auth.onAuthStateChange((event, session) => {
     if (event === 'PASSWORD_RECOVERY') { S.session = session; renderSetPassword(); return; }
     if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
       const had = S.session && S.session.user && S.session.user.id;
       S.session = session;
-      if (event !== 'SIGNED_IN' || had !== (session && session.user && session.user.id)) await start();
+      if (event !== 'SIGNED_IN' || had !== (session && session.user && session.user.id)) {
+        setTimeout(() => {
+          start().catch(err => {
+            console.error('Team Hub failed to refresh after an auth change:', err);
+            const app = $('#app');
+            if (app) app.innerHTML = '<div class="auth"><div class="card error">Could not load your account. Please refresh and try again.</div></div>';
+          });
+        }, 0);
+      }
     }
   });
   const { data } = await sb.auth.getSession();
@@ -272,6 +284,9 @@ async function start() {
   S.cache = {};
   S.route = (location.hash.slice(2) || 'home').split('/')[0];
   render();
+  // quietly refresh this player's Riot games once per visit (the server skips it if it ran in the last 5 minutes)
+  if (S.me && S.me.team_id && !S.riotTried) { S.riotTried = true;
+    sb.from('riot_links').select('user_id').eq('user_id', S.me.id).maybeSingle().then(({ data }) => { if (data) riotCall({ action: 'sync' }).then(r => { if (r && r.new_games) { S.cache = {}; } }).catch(() => {}); }).catch(() => {}); }
 }
 
 // ------------------------------------------------------------------ auth
@@ -378,6 +393,7 @@ const NAV = [
   { r: 'stats', label: 'My stats', sec: 'my_stats', i: 'chart', g: 'Team' },
   { r: 'workon', label: 'Work on', sec: 'reviews', i: 'target', g: 'Team' },
   { r: 'live', label: 'Live match', sec: 'scouting', i: 'bolt', g: 'Prepare' },
+  { r: 'prep', label: 'Match prep center', sec: 'scouting', i: 'target', g: 'Prepare' },
   { r: 'plans', label: 'Game plans', sec: 'scouting', i: 'flag', g: 'Prepare' },
   { r: 'veto', label: 'Veto simulator', sec: 'team_stats', i: 'swap', g: 'Prepare' },
   { r: 'maps', label: 'Map pool', sec: 'team_stats', i: 'map', g: 'Prepare' },
@@ -388,6 +404,7 @@ const NAV = [
   { r: 'comps', label: 'Comp Checker', sec: 'comp_checker', i: 'shield', g: 'Prepare' },
   { r: 'reviews', label: 'VOD reviews', sec: 'reviews', i: 'play', g: 'Prepare' },
   { r: 'patches', label: 'Patch notes', sec: 'patch_notes', i: 'doc', g: 'Prepare' },
+  { r: 'games', label: 'My games', sec: null, i: 'chart', g: 'Improve' },
   { r: 'aim', label: 'Aim tracker', sec: null, i: 'cross', g: 'Improve' },
   { r: 'paths', label: 'Training path', sec: null, i: 'route', g: 'Improve' },
   { r: 'notes', label: '1-on-1', sec: null, i: 'chat', g: 'Improve' }
@@ -548,9 +565,17 @@ function filterBar(rows, keys, onChange) {
 async function cached(table, opts) {
   const key = table + JSON.stringify(opts || {});
   if (S.cache[key]) return S.cache[key];
-  const rows = await db.list(table, opts);
-  S.cache[key] = rows;
-  return rows;
+  // Cache the in-flight request as well as its result so parallel page
+  // renders share one query instead of racing each other.
+  const pending = db.list(table, opts).then(rows => {
+    S.cache[key] = rows;
+    return rows;
+  }).catch(err => {
+    delete S.cache[key];
+    throw err;
+  });
+  S.cache[key] = pending;
+  return pending;
 }
 
 // ------------------------------------------------------------------ pages
@@ -580,19 +605,34 @@ function checkStatus(r) {
   return { label: 'Partial', cls: 'yellow' };
 }
 // one entry per player: roster slot + their account (if linked)
+async function riotSummaries() {
+  const key = 'riot_summary';
+  if (S.cache[key]) return S.cache[key];
+  const { data, error } = await sb.from('riot_summary').select('*');
+  const rows = error ? [] : (data || []);
+  S.cache[key] = rows; return rows;
+}
+function riotLine(rs) {
+  if (!rs || !rs.games) return '';
+  return '<div class="rsline" title="Last ' + rs.games + ' games from Riot' + (rs.updated_at ? ', updated ' + fmtDate(String(rs.updated_at).slice(0, 10)) : '') + '">K/D <b>' + num(Number(rs.kd), 2) + '</b> · HS <b>' + pct(rs.hs_pct == null ? null : Number(rs.hs_pct)) + '</b>' +
+    (rs.acs ? ' · ACS <b>' + Math.round(rs.acs) + '</b>' : '') + ' · <span class="muted">' + rs.games + ' games</span></div>';
+}
 async function teamPlayers() {
-  let [roster, members] = await Promise.all([cached('roster'), cached('profiles_list')]);
+  let [roster, members, rsum] = await Promise.all([cached('roster'), cached('profiles_list'), riotSummaries()]);
+  const rsBy = new Map((rsum || []).map(x => [x.user_id, x]));
   roster = roster || []; members = members || [];
   const byId = new Map(members.map(m => [m.id, m]));
   const out = roster.map(r => {
     const m = r.claimed_by ? byId.get(r.claimed_by) : null;
     return { key: 'r' + r.id, name: r.ign || (m && m.ign) || r.name, ign: r.ign || (m && m.ign), role: r.role || (m && m.role), is_igl: r.is_igl, is_trial: r.is_trial,
-      discord: r.discord || (m && m.discord), avatar_url: m && m.avatar_url, rank: m && m.rank, rank_rr: m && m.rank_rr, peak_rank: m && m.peak_rank, riot_id: m && m.riot_id, rank_updated: m && m.rank_updated, user_id: m ? m.id : null, joined: !!(m && r.claim_status === 'approved'), rid: r.id, bench: r.status === 'Bench' };
+      discord: r.discord || (m && m.discord), avatar_url: m && m.avatar_url, rank: m && m.rank, rank_rr: m && m.rank_rr, peak_rank: m && m.peak_rank, riot_id: m && m.riot_id, rank_updated: m && m.rank_updated, user_id: m ? m.id : null, joined: !!(m && r.claim_status === 'approved'), rid: r.id, bench: r.status === 'Bench', coachSlot: r.status === 'Coach' };
   });
   members.forEach(m => { if (!m.is_coach && !m.staff_role && !roster.some(r => r.claimed_by === m.id)) out.push({ key: 'u' + m.id, name: nameOf(m), ign: m.ign, role: m.role, is_igl: m.is_igl, is_trial: m.is_trial, discord: m.discord, avatar_url: m.avatar_url, rank: m.rank, rank_rr: m.rank_rr, peak_rank: m.peak_rank, riot_id: m.riot_id, rank_updated: m.rank_updated, user_id: m.id, joined: true }); });
   const staffIds = new Set(members.filter(m => m.is_coach || m.staff_role).map(m => m.id));
   const coaches = members.filter(m => m.is_coach).concat(members.filter(m => !m.is_coach && m.staff_role));
-  return { players: out.filter(p => !(p.user_id && staffIds.has(p.user_id))).sort((a, b) => (a.is_trial ? 1 : 0) - (b.is_trial ? 1 : 0) || String(a.name).localeCompare(String(b.name))), coaches: coaches };
+  out.forEach(p => { if (p.user_id) p.rs = rsBy.get(p.user_id) || null; });
+  const slotCoaches = out.filter(p => p.coachSlot);
+  return { slotCoaches: slotCoaches, players: out.filter(p => !p.coachSlot && !(p.user_id && staffIds.has(p.user_id))).sort((a, b) => (a.is_trial ? 1 : 0) - (b.is_trial ? 1 : 0) || String(a.name).localeCompare(String(b.name))), coaches: coaches };
 }
 async function kickPlayer(p, done) {
   if (!confirm('Kick ' + p.name + ' from ' + teamName() + '?\n\nThey lose access to the team and their roster spot is removed. Their past stats stay.')) return;
@@ -600,16 +640,51 @@ async function kickPlayer(p, done) {
   if (p.rid) await sb.from('roster').delete().eq('id', p.rid);
   S.cache = {}; toast(p.name + ' was removed from the team'); if (done) done();
 }
-async function setBench(p, bench, done) {
+async function setBench(p, bench, done) { return setSlotStatus(p, bench ? 'Bench' : 'Active', done); }
+async function setSlotStatus(p, status, done) {
   if (!p.rid) { toast('Add ' + p.name + ' to the roster first (Coach panel → Members)'); return; }
-  const { error } = await sb.from('roster').update({ status: bench ? 'Bench' : 'Active' }).eq('id', p.rid);
-  S.cache = {}; toast(error ? error.message : p.name + (bench ? ' moved to the bench' : ' is back on the active roster')); if (done) done();
+  const { error } = await sb.from('roster').update({ status: status }).eq('id', p.rid);
+  const msg = { Bench: ' moved to the bench', Active: ' is on the active roster', Coach: ' moved to coaches' }[status];
+  S.cache = {}; toast(error ? error.message : p.name + msg); if (done) done();
 }
 function statsFor(ps, ign) {
   const rows = ps.filter(r => normName(r.player) === normName(ign));
   if (!rows.length) return null;
   const k = sum(rows, 'kills'), d = sum(rows, 'deaths'), hs = sum(rows, 'hs_kills');
-  return { maps: rows.length, k: k, kd: d ? k / d : k, hs: k ? hs / k : null, ths: avg(rows, 'true_hs_pct'), fk: sum(rows, 'first_kills'), fd: sum(rows, 'first_deaths'), a: sum(rows, 'assists') };
+  const graded = rows.map(perfScore).filter(x => x != null);
+  return { maps: rows.length, k: k, kd: d ? k / d : k, hs: k ? hs / k : null, ths: avg(rows, 'true_hs_pct'), fk: sum(rows, 'first_kills'), fd: sum(rows, 'first_deaths'), a: sum(rows, 'assists'),
+    tr: sum(rows, 'trades'), trd: sum(rows, 'traded_deaths'), score: graded.length ? graded.reduce((x, y) => x + y, 0) / graded.length : null };
+}
+// ---- Performance grade (one map). About 72-75 = an even game (C/C+), 84+ = B+, 90+ = A.
+// Per round: kills and deaths count most, then assists, opening duels, trade kills and headshot rate.
+function perfScore(r) {
+  const R = Number(r.rounds), k = Number(r.kills), d = Number(r.deaths);
+  if (!(R > 0) || isNaN(k) || isNaN(d)) return null;
+  const a = Number(r.assists) || 0, fk = Number(r.first_kills) || 0, fd = Number(r.first_deaths) || 0, tr = Number(r.trades) || 0;
+  const hsp = r.hs_kill_pct != null && r.hs_kill_pct !== '' ? Number(r.hs_kill_pct) : (k && r.hs_kills != null ? Number(r.hs_kills) / k : null);
+  let s = 70 + 35 * (k - d) / R + 15 * a / R + 30 * (fk - fd) / R + 20 * tr / R + (hsp == null || isNaN(hsp) ? 0 : Math.max(-4, Math.min(4, 10 * (hsp - 0.3))));
+  return Math.max(0, Math.min(100, s));
+}
+const GRADES = [[95, 'A+'], [90, 'A'], [87, 'A-'], [84, 'B+'], [80, 'B'], [77, 'B-'], [74, 'C+'], [70, 'C'], [67, 'C-'], [64, 'D+'], [60, 'D'], [0, 'F']];
+function letterOf(score) { if (score == null) return ''; return (GRADES.find(g => score >= g[0]) || GRADES[GRADES.length - 1])[1]; }
+function gradePill(r, score) {
+  const sc = score != null ? score : perfScore(r); const g = (r && r.grade) || letterOf(sc);
+  if (!g) return '<span class="muted">–</span>';
+  const c = { A: 'green', B: 'blue', C: 'yellow', D: 'red', F: 'red' }[g[0]] || '';
+  return '<span class="pill grade ' + c + '" title="' + (sc != null ? 'Score ' + Math.round(sc) + '/100' : '') + '">' + esc(g) + '</span>';
+}
+function scrimStatsPanel(rows, title) {
+  if (!rows.length) return '';
+  const list = rows.slice().sort((a, b) => (perfScore(b) || 0) - (perfScore(a) || 0));
+  const hsOf = r => r.hs_kill_pct != null && r.hs_kill_pct !== '' ? Number(r.hs_kill_pct) : (Number(r.kills) && r.hs_kills != null ? Number(r.hs_kills) / Number(r.kills) : null);
+  return panel(title || 'Player stats', '<span class="small muted">' + esc([rows[0].map, rows[0].rounds ? rows[0].rounds + ' rounds' : ''].filter(Boolean).join(' · ')) + '</span>',
+    '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Agent</th><th class="num">K / D / A</th><th class="num">K/D</th><th class="num">HS %</th><th class="num">First K / D</th><th class="num">Trade kills</th><th class="num">Deaths traded</th><th class="num">Grade</th></tr></thead><tbody>' +
+    list.map(r => '<tr><td><b>' + esc(String(r.player).replace(/\s*\*\s*trial\s*$/i, '')) + '</b>' + (isTrialName(r.player) ? ' <span class="pill yellow">Trial</span>' : '') + '</td><td>' + esc(r.agent || '–') + '</td>' +
+      '<td class="num">' + (r.kills ?? '–') + ' / ' + (r.deaths ?? '–') + ' / ' + (r.assists ?? '–') + '</td><td class="num"><b>' + num(Number(r.deaths) ? r.kills / r.deaths : r.kills, 2) + '</b></td>' +
+      '<td class="num">' + pct(hsOf(r)) + '</td><td class="num">' + (r.first_kills ?? '–') + ' / ' + (r.first_deaths ?? '–') + '</td><td class="num">' + (r.trades ?? '–') + '</td>' +
+      '<td class="num">' + (r.traded_deaths == null ? '–' : r.traded_deaths + (r.deaths ? ' <span class="muted small">of ' + r.deaths + '</span>' : '')) + '</td><td class="num">' + gradePill(r) + '</td></tr>').join('') +
+    '</tbody></table></div>' + (list.some(r => r.notes) ? '<div class="small" style="margin-top:8px">' + list.filter(r => r.notes).map(r => '<div><b>' + esc(String(r.player).replace(/\s*\*\s*trial\s*$/i, '')) + ':</b> ' + esc(r.notes) + '</div>').join('') + '</div>' : '') +
+    '<p class="small muted" style="margin:8px 0 0">Grade = performance score out of 100 from kills, deaths, assists, opening duels, trade kills and headshot rate per round (an even game is about a C/C+). Hover a grade for the score.</p>');
 }
 
 function pcard(p, ps) {
@@ -617,10 +692,12 @@ function pcard(p, ps) {
   const key = p.rid ? 'r' + p.rid : 'u' + p.user_id;
   return '<div class="pcard' + (p.bench ? ' bench' : '') + '">' + avatar(p, 52) + '<div class="nm">' + esc(p.name) + '</div>' +
     '<div class="sub">' + esc([p.ign && p.ign !== p.name ? p.ign : '', p.discord ? '@' + p.discord : ''].filter(Boolean).join(' · ')) + '</div>' +
-    '<div class="row" style="justify-content:center;gap:4px">' + rolePill(p.role) + (p.is_igl ? '<span class="pill yellow">IGL</span>' : '') + (p.is_trial ? '<span class="pill yellow">Trial</span>' : '') + (p.bench ? '<span class="pill">Bench</span>' : '') + (!p.user_id ? '<span class="pill">Not joined</span>' : '') + '</div>' +
-    (p.rank ? '<div style="margin-top:6px">' + rankPill(p.rank, true) + '</div>' : '') +
+    '<div class="row" style="justify-content:center;gap:4px">' + rolePill(p.role) + (p.is_igl ? '<span class="pill yellow">IGL</span>' : '') + (p.is_trial ? '<span class="pill yellow">Trial</span>' : '') + (p.bench ? '<span class="pill">Bench</span>' : '') + (p.coachSlot ? '<span class="pill blue">Coach</span>' : '') + (!p.user_id ? '<span class="pill">Not joined</span>' : '') + '</div>' +
+    (p.rank ? '<div style="margin-top:6px">' + rankPill(p.rank, true) + '</div>' : '') + riotLine(p.rs) +
     (ps ? '<div class="pstats">' + (s ? '<div><b>' + num(s.kd, 2) + '</b><span>K/D</span></div><div><b>' + pct(s.hs) + '</b><span>HS%</span></div><div><b>' + s.maps + '</b><span>Maps</span></div>' : '<div class="muted small" style="grid-column:1/-1">No stats yet</div>') + '</div>' : '') +
-    (S.me.is_coach ? '<div class="pact"><button class="btn small ghost" data-bench="' + key + '">' + (p.bench ? 'Make active' : 'Bench') + '</button><button class="btn small ghost danger-t" data-kick="' + key + '">Kick</button></div>' : '') + '</div>';
+    (S.me.is_coach ? '<div class="pact">' + (p.coachSlot ? '<button class="btn small ghost" data-slot="' + key + '|Active">Make player</button>'
+      : '<button class="btn small ghost" data-bench="' + key + '">' + (p.bench ? 'Make active' : 'Bench') + '</button><button class="btn small ghost" data-slot="' + key + '|Coach">Coach</button>') +
+      '<button class="btn small ghost danger-t" data-kick="' + key + '">Kick</button></div>' : '') + '</div>';
 }
 
 // ---- Daily check-in form (used on Home and the Check-ins page)
@@ -672,18 +749,45 @@ PAGES.home = async function (el) {
   const me = S.me, coach = isStaff(), head = me.is_coach;
   const doCheckin = can('checkin') && !(coach && !me.ign);
   const today = todayISO();
-  const [ann, team, myHist, todayRows, ps, work, nxt, avail, plans] = await Promise.all([
+  const [ann, team, myHist, todayRows, ps, work, nxt, avail, plans, matches, drills, aimLogs, reviewRows] = await Promise.all([
     cached('announcements'), teamPlayers(),
     doCheckin ? db.list('checkins', { eq: { user_id: me.id }, order: 'day', asc: false, limit: 60 }) : Promise.resolve([]),
     coach ? db.list('checkins', { eq: { day: today } }) : Promise.resolve([]),
     can('my_stats') || can('team_stats') ? cached('player_stats') : Promise.resolve([]),
     can('reviews') ? cached('work_on') : Promise.resolve([]),
     nextScrim().catch(() => null), db.list('availability', { eq: { user_id: me.id } }).catch(() => []),
-    can('scouting') ? db.list('game_plans', { limit: 200 }).catch(() => []) : Promise.resolve([])
+    can('scouting') ? db.list('game_plans', { limit: 200 }).catch(() => []) : Promise.resolve([]),
+    can('team_stats') ? cached('matches') : Promise.resolve([]),
+    can('my_stats') ? cached('drills') : Promise.resolve([]),
+    can('my_stats') ? db.list('aim_logs', { eq: { user_id: me.id }, order: 'date', asc: false, limit: 100 }).catch(() => []) : Promise.resolve([]),
+    coach && can('reviews') ? cached('reviews') : Promise.resolve([])
   ]);
   const doneToday = myHist.some(h => String(h.day).slice(0, 10) === today);
   const streak = calcStreak(myHist.map(h => h.day));
   const players = team.players;
+  const matchRows = (matches || []).slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const matchWins = matchRows.filter(isWin).length;
+  const matchLosses = matchRows.length - matchWins;
+  const matchWinRate = matchRows.length ? Math.round(matchWins / matchRows.length * 100) : null;
+  const roundsFor = sum(matchRows, 'rounds_won'), roundsAgainst = sum(matchRows, 'rounds_lost');
+  const roundDiff = roundsFor - roundsAgainst;
+  const mapCount = new Set(matchRows.map(m => m.map).filter(Boolean)).size;
+  const recentForm = matchRows.slice(0, 5);
+  const canSeeTeamStats = can('team_stats');
+  const performanceHtml = S.me && S.me.approved
+    ? (canSeeTeamStats
+    ? '<section class="command-center"><div class="command-head"><div><div class="eyebrow">TEAM PERFORMANCE</div><h2>Command center</h2><p class="muted small">' + (matchRows.length ? 'A quick read on your recorded match results.' : 'Your team overview will build as results are logged.') + '</p></div><a class="btn small ghost" href="#/team/matches">Match history →</a></div>' +
+      (matchRows.length
+        ? '<div class="command-kpis">' +
+          '<div class="command-stat"><span>Match record</span><b>' + matchWins + '<i>W</i> · ' + matchLosses + '<i>L</i></b><small>' + matchWinRate + '% win rate</small></div>' +
+          '<div class="command-stat"><span>Maps recorded</span><b>' + matchRows.length + '</b><small>Across ' + mapCount + ' unique maps</small></div>' +
+          '<div class="command-stat"><span>Round differential</span><b class="' + (roundDiff > 0 ? 'up' : roundDiff < 0 ? 'down' : '') + '">' + (roundDiff > 0 ? '+' : '') + roundDiff + '</b><small>' + roundsFor + ' for · ' + roundsAgainst + ' against</small></div>' +
+          '<div class="command-stat command-form"><span>Recent form</span><div class="form-dots">' + recentForm.map(m => '<span class="fdot ' + (isWin(m) ? 'w' : 'l') + '" title="' + esc((m.opponent || 'Opponent') + ' · ' + m.rounds_won + '–' + m.rounds_lost) + '"></span>').join('') + '</div><small>Last ' + recentForm.length + ' maps</small></div>' +
+          '</div>'
+        : '<div class="command-empty"><div><b>No match results yet</b><p class="small muted">Log your first map result to unlock win rate, round differential, and recent form.</p></div>' + (isStaff() ? '<a class="btn small" href="#/coach/data">Add match results</a>' : '') + '</div>') +
+      '</section>'
+    : '<section class="command-center"><div class="command-head"><div><div class="eyebrow">TEAM HUB</div><h2>Command center</h2><p class="muted small">Your team dashboard is ready. Performance analytics are hidden by your team visibility settings.</p></div></div></section>')
+    : '';
   const byUser = new Map(todayRows.map(r => [r.user_id, r]));
   const joined = players.filter(p => p.user_id);
   const doneCount = joined.filter(p => byUser.has(p.user_id)).length;
@@ -730,7 +834,7 @@ PAGES.home = async function (el) {
   // roster
   const rosterHtml = panel('The team', '<a class="small" href="#/team">Roster &amp; stats →</a>',
     (team.coaches.length ? '<div class="small muted" style="margin-bottom:6px">Coaching staff: ' + team.coaches.map(c => esc(nameOf(c)) + ' <span class="muted">(' + esc(staffLabel(c)) + ')</span>').join(', ') + '</div>' : '') +
-    (players.length ? '<div class="plist compact">' + players.slice().sort((a, b) => (a.bench ? 1 : 0) - (b.bench ? 1 : 0)).map(p => '<div class="prow' + (p.bench ? ' benched' : '') + '">' + avatar(p, 28) + '<div class="grow t">' + esc(p.name) + (p.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (p.is_trial ? ' <span class="pill yellow">Trial</span>' : '') + (p.bench ? ' <span class="pill">Bench</span>' : '') + '</div>' + rolePill(p.role) + '</div>').join('') + '</div>' : '<p class="muted small">No players yet.</p>'));
+    (players.length ? '<div class="plist compact">' + players.slice().sort((a, b) => (a.bench ? 1 : 0) - (b.bench ? 1 : 0)).map(p => '<div class="prow' + (p.bench ? ' benched' : '') + '">' + avatar(p, 28) + '<div class="grow t">' + esc(p.name) + (p.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (p.is_trial ? ' <span class="pill yellow">Trial</span>' : '') + (p.bench ? ' <span class="pill">Bench</span>' : '') + riotLine(p.rs).replace('class="rsline"', 'class="rsline" style="margin-top:2px"') + '</div>' + rolePill(p.role) + '</div>').join('') + '</div>' : '<p class="muted small">No players yet.</p>'));
   const annHtml = panel('From the coach', coach ? '<a class="small" href="#/coach/announce">Post →</a>' : '',
     anns.length ? anns.slice(0, 5).map(a => '<div class="ann">' + (a.pinned ? '<span class="pill red">Pinned</span> ' : '') + '<b>' + esc(a.title) + '</b> <span class="muted small">' + fmtDate(a.created_at) + '</span><div class="md">' + md(a.body) + '</div></div>').join('') : '<p class="muted small">Nothing posted yet.</p>');
 
@@ -757,8 +861,36 @@ PAGES.home = async function (el) {
       '<div class="t">vs ' + esc(nxt.opponent || 'TBD') + '</div><div class="small muted">' + esc(fmtWhen(nxt.starts_at)) + ' · ' + relDays(nxt.starts_at) + '</div><div class="row small" style="gap:6px;margin-top:4px">' + mapList(nxt.maps).map(m => '<span class="pill">' + esc(m) + '</span>').join('') + '</div></div>' +
       (plan ? '<a class="btn small" href="#/plans/' + plan.id + '">Game plan</a>' : '') + '</div>') : (coach ? panel('Next scrim', '<a class="small" href="#/schedule">Schedule →</a>', '<p class="muted small">Nothing booked. See when everyone is free and book one.</p>') : ''));
   }
+  let roleDrills = [];
+  let playerGrowthHtml = '';
+  if (!coach && can('my_stats')) {
+    const role = String(me.role || 'Flex');
+    roleDrills = (drills || []).filter(d => !d.role || d.role === 'Everyone' || d.role === role).sort((a, b) => (Number(a.sort) || 0) - (Number(b.sort) || 0));
+    const recentAim = (aimLogs || []).filter(x => String(x.date || '') >= addDays(todayISO(), -13));
+    const activeWork = (work || []).filter(w => w.approved && w.status !== 'Fixed' && (isMine(w) || isTeamWide(w)));
+    const drillCards = roleDrills.slice(0, 3).map(d => '<div class="growth-drill"><div><span class="pill">' + esc(d.block || d.role || 'Practice') + '</span> <span class="muted small">' + esc(d.minutes || '—') + ' min</span></div><b>' + esc(d.drill) + '</b>' + (d.how ? '<p class="small muted">' + esc(d.how) + '</p>' : '') + (d.success ? '<p class="small growth-success">Success: ' + esc(d.success) + '</p>' : '') + '</div>').join('');
+    playerGrowthHtml = '<section class="growth-hub"><div class="growth-head"><div><div class="eyebrow">PLAYER DEVELOPMENT</div><h2>Your improvement plan</h2><p class="muted small">A focused view of your assigned work, role drills, and practice consistency.</p></div><a class="btn small ghost" href="#/aim/me">Practice log →</a></div>' +
+      '<div class="growth-metrics"><a href="#/workon"><b>' + activeWork.length + '</b><span>Open focus items</span></a><a href="#/aim/me"><b>' + recentAim.length + '</b><span>Aim sessions · 14d</span></a><a href="#/checkin"><b>' + myHist.filter(h => String(h.day || '') >= addDays(todayISO(), -6)).length + '/7</b><span>Check-ins this week</span></a></div>' +
+      '<div class="growth-columns"><div><div class="growth-subhead">Role practice · ' + esc(role) + '</div>' + (drillCards || '<p class="small muted">Your coach has not added role drills yet.</p>') + (roleDrills.length > 3 ? '<a class="small" href="#/aim/me">View practice tools →</a>' : '') + '</div><div><div class="growth-subhead">Your current focus</div>' + (activeWork.length ? activeWork.slice(0, 2).map(w => '<div class="growth-focus"><span class="pill ' + (PRIO[w.priority] || '') + '">' + esc(w.priority || 'Focus') + '</span><b>' + inlineMd(w.issue || 'Development item') + '</b>' + (w.tip ? '<p class="small muted">' + inlineMd(w.tip) + '</p>' : '') + '</div>').join('') : '<p class="small muted">No open coach-approved focus items. Keep building good habits.</p>') + '</div></div></section>';
+  }
+  let coachOpsHtml = '';
+  if (coach) {
+    const pendingWork = (work || []).filter(w => !w.approved).length;
+    const totalReviews = (reviewRows || []).length;
+    const todaysPct = joined.length ? Math.round(doneCount / joined.length * 100) : 0;
+    const upcomingPlan = nxt && plans.find(p => p.scrim_id === nxt.id);
+    coachOpsHtml = '<section class="coach-ops"><div class="growth-head"><div><div class="eyebrow">COACH WORKSPACE</div><h2>Staff action center</h2><p class="muted small">The items that need coaching attention today.</p></div><a class="btn small ghost" href="#/coach">Open coach panel →</a></div><div class="coach-actions">' +
+      '<a href="#/coach/work"><b>' + pendingWork + '</b><span>Work-on items awaiting approval</span><i>Review queue →</i></a>' +
+      '<a href="#/reviews"><b>' + totalReviews + '</b><span>VOD reviews in library</span><i>Open reviews →</i></a>' +
+      '<a href="#/coach/checkins"><b>' + doneCount + '/' + joined.length + '</b><span>Players checked in today · ' + todaysPct + '%</span><i>Attendance →</i></a>' +
+      '<a href="' + (upcomingPlan ? '#/plans/' + upcomingPlan.id : '#/prep') + '"><b>' + (upcomingPlan ? 'Ready' : 'Prepare') + '</b><span>' + (nxt ? 'Next opponent: ' + esc(nxt.opponent || 'TBD') : 'No upcoming scrim linked') + '</span><i>Match prep →</i></a>' +
+      '</div></section>';
+  }
   const ciHtml = doCheckin ? panel('Today\'s check-in', '<span class="muted small">' + new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) + '</span>', '<div id="ci-box"><p class="muted">Loading…</p></div>', 'ci-panel') : '';
-  el.innerHTML = hero + '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + schedHtml + (coach ? '' : focusHtml) + annHtml + statsHtml + rosterHtml + '</div></div>';
+  el.innerHTML = '<div class="home-dashboard"><div class="home-topline"><div><div class="eyebrow">TEAM OPERATIONS / OVERVIEW</div><div class="home-date">' + new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }) + '</div></div><div class="home-live"><span></span> TEAM SPACE ACTIVE</div></div>' +
+    hero.replace('class="hero"', 'class="hero home-hero"') + performanceHtml +
+    '<div class="home-section-label"><span>YOUR TEAM WORKSPACE</span><i></i></div>' +
+    (coach ? coachOpsHtml : playerGrowthHtml) + '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + schedHtml + (coach ? '' : focusHtml) + annHtml + statsHtml + rosterHtml + '</div></div></div>';
   if (doCheckin) {
     const mineToday = myHist.find(h => String(h.day).slice(0, 10) === today);
     const showForm = () => checkinForm($('#ci-box'), today, () => { S.cache = {}; render(); });
@@ -812,12 +944,17 @@ PAGES.stats = async function (el) {
   const mine = ps.filter(r => normName(r.player) === normName(me.ign));
   const util = uu.filter(r => normName(r.player) === normName(me.ign));
   const k = sum(mine, 'kills'), d = sum(mine, 'deaths'), hs = sum(mine, 'hs_kills');
+  const recent = mine.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 5);
+  const agents = groupBy(mine, 'agent').filter(([name]) => name).map(([agent, rows]) => ({ agent, maps: rows.length, kills: sum(rows, 'kills'), deaths: sum(rows, 'deaths'), kd: sum(rows, 'deaths') ? sum(rows, 'kills') / sum(rows, 'deaths') : sum(rows, 'kills'), hs: sum(rows, 'kills') ? sum(rows, 'hs_kills') / sum(rows, 'kills') : null })).sort((a, b) => b.maps - a.maps);
   el.innerHTML = '<div class="page-h"><div><h1>My stats</h1><p class="muted">Matched to in-game name <b>' + esc(me.ign) + '</b>. Stats come from reviewed scrims and matches.</p></div></div>' +
     (mine.length || util.length ? '' : empty('No stats logged for you yet.')) +
     '<div class="kpis">' + kpi(num(d ? k / d : k, 2), 'K/D') + kpi(k, 'Kills') + kpi(pct(k ? hs / k : null), 'Headshot kill %') + kpi(pct(avg(mine, 'true_hs_pct')), 'True HS %') +
     kpi(sum(mine, 'first_kills') + ' / ' + sum(mine, 'first_deaths'), 'First kills / deaths') + kpi(num(avg(util, 'util_per_round'), 1), 'Util per round') +
-    kpi(pct(avg(util, 'util_before_fight')), 'Util before first fight') + kpi(mine.length, 'Maps') + '</div>' +
-    (mine.length ? panel('Map by map', '', statsTable(mine, ['date', 'map', 'agent', 'kills', 'deaths', 'assists', 'kd', 'hs_kill_pct', 'true_hs_pct', 'first_kills', 'first_deaths', 'notes'], TABLES.player_stats)) : '') +
+    kpi(pct(avg(util, 'util_before_fight')), 'Util before first fight') + kpi(mine.length, 'Maps') + kpi(sum(mine, 'trades'), 'Trade kills') +
+    (function () { const g = mine.map(perfScore).filter(x => x != null); return g.length ? '<div class="kpi"><div class="v">' + gradePill(null, g.reduce((a, b) => a + b, 0) / g.length) + '</div><div class="l">Average grade</div></div>' : ''; })() + '</div>' +
+    (recent.length ? panel('Recent form · last ' + recent.length + ' maps', '', '<div class="kpis compact-kpis">' + kpi(num(avg(recent, 'kd'), 2), 'Average K/D') + kpi(sum(recent, 'first_kills') + ' / ' + sum(recent, 'first_deaths'), 'First kills / deaths') + kpi(pct(sum(recent, 'kills') ? sum(recent, 'hs_kills') / sum(recent, 'kills') : null), 'Headshot kill %') + '</div>') : '') +
+    (agents.length ? panel('Agent performance', '', '<div class="tablewrap"><table><thead><tr><th>Agent</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">HS kill %</th></tr></thead><tbody>' + agents.map(a => '<tr><td><b>' + esc(a.agent) + '</b></td><td class="num">' + a.maps + '</td><td class="num">' + num(a.kd, 2) + '</td><td class="num">' + pct(a.hs) + '</td></tr>').join('') + '</tbody></table></div>') : '') +
+    (mine.length ? panel('Map by map', '', statsTable(mine, ['date', 'map', 'agent', 'kills', 'deaths', 'assists', 'kd', 'hs_kill_pct', 'true_hs_pct', 'first_kills', 'first_deaths', 'trades', 'traded_deaths', 'grade', 'notes'], TABLES.player_stats)) : '') +
     (util.length ? panel('Utility usage', '', statsTable(util, ['date', 'map', 'agent', 'rounds', 'util_per_round', 'q_casts', 'e_casts', 'c_casts', 'ults_used', 'ults_available', 'died_with_util', 'util_before_fight', 'source', 'notes'], TABLES.utility_usage)) : '');
 };
 function statsTable(rows, keys, cfg) {
@@ -838,7 +975,12 @@ PAGES.team = async function (el) {
   if (tab === 'ranks') {
     body = await ranksTab();
   } else if (tab === 'roster' || !showStats) {
-    body = (team.coaches.length ? '<div class="small muted" style="margin:4px 0 12px">Coaching staff: ' + team.coaches.map(c => '<span class="chip">' + avatar(c, 20) + esc(nameOf(c)) + ' <span class="muted">' + esc(staffLabel(c)) + '</span></span>').join(' ') + '</div>' : '') +
+    const slotIds = new Set(team.slotCoaches.map(p => p.user_id).filter(Boolean));
+    const chipCoaches = team.coaches.filter(c => !slotIds.has(c.id));
+    const linked = team.players.filter(p => p.rs && p.rs.games).length;
+    body = (isStaff() ? '<div class="row small" style="margin:0 0 10px;gap:10px"><span class="muted">' + linked + ' of ' + team.players.filter(p => p.user_id).length + ' players linked their Riot account. Their K/D and HS% from recent games show on their card.</span><button class="btn small ghost" id="rsall">Update Riot stats</button></div>' : '') +
+      (team.slotCoaches.length ? '<div class="sec-h"><h2>Coaches <span class="muted small">' + team.slotCoaches.length + '</span></h2><span class="small muted">Coaches don\'t count in check-ins or player stats.</span></div><div class="pcards" style="margin-bottom:24px">' + team.slotCoaches.map(p => pcard(p, null)).join('') + '</div>' : '') +
+      (chipCoaches.length ? '<div class="small muted" style="margin:4px 0 12px">Coaching staff: ' + chipCoaches.map(c => '<span class="chip">' + avatar(c, 20) + esc(nameOf(c)) + ' <span class="muted">' + esc(staffLabel(c)) + '</span></span>').join(' ') + '</div>' : '') +
       (team.players.length ? ['Active roster', 'Bench'].map(sec => { const list = team.players.filter(p => (sec === 'Bench') === !!p.bench);
         if (sec === 'Bench' && !list.length && !S.me.is_coach) return '';
         return '<div class="sec-h"><h2>' + sec + ' <span class="muted small">' + list.length + '</span></h2>' + (sec === 'Bench' ? '<span class="small muted">Bench players keep their access and check-ins.</span>' : '') + '</div>' +
@@ -851,12 +993,14 @@ PAGES.team = async function (el) {
     const lb = Array.from(names.entries()).map(([n, name]) => { const s = statsFor(ps, name); const p = byIgn.get(n); const u = uu.filter(r => normName(r.player) === n);
       return Object.assign(s, { name: p ? p.name : name, p: p || { name: name }, trial: (p && p.is_trial) || ps.some(r => normName(r.player) === n && isTrialName(r.player)), role: p ? p.role : '', upr: avg(u, 'util_per_round'), ubf: avg(u, 'util_before_fight') }); })
       .sort((a, b) => b.kd - a.kd);
-    body = lb.length ? '<div class="tablewrap"><table><thead><tr><th>#</th><th>Player</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">Kills</th><th class="num">Assists</th><th class="num">HS kill %</th><th class="num">True HS %</th><th class="num">First K / D</th><th class="num">Util / round</th><th class="num">Util before fight</th></tr></thead><tbody>' +
-      lb.map((p, i) => '<tr><td><span class="rank r' + (i + 1) + '">' + (i + 1) + '</span></td><td><div class="row" style="gap:8px;flex-wrap:nowrap">' + avatar(p.p, 26) + '<b>' + esc(p.name) + '</b> ' + rolePill(p.role) + (p.trial ? ' <span class="pill yellow">Trial</span>' : '') + '</div></td><td class="num">' + p.maps + '</td><td class="num"><b>' + num(p.kd, 2) + '</b></td><td class="num">' + p.k + '</td><td class="num">' + p.a + '</td><td class="num">' + pct(p.hs) + '</td><td class="num">' + pct(p.ths) + '</td><td class="num">' + p.fk + ' / ' + p.fd + '</td><td class="num">' + num(p.upr, 1) + '</td><td class="num">' + pct(p.ubf) + '</td></tr>').join('') +
+    body = lb.length ? '<div class="tablewrap"><table><thead><tr><th>#</th><th>Player</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">Kills</th><th class="num">Assists</th><th class="num">HS kill %</th><th class="num">True HS %</th><th class="num">First K / D</th><th class="num">Trade kills</th><th class="num">Grade</th><th class="num">Util / round</th><th class="num">Util before fight</th></tr></thead><tbody>' +
+      lb.map((p, i) => '<tr><td><span class="rank r' + (i + 1) + '">' + (i + 1) + '</span></td><td><div class="row" style="gap:8px;flex-wrap:nowrap">' + avatar(p.p, 26) + '<b>' + esc(p.name) + '</b> ' + rolePill(p.role) + (p.trial ? ' <span class="pill yellow">Trial</span>' : '') + '</div></td><td class="num">' + p.maps + '</td><td class="num"><b>' + num(p.kd, 2) + '</b></td><td class="num">' + p.k + '</td><td class="num">' + p.a + '</td><td class="num">' + pct(p.hs) + '</td><td class="num">' + pct(p.ths) + '</td><td class="num">' + p.fk + ' / ' + p.fd + '</td><td class="num">' + (p.tr || '–') + '</td><td class="num">' + (p.score != null ? gradePill(null, p.score) : '<span class="muted">–</span>') + '</td><td class="num">' + num(p.upr, 1) + '</td><td class="num">' + pct(p.ubf) + '</td></tr>').join('') +
       '</tbody></table></div><p class="small muted">Sorted by K/D. Stats come from reviewed scrims and matches.</p>' : empty('No player stats logged yet. Import them from your sheet (Coach panel → Content & import).');
   } else {
     const maps = groupBy(matches, 'map').map(([m, list]) => { const w = list.filter(x => Number(x.rounds_won) > Number(x.rounds_lost)).length; return { m: m, n: list.length, w: w, rw: sum(list, 'rounds_won'), rl: sum(list, 'rounds_lost') }; }).sort((a, b) => b.n - a.n);
-    body = matches.length ? '<div class="kpis">' + kpi(won + '–' + (matches.length - won), 'Map record') + kpi(pct(rw + rl ? rw / (rw + rl) : null), 'Round win %') + kpi(matches.length, 'Maps played') + '</div>' +
+    const atkW = sum(matches, 'atk_won'), atkL = sum(matches, 'atk_lost'), defW = sum(matches, 'def_won'), defL = sum(matches, 'def_lost');
+    const pistolWins = sum(matches, 'pistols_won'), pistolMapsLogged = matches.filter(m => m.pistols_won != null && m.pistols_won !== '').length;
+    body = matches.length ? '<div class="kpis">' + kpi(won + '–' + (matches.length - won), 'Map record') + kpi(pct(rw + rl ? rw / (rw + rl) : null), 'Round win %') + kpi(matches.length, 'Maps played') + kpi(atkW + atkL ? pct(atkW / (atkW + atkL)) : '—', 'Attack round win %') + kpi(defW + defL ? pct(defW / (defW + defL)) : '—', 'Defense round win %') + kpi(pistolMapsLogged ? pistolWins + ' / ' + (pistolMapsLogged * 2) : '—', 'Pistol rounds won') + '</div>' +
       panel('By map', '', '<div class="tablewrap"><table><thead><tr><th>Map</th><th class="num">Played</th><th class="num">Won</th><th class="num">Win %</th><th class="num">Rounds</th></tr></thead><tbody>' +
         maps.map(x => '<tr><td><b>' + esc(x.m) + '</b></td><td class="num">' + x.n + '</td><td class="num">' + x.w + '</td><td class="num">' + pct(x.n ? x.w / x.n : null) + '</td><td class="num">' + x.rw + '–' + x.rl + '</td></tr>').join('') + '</tbody></table></div>') +
       panel('All matches', '', statsTable(matches, ['date', 'event', 'opponent', 'map', 'rounds_won', 'rounds_lost', 'start_side', 'vod_link', 'notes'], TABLES.matches))
@@ -865,8 +1009,10 @@ PAGES.team = async function (el) {
   el.innerHTML = '<div class="page-h"><div><h1>' + esc(teamName()) + '</h1><p class="muted">' + team.players.length + ' player' + (team.players.length === 1 ? '' : 's') +
     (showStats && matches.length ? ' · ' + won + '–' + (matches.length - won) + ' on maps' : '') + '</p></div></div>' +
     (tabs.length > 1 ? '<div class="tabs">' + tabs.map(t => '<a href="#/team/' + t[0] + '" class="' + ((tab === t[0] || (t[0] === 'roster' && !tabs.some(x => x[0] === tab))) ? 'active' : '') + '">' + t[1] + '</a>').join('') + '</div>' : '') + body;
-  const find = k => team.players.find(p => (p.rid ? 'r' + p.rid : 'u' + p.user_id) === k);
+  const find = k => team.players.concat(team.slotCoaches).find(p => (p.rid ? 'r' + p.rid : 'u' + p.user_id) === k);
   $$('[data-bench]', el).forEach(b => b.onclick = () => { const p = find(b.dataset.bench); setBench(p, !p.bench, render); });
+  $$('[data-slot]', el).forEach(b => b.onclick = () => { const [k, st] = b.dataset.slot.split('|'); const p = find(k); if (p) setSlotStatus(p, st, render); });
+  if ($('#rsall', el)) $('#rsall', el).onclick = async () => { const b = $('#rsall', el); b.disabled = true; b.textContent = 'Updating…'; try { const r = await riotCall({ action: 'sync_team' }); toast('Updated ' + r.synced + ' linked player' + (r.synced === 1 ? '' : 's') + (r.failed ? ' · ' + r.failed + ' failed' : '')); S.cache = {}; render(); } catch (err) { toast(err.message); b.disabled = false; b.textContent = 'Update Riot stats'; } };
   $$('[data-kick]', el).forEach(b => b.onclick = () => kickPlayer(find(b.dataset.kick), render));
 };
 
@@ -1053,31 +1199,92 @@ PAGES.reviews = async function (el) {
   if (id) return reviewDetail(el, rows.find(r => r.id === id), work);
   const f = location.hash.split('/')[3] || '';
   const filt = f === 'ours' ? rows.filter(isOurs) : f === 'pro' ? rows.filter(r => !isOurs(r)) : rows;
-  el.innerHTML = '<div class="page-h"><div><h1>VOD reviews</h1><p class="muted">Watch the VOD with the notes beside it. Timestamps jump the video to that moment.</p></div>' +
-    (isStaff() ? '<button class="btn small" id="addrev">Add a review</button>' : '') + '</div>' +
-    '<div class="tabs"><a href="#/reviews" class="' + (!f ? 'active' : '') + '">All</a><a href="#/reviews/0/ours" class="' + (f === 'ours' ? 'active' : '') + '">Our scrims &amp; matches</a><a href="#/reviews/0/pro" class="' + (f === 'pro' ? 'active' : '') + '">Pro &amp; other teams</a></div>' +
+  const needsWork = rows.reduce((n, r) => n + workFor(r, work).filter(w => w.status !== 'Fixed').length, 0);
+  const thisMonth = rows.filter(r => String(r.date || '').slice(0,7) === todayISO().slice(0,7)).length;
+  el.innerHTML = '<div class="vod-workspace">' +
+    '<section class="vod-hero"><div class="vod-hero-copy"><div class="eyebrow">VIDEO INTELLIGENCE / TEAM REVIEW</div><h1>VOD workspace</h1><p>Bring a scrim or match recording into Team Hub, review key moments, and turn observations into player development work.</p><div class="vod-hero-actions">' + (isStaff() ? '<button class="btn" id="uploadvod">＋ Add a VOD</button><button class="btn ghost" id="addrev">Create review notes</button>' : '<span class="pill">Team review library</span>') + '</div></div><div class="vod-hero-art"><div class="vod-play">▶</div><span>REVIEW · LEARN · REPEAT</span></div></section>' +
+    '<div class="vod-provider-status"><div><div class="eyebrow">AI VIDEO ANALYSIS</div><b>TwelveLabs connection</b><span id="vod-provider-state">Not checked yet · API key stays server-side</span></div>' + (isStaff() ? '<button class="btn ghost small" id="checkvodprovider">Test connection</button>' : '') + '</div>' +
+    '<div class="vod-overview"><div><b>' + rows.length + '</b><span>Videos in library</span></div><div><b>' + thisMonth + '</b><span>Added this month</span></div><div><b>' + needsWork + '</b><span>Open development items</span></div></div>' +
+    '<div class="vod-content"><div class="vod-library-head"><div><div class="eyebrow">TEAM VIDEO LIBRARY</div><h2>Review library</h2><p class="muted small">Filter your team&#39;s scrims, official matches, and pro reference VODs.</p></div><div class="tabs"><a href="#/reviews" class="' + (!f ? 'active' : '') + '">All videos</a><a href="#/reviews/0/ours" class="' + (f === 'ours' ? 'active' : '') + '">Our team</a><a href="#/reviews/0/pro" class="' + (f === 'pro' ? 'active' : '') + '">Reference VODs</a></div></div>' +
     (filt.length ? '<div class="vgrid">' + filt.map(r => { const vi = videoInfo(r.vod); const n = workFor(r, work).filter(w => w.status !== 'Fixed').length;
       return '<a class="vcard" href="#/reviews/' + r.id + '">' + thumbHtml(vi) + '<div class="vb"><div class="t">' + esc(r.title || 'VOD review') + '</div>' +
-        '<div class="row small" style="gap:6px;margin-top:6px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.type ? '<span class="pill">' + esc(r.type) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') +
+        '<div class="row small" style="gap:6px;margin-top:6px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.opponent ? '<span class="muted">vs ' + esc(r.opponent) + '</span>' : '') + (r.type ? '<span class="pill">' + esc(r.type) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') +
         (n ? '<span class="pill red">' + n + ' to work on</span>' : '') + '</div></div></a>'; }).join('') + '</div>'
-      : empty(rows.length ? 'Nothing in this list yet.' : 'No reviews yet. They show up here after the coach imports the VOD Queue tab, or adds one.'));
+      : '<div class="vod-empty"><div class="vod-empty-icon">▶</div><h3>Your video library starts here</h3><p>Paste a YouTube, Twitch, or direct video link. Team Hub will create a review room so your staff can add notes, timestamps, and player action items.</p>' + (isStaff() ? '<button class="btn" id="uploadvod-empty">Add your first VOD</button>' : '') + '</div>') +
+    '</div></div>';
+  const launch = () => vodUploadModal();
+  if ($('#uploadvod')) $('#uploadvod').onclick = launch;
+  if ($('#uploadvod-empty')) $('#uploadvod-empty').onclick = launch;
   if ($('#addrev')) $('#addrev').onclick = () => editRow('reviews', null, () => { S.cache = {}; render(); });
+  if ($('#checkvodprovider')) $('#checkvodprovider').onclick = async () => {
+    const btn = $('#checkvodprovider'), state = $('#vod-provider-state');
+    btn.disabled = true; btn.textContent = 'Checking…'; state.textContent = 'Verifying the server-side API key with TwelveLabs…';
+    try {
+      const { data, error } = await sb.functions.invoke('youtube-vod-ingest', { body: { action: 'provider_status' } });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || 'Provider connection failed');
+      state.textContent = 'Connected · API key verified · ' + (data.index_count ?? '—') + ' indexes available';
+      toast('TwelveLabs connection verified');
+    } catch (err) { state.textContent = 'Connection check failed · ' + (err.message || 'Check function secrets'); toast('TwelveLabs check failed: ' + (err.message || 'Unknown error')); }
+    finally { btn.disabled = false; btn.textContent = 'Test connection'; }
+  };
 };
+function vodUploadModal() {
+  openModal('<div class="vod-upload-modal"><div class="eyebrow">NEW VIDEO REVIEW</div><h2>Add a VOD in seconds</h2><p class="muted small">Paste the share link. Add match details now or fill them in later.</p><form id="vodupload">' +
+    '<label class="f"><span>Video link *</span><input type="url" name="vod" required placeholder="https://www.youtube.com/watch?v=…"></label>' +
+    '<div class="vod-provider-hint">Paste a YouTube watch, Shorts, or live link. Team Hub will validate it, retrieve available video metadata, and create an analysis job for your team.</div>' +
+    '<div class="vod-form-grid"><label class="f"><span>Review title</span><input name="title" placeholder="e.g. vs Sentinels · Scrim 2"></label><label class="f"><span>Date played</span><input type="date" name="date" value="' + todayISO() + '"></label>' +
+    '<label class="f"><span>Opponent</span><input name="opponent" placeholder="Opponent team"></label><label class="f"><span>Map</span><input name="map" placeholder="Ascent, Haven…"></label>' +
+    '<label class="f"><span>Recording type</span><select name="type"><option>Scrim</option><option>Official match</option><option>Pro reference</option><option>Practice</option></select></label><label class="f"><span>POV player (optional)</span><input name="pov" placeholder="Player IGN"></label></div>' +
+    '<div class="vod-upload-note"><b>What happens next?</b><span>Team Hub checks the YouTube link, saves the VOD, and creates a trackable analysis job. Actual round and player-stat extraction starts once an authorized video asset and analysis provider are connected. A YouTube share link alone is not treated as a downloadable video.</span></div>' +
+    '<div class="row"><button class="btn" type="submit">Add video to library</button><button class="btn ghost" type="button" data-close>Cancel</button></div></form></div>', m => {
+      $('#vodupload', m).onsubmit = async e => {
+        e.preventDefault();
+        const form = e.target, url = form.vod.value.trim();
+        let parsed;
+        try { parsed = new URL(url); } catch (_) { toast('Enter a valid video URL'); return; }
+        if (!/^https?:$/.test(parsed.protocol)) { toast('Use an http or https video link'); return; }
+        const title = form.title.value.trim() || [form.opponent.value.trim(), form.type.value].filter(Boolean).join(' · ') || 'VOD review';
+        const submit = $('button[type="submit"]', form); submit.disabled = true; submit.textContent = 'Checking YouTube & creating job…';
+        try {
+          const { data, error } = await sb.functions.invoke('youtube-vod-ingest', { body: {
+            url, title, date:form.date.value || todayISO(), opponent:form.opponent.value.trim(),
+            map:form.map.value.trim(), type:form.type.value, pov:form.pov.value.trim()
+          }});
+          if (error) throw error;
+          if (!data || !data.ok) throw new Error(data?.error || 'The VOD import could not be completed.');
+          S.cache = {};
+          closeModal();
+          toast('YouTube VOD imported · analysis job #' + data.job.id + ' awaiting video access');
+          location.hash = '#/reviews/' + data.review_id;
+          render();
+        } catch (err) {
+          submit.disabled = false; submit.textContent = 'Add video to library';
+          toast('Could not import VOD: ' + (err.message || 'Unknown error'));
+        }
+      };
+    });
+}
+
 async function reviewDetail(el, r, work) {
   if (!r) { el.innerHTML = empty('That review isn\'t here any more.', '<a class="btn small" href="#/reviews">All reviews</a>'); return; }
   const vi = videoInfo(r.vod), items = workFor(r, work), start = vi ? (vi.t || tsToSec(r.starts_at)) : 0;
+  const vodJob = isStaff() ? await db.list('vod_analysis_jobs', { eq: { review_id: r.id }, limit: 1 }).then(rows => rows[0] || null).catch(() => null) : null;
+  const revStats = (can('team_stats') || can('my_stats') || isStaff()) ? await db.list('player_stats', { eq: { review_id: r.id }, limit: 50 }).catch(() => []) : [];
   const canEmbed = vi && (vi.kind === 'yt' || vi.kind === 'tw');
   el.innerHTML = '<div class="page-h"><div><a href="#/reviews" class="small">← All reviews</a><h1 style="margin-top:6px">' + esc(r.title || 'VOD review') + '</h1>' +
     '<div class="row small" style="gap:6px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.type ? '<span class="pill">' + esc(r.type) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') +
     (r.pov ? '<span class="pill">POV: ' + esc(r.pov) + '</span>' : '') + (r.whose ? '<span class="pill ' + (isOurs(r) ? 'green' : '') + '">' + esc(r.whose) + '</span>' : '') + '</div></div>' +
     '<div class="row">' + (vi ? '<a class="btn small ghost" href="' + esc(vi.url) + '" target="_blank" rel="noopener">Open on ' + (vi.kind === 'tw' ? 'Twitch' : vi.kind === 'yt' ? 'YouTube' : 'site') + '</a>' : '') +
     (isStaff() && r.link ? linkHtml(r.link, 'Full review (coach)').replace('<a ', '<a class="btn small ghost" ') : '') + (isStaff() ? '<button class="btn small ghost" id="editrev">Edit</button>' : '') + '</div></div>' +
+    (vodJob ? panel('Video analysis status', '<span class="pill">' + esc(vodJob.status.replace(/_/g, ' ')) + '</span>', '<div class="vod-job-progress"><div class="vod-job-track"><i style="width:' + Math.max(0, Math.min(100, Number(vodJob.progress) || 0)) + '%"></i></div><div class="row small" style="justify-content:space-between"><span>' + esc(String(vodJob.stage || 'Queued').replace(/_/g, ' ')) + '</span><b>' + Math.max(0, Math.min(100, Number(vodJob.progress) || 0)) + '%</b></div>' + (vodJob.status === 'awaiting_media' ? '<p class="small muted">The YouTube link is registered. Connect an authorized video-analysis asset to begin frame and round analysis.</p>' : '') + (vodJob.error_message ? '<p class="small" style="color:#ff858f">' + esc(vodJob.error_message) + '</p>' : '') + '</div>') : '') +
     '<div class="review-grid"><div class="vcol"><div class="player">' + (canEmbed ? '<iframe id="vplayer" src="' + esc(embedSrc(vi, start)) + '" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>' : '<div class="noembed">' + (vi ? '<a class="btn" href="' + esc(vi.url) + '" target="_blank" rel="noopener">Watch the VOD</a>' : 'No video link on this review.') + '</div>') + '</div>' +
       (start ? '<div class="small muted" style="margin-top:6px">Game starts at <button class="linkbtn" data-seek="' + start + '">' + fmtTs(start) + '</button></div>' : '') + '</div>' +
     '<div class="ncol">' +
+      scrimStatsPanel(revStats, 'Player stats from this VOD') +
       (r.summary ? panel('Key takeaways', '', '<div class="md takeaways">' + md(String(r.summary).replace(/\s(\d\))\s/g, '\n$1 ')) + '</div>') : '') +
       (items.length ? panel('What we need to work on', '<a class="small" href="#/workon">All →</a>', items.map(w => workCard(w, { onSeek: true, coachView: isStaff() })).join('')) : '') +
-      (r.body ? panel('Notes &amp; tips', '', '<div class="md notes">' + md(r.body) + '</div>') : (!r.summary && !items.length ? empty('No notes on this review yet.') : '')) +
+      (r.body ? panel('Notes &amp; tips', '', '<div class="md notes">' + md(r.body) + '</div>') : (!r.summary && !items.length && !revStats.length ? empty('No notes on this review yet.') : '')) +
     '</div></div>';
   // timestamps in the notes become buttons that seek the video
   if (canEmbed) {
@@ -1157,9 +1364,11 @@ PAGES.account = async function (el) {
     '<p class="muted small">The coach manages your name, role and what you can see.</p>' +
     '<form id="pw" class="stack"><label class="f"><span>New password</span><input name="p" type="password" minlength="6" required></label><button class="btn ghost">Change password</button></form>' +
     '<div class="row"><button class="btn danger" id="so">Sign out</button><button class="btn ghost" id="lt">Leave ' + esc(teamName()) + '</button></div></div>' +
+    '<div class="card" style="max-width:520px;margin-top:14px"><h2>Riot account</h2><div id="riotbox"><p class="muted small">Loading…</p></div></div>' +
     '<div class="card" style="max-width:520px;margin-top:14px"><h2>Rank</h2><div id="rkbox"></div></div>' +
     '<div class="card" style="max-width:520px;margin-top:14px"><b>Install the app</b><p class="small muted">Phone: open this site in Safari (iPhone) or Chrome (Android) → Share / menu → <b>Add to Home Screen</b>. Computer: in Chrome or Edge click the install icon at the right end of the address bar.</p></div>';
   rankForm($('#rkbox'), () => PAGES.account(el));
+  riotPanel($('#riotbox'));
   $('#so').onclick = () => sb.auth.signOut();
   $('#lt').onclick = async () => {
     if (!confirm('Leave ' + teamName() + '? You\'ll lose access to its data until a coach lets you back in.')) return;
@@ -1265,7 +1474,7 @@ function rosterTable(roster, members) {
       '<td><select data-f="role">' + ROLES.map(x => '<option' + (x === (r.role || 'Flex') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></td>' +
       '<td style="text-align:center"><input type="checkbox" data-f="is_igl"' + (r.is_igl ? ' checked' : '') + '></td>' +
       '<td style="text-align:center"><input type="checkbox" data-f="is_trial"' + (r.is_trial ? ' checked' : '') + '></td>' +
-      '<td><select data-f="status" style="min-width:96px">' + ['Active', 'Bench'].map(x => '<option' + (x === (r.status || 'Active') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></td>' +
+      '<td><select data-f="status" style="min-width:96px">' + ['Active', 'Bench', 'Coach'].map(x => '<option' + (x === (r.status || 'Active') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></td>' +
       '<td>' + (r.id ? status + (who ? '<div class="small muted">' + esc(nameOf(who)) + '</div>' : '') : '') + '</td>' +
       '<td style="white-space:nowrap">' + (r.id ? '<button class="btn small ghost" data-rsave>Save</button> ' + (r.claimed_by ? '<button class="btn small ghost" data-runlink>Unlink</button> <button class="btn small danger" data-rkick>Kick</button>' : '<button class="btn small danger" data-rdel title="Delete slot">×</button>') : '<button class="btn small" data-rsave>Add</button>') + '</td></tr>';
   };
@@ -1886,7 +2095,13 @@ PAGES.maps = async function (el) {
       '<div class="grow"><div class="lbl small muted">NOT PLAYED</div><div class="small">' + (cards.filter(c => !c.n && c.pool.status !== 'Ban').map(c => esc(c.map)).join(', ') || '—') + '</div></div></div>') : '') +
     (matches.length || coach ? '<div class="mapgrid">' + cards.filter(c => c.n || c.pool.status).map(card).join('') + '</div>' +
       (cards.some(c => !c.n && !c.pool.status) ? '<details class="item" style="margin-top:14px"' + (matches.length ? '' : ' open') + '><summary><span class="t">Other maps (' + cards.filter(c => !c.n && !c.pool.status).length + ')</span> <span class="muted small">not played' + (since ? ' in this period' : ' yet') + '</span></summary><div class="body"><div class="mapgrid">' +
-        cards.filter(c => !c.n && !c.pool.status).map(card).join('') + '</div></div></details>' : '') : empty('No matches logged yet. Results show up here after the coach logs scrim results (Schedule → Log result) or imports the Matches tab.'));
+        cards.filter(c => !c.n && !c.pool.status).map(card).join('') + '</div></div></details>' : '') : empty('No matches logged yet. Results show up here after the coach logs scrim results (Schedule → Log result) or imports the Matches tab.')) +
+    (matches.length ? gamesPanel(matches, canEdit('matches')) : '');
+  const gf = $('#gmap', el);
+  if (gf) gf.onchange = () => { $$('#games tbody tr', el).forEach(tr => { tr.style.display = !gf.value || tr.dataset.map === gf.value.toLowerCase() ? '' : 'none'; }); };
+  $$('[data-gedit]', el).forEach(b => b.onclick = () => { const m = allMatches.find(x => x.id === Number(b.dataset.gedit)); if (m) editRow('matches', m, () => { S.cache = {}; render(); }); });
+  $$('[data-gdel]', el).forEach(b => b.onclick = async () => { const m = allMatches.find(x => x.id === Number(b.dataset.gdel)); if (!m || !confirm('Delete the ' + m.map + ' game' + (m.opponent ? ' vs ' + m.opponent : '') + (m.date ? ' on ' + fmtDate(m.date) : '') + '? This can\'t be undone.')) return;
+    try { await db.remove('matches', m.id); S.cache = {}; toast('Deleted'); render(); } catch (err) { toast('Error: ' + err.message); } });
   async function savePool(map, patch) {
     const ex = poolOf(map);
     try { if (ex.id) await db.update('map_pool', ex.id, patch); else { await db.insert('map_pool', [Object.assign({ map: map }, patch)]); const again = await db.list('map_pool', { limit: 100 }); pool.splice(0, pool.length, ...again); } toast('Saved'); }
@@ -1896,6 +2111,20 @@ PAGES.maps = async function (el) {
   $$('.poolnote', el).forEach(i => i.onchange = () => savePool(i.dataset.map, { notes: i.value.trim() || null }));
   if ($('#logm')) $('#logm').onclick = () => editRow('matches', { date: todayISO(), type: 'Scrim', event: 'Scrim' }, () => { S.cache = {}; render(); });
 };
+function gamesPanel(matches, edit) {
+  const list = matches.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || b.id - a.id);
+  const maps = Array.from(new Set(list.map(m => m.map))).sort();
+  const side = (w, l) => w == null && l == null ? '–' : (Number(w) || 0) + '–' + (Number(l) || 0);
+  return '<div class="card panel" style="margin-top:16px"><div class="card-h"><h2>Logged games <span class="muted small">' + list.length + '</span></h2>' +
+    '<select id="gmap" style="width:auto;padding:5px 8px"><option value="">All maps</option>' + maps.map(m => '<option>' + esc(m) + '</option>').join('') + '</select></div>' +
+    (edit ? '<p class="small muted" style="margin-top:-6px">Fix a score, map or opponent with Edit. Changes update every map card above.</p>' : '') +
+    '<div class="tablewrap" id="games"><table><thead><tr><th>Date</th><th>Opponent</th><th>Map</th><th class="num">Score</th><th>Type</th><th class="num">Atk</th><th class="num">Def</th><th class="num">Pistols</th>' + (edit ? '<th></th>' : '') + '</tr></thead><tbody>' +
+    list.map(m => '<tr data-map="' + esc(String(m.map).toLowerCase()) + '"><td>' + (m.date ? fmtDate(m.date) : '–') + '</td><td>' + esc(m.opponent || '–') + '</td><td><b>' + esc(m.map) + '</b></td>' +
+      '<td class="num"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span> ' + (Number(m.rounds_won) || 0) + '–' + (Number(m.rounds_lost) || 0) + '</td><td>' + esc(matchType(m)) + '</td>' +
+      '<td class="num">' + side(m.atk_won, m.atk_lost) + '</td><td class="num">' + side(m.def_won, m.def_lost) + '</td><td class="num">' + (m.pistols_won == null ? '–' : m.pistols_won + '/2') + '</td>' +
+      (edit ? '<td class="num" style="white-space:nowrap"><button class="btn small ghost" data-gedit="' + m.id + '">Edit</button> <button class="btn small ghost danger-t" data-gdel="' + m.id + '">Delete</button></td>' : '') + '</tr>').join('') +
+    '</tbody></table></div></div>';
+}
 function bestOnMap(rows) {
   const by = new Map(); rows.forEach(r => { const n = normName(r.player); if (!n) return; if (!by.has(n)) by.set(n, { name: String(r.player).replace(/\s*\*\s*trial\s*$/i, ''), k: 0, d: 0 }); const x = by.get(n); x.k += Number(r.kills) || 0; x.d += Number(r.deaths) || 0; });
   const list = Array.from(by.values()).filter(x => x.k + x.d > 0).map(x => Object.assign(x, { kd: x.d ? x.k / x.d : x.k })).sort((a, b) => b.kd - a.kd);
@@ -1927,11 +2156,34 @@ PAGES.plans = async function (el) {
 async function planDetail(el, p) {
   if (!p) { el.innerHTML = empty('That game plan isn\'t here any more.', '<a class="btn small" href="#/plans">All game plans</a>'); return; }
   const coach = isStaff();
-  const [scout, comps, matches, scrims] = await Promise.all([can('scouting') ? cached('opponent_scouting') : [], can('scouting') ? cached('comp_notes') : [], can('team_stats') ? cached('matches') : [], p.scrim_id ? listScrims() : []]);
+  const [scout, comps, matches, scrims, team] = await Promise.all([can('scouting') ? cached('opponent_scouting') : [], can('scouting') ? cached('comp_notes') : [], can('team_stats') ? cached('matches') : [], p.scrim_id ? listScrims() : [], teamPlayers()]);
   const sc = scout.filter(r => sameOpp(r.opponent, p.opponent)), cn = comps.filter(r => sameOpp(r.team, p.opponent));
   const vs = matches.filter(m => sameOpp(m.opponent, p.opponent));
   const scrim = scrims.find(s => s.id === p.scrim_id);
   const maps = mapList(p.maps);
+  const lineupMaps = maps.length ? maps : Object.keys(p.starting_lineup || {}).length ? Object.keys(p.starting_lineup) : MAPS;
+  let lineupMap = lineupMaps[0];
+  const lineupPlayers = team.players.filter(x => !x.bench);
+  const savedFive = map => (p.starting_lineup || {})[map] || [];
+  const savedAgents = map => (p.agent_comps || {})[map] || [];
+  const lineupView = map => { const five = savedFive(map), agents = savedAgents(map); return five.length === 5 ? '<div class="match-five">' + five.map((x, i) => '<div class="match-slot-view"><span class="slot-n">' + (i + 1) + '</span><b>' + esc(x.player || 'Player') + '</b><span class="pill">' + esc(agents[i] || x.agent || 'Agent TBD') + '</span>' + (x.role ? '<small class="muted">' + esc(x.role) + '</small>' : '') + '</div>').join('') + '</div>' : '<p class="muted small">No starting five saved for ' + esc(map) + ' yet.</p>'; };
+  const lineupFields = map => {
+    const five = savedFive(map), agents = savedAgents(map);
+    return Array.from({ length: 5 }, (_, i) => {
+      const slot = five[i] || {}, agent = agents[i] || slot.agent || '';
+      return '<div class="match-slot"><span class="slot-n">' + (i + 1) + '</span><label class="f grow"><span>Player</span><select data-lineup-player="' + i + '"><option value="">Choose player</option>' +
+        lineupPlayers.map(x => '<option value="' + esc(x.key) + '"' + (slot.player_key === x.key ? ' selected' : '') + '>' + esc(x.name) + (x.role ? ' · ' + esc(x.role) : '') + '</option>').join('') + '</select></label>' +
+        '<label class="f grow"><span>Agent</span><select data-lineup-agent="' + i + '"><option value="">Choose agent</option>' + AGENTS.map(a => '<option' + (a === agent ? ' selected' : '') + '>' + esc(a) + '</option>').join('') + '</select></label></div>';
+    }).join('');
+  };
+  const lineupPanel = () => {
+    const view = lineupView(lineupMap);
+    return '<section class="card panel match-lineup-panel"><div class="card-h"><div><h2>Starting five &amp; agent composition</h2><p class="small muted">Assign one active roster player and one agent to each slot for each map.</p></div>' +
+      (coach ? '<span class="pill purple">Coach edit</span>' : '') + '</div>' +
+      '<label class="f match-map-select"><span>Map</span><select id="lineup-map">' + lineupMaps.map(m => '<option' + (m === lineupMap ? ' selected' : '') + '>' + esc(m) + '</option>').join('') + '</select></label>' +
+      (coach ? '<div id="lineup-fields">' + lineupFields(lineupMap) + '</div><div class="row"><button class="btn small" id="save-lineup">Save starting five</button><span class="small muted">Saved to this game plan for the whole team.</span></div>' : '<div id="lineup-fields">' + view + '</div>') +
+      '</section>';
+  };
   const intel = [];
   if (vs.length) { const st = mapStats(vs); intel.push(panel('Our record vs them', '', '<div class="mini-kpis">' + kpi(st.w + '–' + st.l, 'Maps') + kpi(pct(st.rp), 'Rounds') + '</div>' +
     vs.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 6).map(m => '<div class="small row" style="gap:8px"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span><b>' + esc(m.map) + '</b> ' + m.rounds_won + '–' + m.rounds_lost + '<span class="muted">' + (m.date ? fmtDate(m.date) : '') + '</span></div>').join(''))); }
@@ -1947,13 +2199,102 @@ async function planDetail(el, p) {
     maps.map(m => '<span class="pill">' + esc(m) + '</span>').join('') + (!p.published ? '<span class="pill purple">Draft — players can\'t see this yet</span>' : '') + '</div></div>' +
     (coach ? '<div class="row"><button class="btn small ghost" id="pub">' + (p.published ? 'Hide from players' : 'Publish to players') + '</button><button class="btn small" id="pedit">Edit</button><button class="btn small danger" id="pdel">Delete</button></div>' : '') + '</div>' +
     '<div class="plan-grid"><div class="col">' + (secs.length ? secs.map(s => panel(s[1], '', '<div class="md">' + md(p[s[0]]) + '</div>')).join('') : empty('This plan is empty so far.' + (coach ? ' Click Edit to fill it in.' : ''))) + '</div>' +
-    '<div class="col">' + (intel.length ? intel.join('') : panel('Intel', '', '<p class="muted small">No scouting notes or past games vs ' + esc(p.opponent) + ' yet. Scouting notes with the same opponent name show up here automatically.</p>')) + '</div></div>';
+    '<div class="col">' + (intel.length ? intel.join('') : panel('Intel', '', '<p class="muted small">No scouting notes or past games vs ' + esc(p.opponent) + ' yet. Scouting notes with the same opponent name show up here automatically.</p>')) + '</div></div>' + lineupPanel();
+  $('#lineup-map').onchange = e => { lineupMap = e.target.value; $('#lineup-fields').innerHTML = coach ? lineupFields(lineupMap) : lineupView(lineupMap); };
   if (coach) {
+    $('#save-lineup').onclick = async () => {
+      const selected = Array.from({ length: 5 }, (_, i) => {
+        const key = $('[data-lineup-player="' + i + '"]', el).value;
+        const agent = $('[data-lineup-agent="' + i + '"]', el).value;
+        const player = lineupPlayers.find(x => x.key === key);
+        return player && agent ? { player_key: player.key, player: player.name, role: player.role || null } : null;
+      });
+      const agents = Array.from({ length: 5 }, (_, i) => $('[data-lineup-agent="' + i + '"]', el).value);
+      if (selected.some(x => !x) || agents.some(x => !x)) { toast('Choose five players and five agents before saving.'); return; }
+      if (new Set(selected.map(x => x.player_key)).size !== 5) { toast('Each starting slot must use a different player.'); return; }
+      const starting = Object.assign({}, p.starting_lineup || {});
+      const compsByMap = Object.assign({}, p.agent_comps || {});
+      starting[lineupMap] = selected;
+      compsByMap[lineupMap] = agents;
+      try {
+        await db.update('game_plans', p.id, { starting_lineup: starting, agent_comps: compsByMap });
+        p.starting_lineup = starting; p.agent_comps = compsByMap;
+        toast('Starting five and agent composition saved for ' + lineupMap);
+        await planDetail(el, p);
+      } catch (err) { toast('Could not save lineup: ' + err.message); }
+    };
     $('#pedit').onclick = () => editRow('game_plans', p, () => { S.cache = {}; render(); });
     $('#pub').onclick = async () => { await db.update('game_plans', p.id, { published: !p.published }); toast(p.published ? 'Hidden from players' : 'Published'); render(); };
     $('#pdel').onclick = async () => { if (!confirm('Delete this game plan?')) return; await db.remove('game_plans', p.id); location.hash = '#/plans'; };
   }
 }
+
+
+ 
+// ---- Match preparation command center
+PAGES.prep = async function (el) {
+  const coach = isStaff();
+  const [scrim, plans, scouting, comps, matches, pool, lineupRows, team] = await Promise.all([
+    nextScrim().catch(() => null),
+    can('scouting') ? db.list('game_plans', { order: 'match_date', asc: true, limit: 300 }) : [],
+    can('scouting') ? cached('opponent_scouting') : [],
+    can('scouting') ? cached('comp_notes') : [],
+    can('team_stats') ? cached('matches') : [],
+    can('team_stats') ? db.list('map_pool', { limit: 100 }) : [],
+    can('playbook') ? db.list('lineups', { order: 'created_at', asc: false, limit: 1000 }) : [],
+    teamPlayers()
+  ]);
+  const opponent = scrim && scrim.opponent ? String(scrim.opponent) : '';
+  const plan = (scrim && plans.find(p => p.scrim_id === scrim.id)) ||
+    (opponent && plans.find(p => sameOpp(p.opponent, opponent))) ||
+    plans.find(p => p.match_date && String(p.match_date).slice(0, 10) >= todayISO()) || null;
+  const scoutRows = opponent ? scouting.filter(s => sameOpp(s.opponent, opponent)) : [];
+  const compRows = opponent ? comps.filter(s => sameOpp(s.team, opponent)) : [];
+  const h2h = opponent ? matches.filter(m => sameOpp(m.opponent, opponent)) : [];
+  const maps = mapList((scrim && scrim.maps) || (plan && plan.maps) || '');
+  const activePlayers = team.players.filter(p => !p.bench);
+  const vetoState = localStore('th_veto') || {};
+  const vetoMatches = !!(opponent && sameOpp(vetoState.opp, opponent));
+  const ready = [
+    { label: 'Opponent scouting', done: scoutRows.length > 0, href: '#/scouting', detail: scoutRows.length ? scoutRows.length + ' report(s) saved' : 'No opponent report linked yet' },
+    { label: 'Game plan', done: !!plan, href: '#/plans', detail: plan ? 'Plan ' + (plan.published ? 'published' : 'draft') : 'No plan linked to this match' },
+    { label: 'Map veto', done: vetoMatches && (vetoState.steps || []).length > 0, href: '#/veto', detail: vetoMatches && (vetoState.steps || []).length ? 'Veto progress saved for this opponent on this device' : 'No veto progress for this opponent on this device' },
+    { label: 'Agent compositions', done: maps.length > 0 && !!plan && maps.every(m => ((plan.agent_comps || {})[m] || []).length === 5), href: '#/plans' + (plan ? '/' + plan.id : ''), detail: plan && Object.keys(plan.agent_comps || {}).length ? Object.keys(plan.agent_comps).length + ' map composition(s) saved' : 'No five-agent compositions saved' },
+    { label: 'Starting five', done: maps.length > 0 && !!plan && maps.every(m => ((plan.starting_lineup || {})[m] || []).length === 5), href: '#/plans' + (plan ? '/' + plan.id : ''), detail: plan && Object.keys(plan.starting_lineup || {}).length ? Object.keys(plan.starting_lineup).length + ' map lineup(s) saved' : 'No starting five saved' },
+    { label: 'Utility lineups', done: maps.length > 0 && maps.every(m => lineupRows.some(x => String(x.map || '').toLowerCase() === m.toLowerCase())), href: '#/lineups', detail: lineupRows.length ? lineupRows.length + ' lineup(s) in library' : 'No lineups saved' }
+  ];
+  const done = ready.filter(x => x.done).length;
+  const linkCard = (href, title, desc, action) => '<a class="prep-link" href="' + href + '"><div><b>' + title + '</b><p class="small muted">' + desc + '</p></div><span>' + action + ' →</span></a>';
+  const opponentLabel = opponent ? 'vs ' + esc(opponent) : 'No upcoming opponent';
+  const mapStatsHtml = maps.length ? maps.map(m => {
+    const rows = matches.filter(x => String(x.map || '').toLowerCase() === m.toLowerCase());
+    const w = rows.filter(isWin).length, l = rows.length - w;
+    return '<div class="prep-map"><b>' + esc(m) + '</b><span>' + (rows.length ? w + '–' + l + ' · ' + pct(w / rows.length) : 'No results logged') + '</span></div>';
+  }).join('') : '<p class="muted small">Add maps to the upcoming scrim or game plan to see map-specific preparation here.</p>';
+  el.innerHTML = '<div class="page-h"><div><div class="eyebrow">Team operations</div><h1>Match preparation center</h1><p class="muted">One place to prepare the opponent, map veto, comps, utility, and match-day plan.</p></div>' +
+    (coach ? '<a class="btn small" href="#/plans">Create game plan</a>' : '') + '</div>' +
+    '<section class="prep-hero"><div><div class="eyebrow">Next scheduled match</div><h2>' + opponentLabel + '</h2><p class="muted">' +
+      (scrim ? esc(fmtWhen(scrim.starts_at)) + (scrim.format ? ' · ' + esc(scrim.format) : '') : 'No upcoming planned scrim found. Add one in Schedule to build a match-specific checklist.') +
+      '</p><div class="row" style="gap:7px;margin-top:12px">' + maps.map(m => '<span class="pill">' + esc(m) + '</span>').join('') + '</div></div>' +
+      '<div class="prep-progress"><b>' + done + '/' + ready.length + '</b><span>prep areas ready</span><div class="bar"><div style="width:' + Math.round(done / ready.length * 100) + '%"></div></div></div></section>' +
+    '<div class="kpis">' + kpi(activePlayers.length, 'Active roster') + kpi(plan ? 'Ready' : 'Missing', 'Game plan') + kpi(scoutRows.length, 'Scouting reports') + kpi(h2h.length, 'Past maps vs opponent') + '</div>' +
+    '<div class="prep-grid"><section class="card panel"><div class="card-h"><h2>Preparation checklist</h2><span class="small muted">' + done + ' of ' + ready.length + ' complete</span></div>' +
+      '<div class="prep-checks">' + ready.map(x => '<a class="prep-check" href="' + x.href + '"><span class="prep-check-icon ' + (x.done ? 'done' : '') + '">' + (x.done ? '✓' : '•') + '</span><span class="grow"><b>' + x.label + '</b><small>' + x.detail + '</small></span><span class="muted">→</span></a>').join('') + '</div></section>' +
+      '<section class="card panel"><div class="card-h"><h2>Match-day tools</h2></div><div class="prep-tools">' +
+        linkCard('#/veto', 'Map veto simulator', 'Build a BO1 or BO3 veto using map results and opponent intel.', 'Open') +
+        linkCard('#/comps', 'Agent comp checker', 'Review saved compositions and counter notes.', 'Open') +
+        linkCard('#/lineups', 'Utility lineup library', 'Find map, agent, side, and site-specific utility.', 'Open') +
+        linkCard('#/live', 'Live match mode', 'Round score, timeout cards, and the active game plan.', 'Open') +
+        linkCard('#/scouting', 'Opponent scouting', 'Track tendencies, star players, weaknesses, and pistol plans.', 'Open') +
+        linkCard('#/plans', 'Game plans', 'Publish the match plan and anti-strat for players.', 'Open') +
+      '</div></section></div>' +
+    '<section class="card panel"><div class="card-h"><h2>Map preparation</h2><a class="small" href="#/maps">Full map pool →</a></div><div class="prep-maps">' + mapStatsHtml + '</div></section>' +
+    (opponent && h2h.length ? '<section class="card panel"><div class="card-h"><h2>Head-to-head vs ' + esc(opponent) + '</h2><span class="small muted">' + h2h.length + ' map(s) logged</span></div>' +
+      '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Map</th><th>Score</th><th>Result</th></tr></thead><tbody>' +
+      h2h.slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0,8).map(m => '<tr><td>' + (m.date ? fmtDate(m.date) : '—') + '</td><td>' + esc(m.map || '—') + '</td><td>' + esc(m.rounds_won) + '–' + esc(m.rounds_lost) + '</td><td><span class="pill ' + (isWin(m) ? 'green' : 'red') + '">' + (isWin(m) ? 'Win' : 'Loss') + '</span></td></tr>').join('') +
+      '</tbody></table></div></section>' : '') +
+    '<p class="small muted">Preparation status is based on saved Team Hub records. Veto progress is currently stored in this browser; the other modules use your team database and existing permissions.</p>';
+};
 
 // ---- Work on: is the mistake coming back?
 function workTrack(w) {
@@ -2034,7 +2375,7 @@ PAGES.explore = async function (el) {
     const rows = Array.from(names.entries()).map(([n, name]) => { const s = statsFor(ps, name); const r = roster.find(x => normName(x.ign || x.name) === n); const u = uu.filter(x => normName(x.player) === n);
       return { name: name, r: r, s: s, upr: avg(u, 'util_per_round') }; }).sort((a, b) => (b.s ? b.s.kd : -1) - (a.s ? a.s.kd : -1));
     body = rows.length ? '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Role</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">HS kill %</th><th class="num">First K / D</th><th class="num">Util / round</th></tr></thead><tbody>' +
-      rows.map(x => '<tr><td><b>' + esc(x.name) + '</b>' + (x.r && x.r.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (x.r && x.r.status === 'Bench' ? ' <span class="pill">Bench</span>' : '') + '</td><td>' + rolePill(x.r && x.r.role) + '</td>' +
+      rows.map(x => '<tr><td><b>' + esc(x.name) + '</b>' + (x.r && x.r.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (x.r && x.r.status === 'Bench' ? ' <span class="pill">Bench</span>' : '') + (x.r && x.r.status === 'Coach' ? ' <span class="pill blue">Coach</span>' : '') + '</td><td>' + rolePill(x.r && x.r.role) + '</td>' +
         (x.s ? '<td class="num">' + x.s.maps + '</td><td class="num"><b>' + num(x.s.kd, 2) + '</b></td><td class="num">' + pct(x.s.hs) + '</td><td class="num">' + x.s.fk + ' / ' + x.s.fd + '</td>' : '<td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td>') +
         '<td class="num">' + num(x.upr, 1) + '</td></tr>').join('') + '</tbody></table></div>' : empty('No players or stats yet.');
   } else if (tab === 'vods') {
@@ -2056,7 +2397,7 @@ PAGES.explore = async function (el) {
       : empty('No matches logged yet.');
   }
   el.innerHTML = '<div class="page-h"><div><a href="#/explore" class="small">← Other teams</a><h1 style="margin-top:6px">' + esc(t.name) + (t.tag ? ' <span class="pill">' + esc(t.tag) + '</span>' : '') + '</h1>' +
-    '<p class="muted">' + roster.filter(r => r.status !== 'Bench').map(r => esc(r.name) + (r.role ? ' <span class="small">(' + esc(r.role) + ')</span>' : '')).join(' · ') + '</p></div></div>' + note +
+    '<p class="muted">' + roster.filter(r => (r.status || 'Active') === 'Active').map(r => esc(r.name) + (r.role ? ' <span class="small">(' + esc(r.role) + ')</span>' : '')).join(' · ') + '</p></div></div>' + note +
     '<div class="tabs">' + tabs.map(x => '<a href="#/explore/' + tid + '/' + x[0] + '" class="' + (x[0] === tab ? 'active' : '') + '">' + x[1] + '</a>').join('') + '</div>' + body;
 };
 
@@ -2079,9 +2420,70 @@ function localStore(k, v) { try { if (v === undefined) return JSON.parse(localSt
 const AGENTS = ['Astra', 'Breach', 'Brimstone', 'Chamber', 'Clove', 'Cypher', 'Deadlock', 'Fade', 'Gekko', 'Harbor', 'Iso', 'Jett', 'KAY/O', 'Killjoy', 'Neon', 'Omen', 'Phoenix', 'Raze', 'Reyna', 'Sage', 'Skye', 'Sova', 'Tejo', 'Viper', 'Vyse', 'Waylay', 'Yoru'];
 
 // ---------------------------------------------------------------- Ranks
+// ---- Riot account link (stats pulled by the riot-sync Edge Function; the Riot ID stays private to the player)
+async function riotCall(body) {
+  const { data, error } = await sb.functions.invoke('riot-sync', { body: body });
+  if (error) { let msg = error.message; try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* keep message */ } throw new Error(msg); }
+  if (data && data.error) throw new Error(data.error);
+  return data || {};
+}
+async function riotPanel(box) {
+  const { data } = await sb.from('riot_links').select('riot_name,riot_tag,region,synced_at').eq('user_id', S.me.id).maybeSingle();
+  if (!data) {
+    box.innerHTML = '<p class="small muted" style="margin-top:0">Link your Riot account to pull your games automatically: K/D, headshot %, first kills and deaths, trades and a grade for every game. ' +
+      'Only you can see your Riot ID and your games. Your team just sees a short line under your name (K/D, HS%, games). No password needed.</p>' +
+      '<form id="rl" class="row"><input name="rid" placeholder="Name#TAG" autocomplete="off" class="grow" required><button class="btn small">Link</button></form><p class="small error" id="rlerr"></p>';
+    $('#rl', box).onsubmit = async e => { e.preventDefault(); const b = e.target.querySelector('button'); b.disabled = true; b.textContent = 'Linking…'; $('#rlerr', box).textContent = '';
+      try { const r = await riotCall({ action: 'link', riot_id: e.target.rid.value.trim() }); toast('Linked' + (r.new_games ? ' · ' + r.new_games + ' games pulled' : '')); S.cache = {}; riotPanel(box); }
+      catch (err) { $('#rlerr', box).textContent = err.message; b.disabled = false; b.textContent = 'Link'; } };
+    return;
+  }
+  box.innerHTML = '<div class="row spread"><div><b>' + esc(data.riot_name) + '#' + esc(data.riot_tag) + '</b> <span class="pill">' + esc(String(data.region).toUpperCase()) + '</span>' +
+    '<div class="small muted">Only you can see this. ' + (data.synced_at ? 'Last updated ' + new Date(data.synced_at).toLocaleString() : 'Not updated yet') + '</div></div>' +
+    '<div class="row"><a class="btn small ghost" href="#/games">My games</a><button class="btn small ghost" id="rsync">Update now</button><button class="btn small ghost danger-t" id="runlink">Unlink</button></div></div>';
+  $('#rsync', box).onclick = async () => { try { const r = await riotCall({ action: 'sync', force: true }); toast(r.new_games ? r.new_games + ' games updated' : 'Up to date'); S.cache = {}; riotPanel(box); } catch (err) { toast(err.message); } };
+  $('#runlink', box).onclick = async () => { if (!confirm('Unlink your Riot account? Your pulled games are removed from Team Hub.')) return; try { await riotCall({ action: 'unlink' }); S.cache = {}; toast('Unlinked'); riotPanel(box); } catch (err) { toast(err.message); } };
+}
+function riotRowAsStats(m) {
+  const hits = (Number(m.headshots) || 0) + (Number(m.bodyshots) || 0) + (Number(m.legshots) || 0);
+  return { rounds: m.rounds, kills: m.kills, deaths: m.deaths, assists: m.assists, first_kills: m.first_kills, first_deaths: m.first_deaths, trades: m.trades, hs_kill_pct: hits ? m.headshots / hits : null };
+}
+PAGES.games = async function (el) {
+  const [{ data: link }, { data: rows }] = await Promise.all([sb.from('riot_links').select('riot_name,riot_tag').eq('user_id', S.me.id).maybeSingle(), sb.from('riot_matches').select('*').eq('user_id', S.me.id).order('started_at', { ascending: false }).limit(60)]);
+  const list = rows || [];
+  const sel = Number(location.hash.split('/')[2]) || null;
+  if (sel) { const m = list.find(x => x.id === sel); return gameDetail(el, m); }
+  const qOf = m => ({ custom: 'Custom', competitive: 'Competitive', unrated: 'Unrated', premier: 'Premier', swiftplay: 'Swiftplay', deathmatch: 'Deathmatch', teamdeathmatch: 'Team DM', spikerush: 'Spike Rush' })[m.queue] || (m.queue || '–');
+  const real = list.filter(m => !/deathmatch/.test(m.queue || ''));
+  const k = sum(real, 'kills'), d = sum(real, 'deaths'), hs = sum(real, 'headshots'), hits = hs + sum(real, 'bodyshots') + sum(real, 'legshots'), rn = sum(real, 'rounds');
+  const scores = real.map(m => perfScore(riotRowAsStats(m))).filter(x => x != null);
+  el.innerHTML = '<div class="page-h"><div><h1>My games</h1><p class="muted">Pulled from Riot for ' + (link ? '<b>' + esc(link.riot_name) + '#' + esc(link.riot_tag) + '</b> (only you see this list)' : 'your linked account') + '. Your team only sees your K/D, HS% and games count.</p></div>' +
+    '<div class="row">' + (link ? '<button class="btn small ghost" id="gsync">Update now</button>' : '<a class="btn small" href="#/account">Link Riot account</a>') + '</div></div>' +
+    (!link ? empty('Link your Riot account on the Account page to see your games here.') : !list.length ? empty('No games pulled yet. Play a game, then press “Update now”.') :
+      '<div class="kpis">' + kpi(num(d ? k / d : k, 2), 'K/D') + kpi(pct(hits ? hs / hits : null), 'Headshot %') + kpi(rn ? Math.round(sum(real, 'score') / rn) : '–', 'ACS') + kpi(rn ? Math.round(sum(real, 'damage') / rn) : '–', 'ADR') +
+      kpi(sum(real, 'first_kills') + ' / ' + sum(real, 'first_deaths'), 'First kills / deaths') + kpi(sum(real, 'trades'), 'Trade kills') +
+      (scores.length ? '<div class="kpi"><div class="v">' + gradePill(null, scores.reduce((a, b) => a + b, 0) / scores.length) + '</div><div class="l">Average grade</div></div>' : '') + kpi(real.length, 'Games') + '</div>' +
+      '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Mode</th><th>Map</th><th>Agent</th><th>Result</th><th class="num">K / D / A</th><th class="num">K/D</th><th class="num">HS %</th><th class="num">ACS</th><th class="num">ADR</th><th class="num">First K / D</th><th class="num">Trades</th><th class="num">Grade</th></tr></thead><tbody>' +
+      list.map(m => { const st = riotRowAsStats(m); return '<tr class="clickrow" data-g="' + m.id + '"><td>' + (m.started_at ? fmtDate(String(m.started_at).slice(0, 10)) : '–') + '</td><td>' + esc(qOf(m)) + '</td><td><b>' + esc(m.map || '–') + '</b></td><td>' + esc(m.agent || '–') + '</td>' +
+        '<td>' + (m.won == null ? '–' : '<span class="pill ' + (m.won ? 'green' : 'red') + '">' + (m.won ? 'W' : 'L') + ' ' + (m.rounds_won ?? '') + '–' + (m.rounds_lost ?? '') + '</span>') + '</td>' +
+        '<td class="num">' + m.kills + ' / ' + m.deaths + ' / ' + m.assists + '</td><td class="num"><b>' + num(m.deaths ? m.kills / m.deaths : m.kills, 2) + '</b></td><td class="num">' + pct(st.hs_kill_pct) + '</td>' +
+        '<td class="num">' + (m.rounds ? Math.round(m.score / m.rounds) : '–') + '</td><td class="num">' + (m.rounds ? Math.round(m.damage / m.rounds) : '–') + '</td><td class="num">' + m.first_kills + ' / ' + m.first_deaths + '</td><td class="num">' + m.trades + '</td><td class="num">' + (/deathmatch/.test(m.queue || '') ? '–' : gradePill(st)) + '</td></tr>'; }).join('') +
+      '</tbody></table></div><p class="small muted">HS % = headshots out of all hits. Trades = kills within 3 s of a teammate dying to that enemy. Grade = performance score (an even game is about a C/C+).</p>');
+  $$('[data-g]', el).forEach(tr => tr.onclick = () => { location.hash = '#/games/' + tr.dataset.g; });
+  if ($('#gsync')) $('#gsync').onclick = async () => { const b = $('#gsync'); b.disabled = true; b.textContent = 'Updating…'; try { const r = await riotCall({ action: 'sync', force: true }); toast(r.new_games ? r.new_games + ' games updated' : 'Up to date'); S.cache = {}; render(); } catch (err) { toast(err.message); b.disabled = false; b.textContent = 'Update now'; } };
+};
+function gameDetail(el, m) {
+  if (!m) { el.innerHTML = empty('That game isn\'t here any more.', '<a class="btn small" href="#/games">My games</a>'); return; }
+  const ps = ((m.detail || {}).players || []).slice().sort((a, b) => String(a.team).localeCompare(String(b.team)) || (b.s || 0) - (a.s || 0));
+  const mine = ps.find(p => p.me); const myTeam = mine ? mine.team : null;
+  const rows = t => ps.filter(p => (p.team === myTeam) === t).map(p => '<tr' + (p.me ? ' style="background:var(--accent-soft)"' : '') + '><td><b>' + esc(p.n || '') + '</b></td><td>' + esc(p.agent || '') + '</td><td class="num">' + (m.rounds ? Math.round((p.s || 0) / m.rounds) : '–') + '</td><td class="num">' + p.k + ' / ' + p.d + ' / ' + p.a + '</td></tr>').join('');
+  el.innerHTML = '<div class="page-h"><div><a href="#/games" class="small">← My games</a><h1 style="margin-top:6px">' + esc(m.map || 'Game') + ' · ' + esc(m.agent || '') + '</h1><p class="muted">' + (m.started_at ? new Date(m.started_at).toLocaleString() : '') + ' · ' + esc(m.queue || '') + (m.won == null ? '' : ' · ' + (m.won ? 'Win ' : 'Loss ') + m.rounds_won + '–' + m.rounds_lost) + '</p></div></div>' +
+    scrimStatsPanel([Object.assign({ player: 'You', agent: m.agent, map: m.map, hs_kills: m.headshots, kills: m.kills, deaths: m.deaths, assists: m.assists, first_kills: m.first_kills, first_deaths: m.first_deaths, trades: m.trades, traded_deaths: m.traded_deaths, rounds: m.rounds }, { hs_kill_pct: riotRowAsStats(m).hs_kill_pct })], 'Your game') +
+    (ps.length ? panel('Scoreboard', '', '<div class="tablewrap"><table><thead><tr><th>Your team</th><th>Agent</th><th class="num">ACS</th><th class="num">K / D / A</th></tr></thead><tbody>' + rows(true) + '</tbody></table></div><div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>Enemy team</th><th>Agent</th><th class="num">ACS</th><th class="num">K / D / A</th></tr></thead><tbody>' + rows(false) + '</tbody></table></div>') : '');
+}
 async function rankForm(box, after) {
   const me = S.me;
-  box.innerHTML = '<form id="rk" class="stack"><label class="f"><span>Riot ID</span><input name="riot" placeholder="Name#TAG" value="' + esc(me.riot_id || '') + '"></label>' +
+  box.innerHTML = '<form id="rk" class="stack"><label class="f"><span>Riot ID <span class="muted">(optional, shown to your team for the tracker.gg link)</span></span><input name="riot" placeholder="Name#TAG" value="' + esc(me.riot_id || '') + '"></label>' +
     '<div class="row"><label class="f grow"><span>Current rank</span><select name="rank"><option value="">—</option>' + RANKS.map(r => '<option' + (r === me.rank ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></label>' +
     '<label class="f"><span>RR</span><input name="rr" inputmode="numeric" style="width:80px" value="' + esc(me.rank_rr == null ? '' : me.rank_rr) + '"></label></div>' +
     '<label class="f"><span>Peak rank</span><select name="peak"><option value="">—</option>' + RANKS.map(r => '<option' + (r === me.peak_rank ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></label>' +
@@ -2126,6 +2528,8 @@ PAGES.live = async function (el) {
   const plan = plans.find(p => p.id === pid);
   const maps = plan ? mapList(plan.maps) : (nxt ? mapList(nxt.maps) : []);
   if (!mapSel && maps.length) mapSel = maps[0];
+  const liveFive = plan && mapSel ? (plan.starting_lineup || {})[mapSel] || [] : [];
+  const liveAgents = plan && mapSel ? (plan.agent_comps || {})[mapSel] || [] : [];
   const key = 'th_live_' + (pid || 0) + '_' + mapSel;
   const score = localStore(key) || { us: 0, them: 0, to: 2 };
   const st = mapSel ? mapStats(matches.filter(m => String(m.map).toLowerCase() === mapSel.toLowerCase())) : null;
@@ -2140,7 +2544,7 @@ PAGES.live = async function (el) {
       '<div class="small">Timeouts left: <b>' + score.to + '</b> <button class="linkbtn" data-sc="to,-1">use one</button></div><button class="linkbtn small" data-sc="reset">Reset score</button></div>' +
       '<div class="sc"><span>THEM</span><b>' + score.them + '</b><div><button class="btn small" data-sc="them,1">+1</button><button class="btn small ghost" data-sc="them,-1">−</button></div></div></div>' +
     (st && st.n ? '<div class="livestats small"><b>' + esc(mapSel) + '</b> for us: ' + pct(st.wp) + ' win (' + st.w + '–' + st.l + ') · attack ' + pct(st.ap) + ' · defense ' + pct(st.dp) + ' · pistols ' + (st.pn ? st.pw + '/' + st.pn : '–') + '</div>' : '') +
-    (plan ? sec('Our comp', plan.comp) + sec('Pistol rounds', plan.pistols) + sec('Attack', plan.attack_plan) + sec('Defense', plan.defense_plan) + sec('Their tendencies', plan.their_tendencies) + sec('Anti-strat', plan.anti_strat)
+    (plan ? sec('Our comp', plan.comp) + (liveFive.length === 5 ? '<section class="livesec"><h3>Starting five · ' + esc(mapSel) + '</h3><div class="match-five">' + liveFive.map((x, i) => '<div class="match-slot-view"><span class="slot-n">' + (i + 1) + '</span><b>' + esc(x.player || 'Player') + '</b><span class="pill">' + esc(liveAgents[i] || 'Agent TBD') + '</span></div>').join('') + '</div></section>' : '') + sec('Pistol rounds', plan.pistols) + sec('Attack', plan.attack_plan) + sec('Defense', plan.defense_plan) + sec('Their tendencies', plan.their_tendencies) + sec('Anti-strat', plan.anti_strat)
       : '<div class="card" style="margin-top:12px"><p class="muted" style="margin:0">No game plan for this match yet.' + (isStaff() ? ' <a href="#/plans">Make one in Game plans</a> and it shows here.' : '') + '</p></div>') +
     '<div class="row spread" style="margin-top:18px"><h2 style="margin:0">Timeout cards</h2>' + (isStaff() ? '<button class="btn small ghost" id="addcard">Add a card</button>' : '') + '</div>' +
     '<div class="tcards">' + allCards.map((c, i) => '<button class="tcard" data-card="' + i + '"><span class="pill">' + esc(c.category || 'Call') + '</span><b>' + esc(c.title) + '</b></button>').join('') + '</div></div>';
@@ -2492,7 +2896,25 @@ COACH.publicpage = async function (box) {
 const _origCached = cached;
 cached = async function (table, opts) {
   if (table === 'profiles_list') {
-    if (!S.cache.profiles_list) { const { data } = await sb.from('profiles').select('id,display_name,ign,role,is_igl,is_trial,is_coach,staff_role,approved,discord,avatar_url,riot_id,rank,rank_rr,peak_rank,rank_updated').eq('approved', true); S.cache.profiles_list = data || []; }
+    if (!S.me || !S.me.team_id) return [];
+    if (!S.cache.profiles_list) {
+      // Never load every approved account into a team's roster view. Only
+      // profiles belonging to the active team may be joined to its roster.
+      const pending = sb.from('profiles')
+        .select('id,display_name,ign,role,is_igl,is_trial,is_coach,staff_role,approved,discord,avatar_url,riot_id,rank,rank_rr,peak_rank,rank_updated')
+        .eq('approved', true)
+        .eq('team_id', S.me.team_id)
+        .then(({ data, error }) => {
+          if (error) throw error;
+          const rows = data || [];
+          S.cache.profiles_list = rows;
+          return rows;
+        }).catch(err => {
+          delete S.cache.profiles_list;
+          throw err;
+        });
+      S.cache.profiles_list = pending;
+    }
     return S.cache.profiles_list;
   }
   return _origCached(table, opts);
