@@ -720,3 +720,5 @@ input:focus,select:focus,textarea:focus { border-color:#ff6572; box-shadow:0 0 0
 .rsline b { font-weight: 700; }
 tr.clickrow { cursor: pointer; }
 tr.clickrow:hover td { background: rgba(255,255,255,.04); }
+.rsagents { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; justify-content: inherit; }
+.rsagents .pill, .rsagents .rankpill { font-size: .68rem; }
