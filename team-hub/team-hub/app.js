@@ -140,7 +140,7 @@ const TABLES = {
     F('date', 'Date', 'date'), F('source', 'From VOD', 'text', ['From VOD', 'Source', 'Scrim']), F('area', 'Area', 'select', ['Area'], { options: ['Comms', 'Utility', 'Trades', 'Opening duels', 'Executes', 'Retakes', 'Post-plant', 'Defense setups', 'Rotations', 'Economy', 'Positioning', 'Aim / mechanics', 'Mid-round calls'] }),
     F('player', 'Player (or Team)', 'text', ['Player']), F('issue', 'What we need to work on', 'long', ['What we need to work on', 'Issue']), F('tip', 'How to fix it', 'long', ['How to fix it', 'Tip']),
     F('priority', 'Priority', 'select', ['Priority'], { options: ['High', 'Medium', 'Low'] }), F('status', 'Status', 'select', ['Status'], { options: ['Open', 'Working on it', 'Fixed'] }),
-    F('watch', 'Watch it', 'link', ['Watch it']), F('drill', 'Drill', 'long', ['Drill'])] },
+    F('watch', 'Watch it', 'link', ['Watch it']), F('drill', 'Drill', 'long', ['Drill'])], keepOnAdd: ['review_id'] },
   opponent_scouting: { label: 'Opponent scouting', sheet: 'Opponent Scouting', order: 'date', req: 'opponent', fields: [
     F('date', 'Date', 'date'), F('opponent', 'Opponent'), F('map', 'Map'), F('veto', 'Their veto'), F('source', 'Source'), F('pistol_plan', 'Pistol plan (attack)', 'long'),
     F('fav_attack_site', 'Favorite attack site'), F('defense_setup', 'Defense setup', 'long'), F('after_losing', 'After losing a round', 'long'),
@@ -612,10 +612,18 @@ async function riotSummaries() {
   const rows = error ? [] : (data || []);
   S.cache[key] = rows; return rows;
 }
-function riotLine(rs) {
-  if (!rs || !rs.games) return '';
-  return '<div class="rsline" title="Last ' + rs.games + ' games from Riot' + (rs.updated_at ? ', updated ' + fmtDate(String(rs.updated_at).slice(0, 10)) : '') + '">K/D <b>' + num(Number(rs.kd), 2) + '</b> · HS <b>' + pct(rs.hs_pct == null ? null : Number(rs.hs_pct)) + '</b>' +
-    (rs.acs ? ' · ACS <b>' + Math.round(rs.acs) + '</b>' : '') + ' · <span class="muted">' + rs.games + ' games</span></div>';
+// 5v5 modes that count toward Riot stats (no deathmatch / team deathmatch / arcade)
+const RIOT_STD = ['competitive', 'unrated', 'premier', 'custom', 'swiftplay'];
+const RIOT_QUEUE = { custom: 'Custom', competitive: 'Competitive', unrated: 'Unrated', premier: 'Premier', swiftplay: 'Swiftplay', deathmatch: 'Deathmatch', teamdeathmatch: 'Team DM', hurm: 'Team DM', spikerush: 'Spike Rush', abilitydraftarena: 'Arcade', ggteam: 'Escalation', onefa: 'Replication', snowball: 'Snowball' };
+function riotAgents(rs) { return (Array.isArray(rs && rs.top_agents) ? rs.top_agents : []).filter(a => a && a.agent); }
+function riotLine(rs, withRank) {
+  if (!rs || !rs.games) return withRank && rs && rs.rank ? '<div class="rsline">' + rankPill(rs.rank, true) + '</div>' : '';
+  const ag = riotAgents(rs);
+  return '<div class="rsline" title="Last ' + rs.games + ' 5v5 games from Riot' + (rs.updated_at ? ', updated ' + fmtDate(String(rs.updated_at).slice(0, 10)) : '') + '">' +
+    '<div>K/D <b>' + num(Number(rs.kd), 2) + '</b> · HS <b>' + pct(rs.hs_pct == null ? null : Number(rs.hs_pct)) + '</b>' +
+    (rs.win_pct != null ? ' · Win <b>' + pct(Number(rs.win_pct)) + '</b>' : '') + ' · <span class="muted">' + rs.games + ' games</span></div>' +
+    (ag.length || rs.main_role || (withRank && rs.rank) ? '<div class="rsagents">' + (withRank && rs.rank ? rankPill(rs.rank, true) + ' ' : '') + (rs.main_role ? rolePill(rs.main_role) + ' ' : '') +
+      (ag.length ? '<span class="muted">' + ag.map(a => esc(a.agent)).join(' · ') + '</span>' : '') + '</div>' : '') + '</div>';
 }
 async function teamPlayers() {
   let [roster, members, rsum] = await Promise.all([cached('roster'), cached('profiles_list'), riotSummaries()]);
@@ -630,7 +638,12 @@ async function teamPlayers() {
   members.forEach(m => { if (!m.is_coach && !m.staff_role && !roster.some(r => r.claimed_by === m.id)) out.push({ key: 'u' + m.id, name: nameOf(m), ign: m.ign, role: m.role, is_igl: m.is_igl, is_trial: m.is_trial, discord: m.discord, avatar_url: m.avatar_url, rank: m.rank, rank_rr: m.rank_rr, peak_rank: m.peak_rank, riot_id: m.riot_id, rank_updated: m.rank_updated, user_id: m.id, joined: true }); });
   const staffIds = new Set(members.filter(m => m.is_coach || m.staff_role).map(m => m.id));
   const coaches = members.filter(m => m.is_coach).concat(members.filter(m => !m.is_coach && m.staff_role));
-  out.forEach(p => { if (p.user_id) p.rs = rsBy.get(p.user_id) || null; });
+  out.forEach(p => {
+    if (!p.user_id) return;
+    p.rs = rsBy.get(p.user_id) || null;
+    // rank pulled from Riot wins over the hand-entered one
+    if (p.rs && RANKS.includes(p.rs.rank)) { p.rank = p.rs.rank; p.rank_rr = p.rs.rank_rr; p.rankAuto = true; if (RANKS.includes(p.rs.peak_rank)) p.peak_rank = p.rs.peak_rank; }
+  });
   const slotCoaches = out.filter(p => p.coachSlot);
   return { slotCoaches: slotCoaches, players: out.filter(p => !p.coachSlot && !(p.user_id && staffIds.has(p.user_id))).sort((a, b) => (a.is_trial ? 1 : 0) - (b.is_trial ? 1 : 0) || String(a.name).localeCompare(String(b.name))), coaches: coaches };
 }
@@ -834,7 +847,7 @@ PAGES.home = async function (el) {
   // roster
   const rosterHtml = panel('The team', '<a class="small" href="#/team">Roster &amp; stats →</a>',
     (team.coaches.length ? '<div class="small muted" style="margin-bottom:6px">Coaching staff: ' + team.coaches.map(c => esc(nameOf(c)) + ' <span class="muted">(' + esc(staffLabel(c)) + ')</span>').join(', ') + '</div>' : '') +
-    (players.length ? '<div class="plist compact">' + players.slice().sort((a, b) => (a.bench ? 1 : 0) - (b.bench ? 1 : 0)).map(p => '<div class="prow' + (p.bench ? ' benched' : '') + '">' + avatar(p, 28) + '<div class="grow t">' + esc(p.name) + (p.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (p.is_trial ? ' <span class="pill yellow">Trial</span>' : '') + (p.bench ? ' <span class="pill">Bench</span>' : '') + riotLine(p.rs).replace('class="rsline"', 'class="rsline" style="margin-top:2px"') + '</div>' + rolePill(p.role) + '</div>').join('') + '</div>' : '<p class="muted small">No players yet.</p>'));
+    (players.length ? '<div class="plist compact">' + players.slice().sort((a, b) => (a.bench ? 1 : 0) - (b.bench ? 1 : 0)).map(p => '<div class="prow' + (p.bench ? ' benched' : '') + '">' + avatar(p, 28) + '<div class="grow t">' + esc(p.name) + (p.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (p.is_trial ? ' <span class="pill yellow">Trial</span>' : '') + (p.bench ? ' <span class="pill">Bench</span>' : '') + riotLine(p.rs, true).replace('class="rsline"', 'class="rsline" style="margin-top:2px"') + '</div>' + rolePill(p.role) + '</div>').join('') + '</div>' : '<p class="muted small">No players yet.</p>'));
   const annHtml = panel('From the coach', coach ? '<a class="small" href="#/coach/announce">Post →</a>' : '',
     anns.length ? anns.slice(0, 5).map(a => '<div class="ann">' + (a.pinned ? '<span class="pill red">Pinned</span> ' : '') + '<b>' + esc(a.title) + '</b> <span class="muted small">' + fmtDate(a.created_at) + '</span><div class="md">' + md(a.body) + '</div></div>').join('') : '<p class="muted small">Nothing posted yet.</p>');
 
@@ -978,7 +991,7 @@ PAGES.team = async function (el) {
     const slotIds = new Set(team.slotCoaches.map(p => p.user_id).filter(Boolean));
     const chipCoaches = team.coaches.filter(c => !slotIds.has(c.id));
     const linked = team.players.filter(p => p.rs && p.rs.games).length;
-    body = (isStaff() ? '<div class="row small" style="margin:0 0 10px;gap:10px"><span class="muted">' + linked + ' of ' + team.players.filter(p => p.user_id).length + ' players linked their Riot account. Their K/D and HS% from recent games show on their card.</span><button class="btn small ghost" id="rsall">Update Riot stats</button></div>' : '') +
+    body = (isStaff() ? '<div class="row small" style="margin:0 0 10px;gap:10px"><span class="muted">' + linked + ' of ' + team.players.filter(p => p.user_id).length + ' players linked their Riot account. Their rank, K/D, HS%, win % and main agents from recent games show on their card.</span><button class="btn small ghost" id="rsall">Update Riot stats</button></div>' : '') +
       (team.slotCoaches.length ? '<div class="sec-h"><h2>Coaches <span class="muted small">' + team.slotCoaches.length + '</span></h2><span class="small muted">Coaches don\'t count in check-ins or player stats.</span></div><div class="pcards" style="margin-bottom:24px">' + team.slotCoaches.map(p => pcard(p, null)).join('') + '</div>' : '') +
       (chipCoaches.length ? '<div class="small muted" style="margin:4px 0 12px">Coaching staff: ' + chipCoaches.map(c => '<span class="chip">' + avatar(c, 20) + esc(nameOf(c)) + ' <span class="muted">' + esc(staffLabel(c)) + '</span></span>').join(' ') + '</div>' : '') +
       (team.players.length ? ['Active roster', 'Bench'].map(sec => { const list = team.players.filter(p => (sec === 'Bench') === !!p.bench);
@@ -1157,7 +1170,7 @@ function thumbHtml(vi) {
 function sameVideo(a, b) { const x = videoInfo(a), y = videoInfo(b); return !!(x && y && x.id && x.kind === y.kind && x.id === y.id); }
 function isOurs(r) { return r.whose === 'Our team' || r.whose === 'Opponent (vs us)' || (!r.whose && /scrim|premier|tournament|qualifier/i.test(r.type || '')); }
 function workFor(r, items) {
-  return items.filter(w => (r.vod && w.watch && sameVideo(w.watch, r.vod)) || (r.date && w.date && String(w.date).slice(0, 10) === String(r.date).slice(0, 10) && w.source && r.opponent && normName(w.source).includes(normName(r.opponent).split(/[ ,(]/)[0])));
+  return items.filter(w => (w.review_id && w.review_id === r.id) || (r.vod && w.watch && sameVideo(w.watch, r.vod)) || (r.date && w.date && String(w.date).slice(0, 10) === String(r.date).slice(0, 10) && w.source && r.opponent && normName(w.source).includes(normName(r.opponent).split(/[ ,(]/)[0])));
 }
 const PRIO = { High: 'red', Medium: 'yellow', Low: '' };
 const WSTAT = { Open: '', 'Working on it': 'yellow', Fixed: 'green' };
@@ -1175,7 +1188,7 @@ function workCard(w, opts) {
     '<div class="wi"><span class="lbl">Mistake</span>' + inlineMd(w.issue || '') + '</div>' +
     (w.tip ? '<div class="wt"><span class="lbl">How to avoid it</span>' + inlineMd(w.tip) + '</div>' : '') +
     (w.drill ? '<div class="small muted" style="margin-top:6px">Drill: ' + inlineMd(w.drill) + '</div>' : '') + workProgressHtml(w) +
-    '<div class="small muted row" style="margin-top:8px;gap:10px">' + (w.date ? '<span>' + fmtDate(w.date) + '</span>' : '') + (w.source ? '<span>' + esc(w.source) + '</span>' : '') +
+    '<div class="small muted row" style="margin-top:8px;gap:10px">' + (w.date ? '<span>' + fmtDate(w.date) + '</span>' : '') + (w.source ? (w.review_id && !opts.onSeek ? '<a href="#/reviews/' + w.review_id + '">' + esc(w.source) + '</a>' : '<span>' + esc(w.source) + '</span>') : (w.review_id && !opts.onSeek ? '<a href="#/reviews/' + w.review_id + '">From VOD review</a>' : '')) +
       (vi ? (opts.onSeek && vi.id ? '<button type="button" class="linkbtn" data-seek="' + (vi.t || 0) + '">▶ Watch ' + fmtTs(vi.t || 0) + '</button>' : '<a href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch the moment</a>') : '') + '</div>' +
     (opts.coachView ? '<div class="row" style="margin-top:10px;gap:6px">' + (!w.approved ? '<button class="btn small" data-wapprove="' + w.id + '">Approve for ' + esc(isTeamWide(w) ? 'team' : w.player) + '</button>' : '<button class="btn small ghost" data-wunapprove="' + w.id + '">Hide from player</button>') +
       (w.approved ? '<button class="btn small ghost" data-wseen="' + w.id + '" title="This mistake showed up again">Seen again</button>' : '') + '<button class="btn small ghost" data-wedit="' + w.id + '">Edit</button><button class="btn small ghost" data-wdel="' + w.id + '">' + (w.approved ? 'Delete' : 'Dismiss') + '</button></div>' : '') + '</div>';
@@ -1283,7 +1296,9 @@ async function reviewDetail(el, r, work) {
     '<div class="ncol">' +
       scrimStatsPanel(revStats, 'Player stats from this VOD') +
       (r.summary ? panel('Key takeaways', '', '<div class="md takeaways">' + md(String(r.summary).replace(/\s(\d\))\s/g, '\n$1 ')) + '</div>') : '') +
-      (items.length ? panel('What we need to work on', '<a class="small" href="#/workon">All →</a>', items.map(w => workCard(w, { onSeek: true, coachView: isStaff() })).join('')) : '') +
+      (items.length || isStaff() ? panel('Work on', '<div class="row" style="gap:10px">' + (isStaff() ? '<button class="btn small" id="addwork">＋ Add</button>' : '') + '<a class="small" href="#/workon">Work on board →</a></div>',
+        (isStaff() ? '<p class="small muted" style="margin:0 0 8px">Add what the team or a player needs to fix from this VOD' + (r.summary ? ', or press <b>→ Work on</b> next to a takeaway' : '') + '. It goes straight onto the Work on board, linked to this review.</p>' : '') +
+        (items.length ? items.map(w => workCard(w, { onSeek: true, coachView: isStaff() })).join('') : '<p class="small muted" style="margin:0">Nothing added from this VOD yet.</p>')) : '') +
       (r.body ? panel('Notes &amp; tips', '', '<div class="md notes">' + md(r.body) + '</div>') : (!r.summary && !items.length && !revStats.length ? empty('No notes on this review yet.') : '')) +
     '</div></div>';
   // timestamps in the notes become buttons that seek the video
@@ -1300,6 +1315,18 @@ async function reviewDetail(el, r, work) {
       $('#vplayer').src = embedSrc(vi, Number(t.dataset.seek)); $('#vplayer').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
   }
   wireWork(el, items, () => render());
+  if (isStaff()) {
+    // new Work on item tied to this review (shows on the Work on board right away)
+    const addWork = issue => editRow('work_on', { review_id: r.id, issue: issue || '', date: r.date || todayISO(), source: r.title || [r.opponent, r.type].filter(Boolean).join(' · ') || 'VOD review',
+      watch: r.vod || '', player: 'Team', priority: 'Medium', status: 'Open', approved: true }, () => { S.cache = {}; render(); });
+    if ($('#addwork')) $('#addwork').onclick = () => addWork('');
+    $$('.takeaways li, .takeaways p', el).filter(x => !x.closest('li')).forEach(li => {
+      const txt = li.textContent.replace(/\s+/g, ' ').trim(); if (txt.length < 8) return;
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'linkbtn tk2w'; b.textContent = '→ Work on'; b.title = 'Add this to the Work on board';
+      b.onclick = e => { e.preventDefault(); e.stopPropagation(); addWork(txt.replace(/^\d+[).]\s*/, '')); };
+      li.appendChild(document.createTextNode(' ')); li.appendChild(b);
+    });
+  }
   if ($('#editrev')) $('#editrev').onclick = () => editRow('reviews', r, () => { S.cache = {}; render(); });
 }
 
@@ -1591,18 +1618,58 @@ function download(name, text) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' })); a.download = name; document.body.appendChild(a); a.click(); a.remove();
 }
 
+async function discordPost(id) { return discordCall({ action: 'post', id: id }); }
+async function discordCall(body) {
+  const { data, error } = await sb.functions.invoke('discord-announce', { body: body });
+  if (error) { let msg = error.message; try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* keep */ } throw new Error(msg); }
+  if (data && data.error) throw new Error(data.error);
+}
+async function discordPanel(box, after) {
+  const { data: st } = await sb.rpc('discord_status');
+  const s = st || { connected: false };
+  const mentionSel = '<select id="dcm">' + [['', 'No ping'], ['@here', '@here'], ['@everyone', '@everyone']].map(([v, l]) => '<option value="' + v + '"' + ((s.mention || '') === v ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
+  box.innerHTML = s.connected
+    ? '<div class="row spread"><div><b>Discord connected</b> <span class="pill green">On</span><div class="small muted">Webhook link ending …' + esc(s.hint || '') + '. New announcements post to that channel.</div></div>' +
+      '<div class="row" style="gap:6px"><label class="small row" style="gap:6px">Ping ' + mentionSel + '</label><button class="btn small ghost" id="dctest">Send test</button><button class="btn small ghost" id="dcchange">Change channel</button><button class="btn small ghost danger-t" id="dcoff">Disconnect</button></div></div><div id="dcform"></div>'
+    : '<b>Post announcements to Discord</b><p class="small muted" style="margin:4px 0 10px">In Discord: <b>Server Settings → Integrations → Webhooks → New Webhook</b>, pick the channel (e.g. #announcements), then <b>Copy Webhook URL</b> and paste it here. The link is stored so only the server can read it. Players never see it.</p><div id="dcform"></div>';
+  const form = () => {
+    $('#dcform', box).innerHTML = '<form id="dcf" class="row" style="gap:6px;margin-top:8px"><input name="url" class="grow" placeholder="https://discord.com/api/webhooks/…" autocomplete="off" required>' + (s.connected ? '' : '<label class="small row" style="gap:6px">Ping ' + mentionSel.replace('id="dcm"', 'name="m"') + '</label>') + '<button class="btn small">Connect</button></form>';
+    $('#dcf', box).onsubmit = async e => { e.preventDefault(); const f = e.target;
+      const { error } = await sb.rpc('set_discord_webhook', { p_url: f.url.value.trim(), p_mention: f.m ? f.m.value : (s.mention || '') });
+      if (error) { toast(error.message); return; }
+      try { await discordCall({ action: 'test' }); toast('Connected. A test message was sent to Discord'); } catch (err) { toast('Saved, but the test failed: ' + err.message); }
+      discordPanel(box, after); if (after) after(); };
+  };
+  if (!s.connected) { form(); return; }
+  $('#dcchange', box).onclick = form;
+  $('#dcm', box).onchange = async e => { const { error } = await sb.rpc('set_discord_mention', { p_mention: e.target.value }); toast(error ? error.message : 'Saved'); };
+  $('#dctest', box).onclick = async () => { try { await discordCall({ action: 'test' }); toast('Test sent. Check your Discord channel'); } catch (err) { toast(err.message); } };
+  $('#dcoff', box).onclick = async () => { if (!confirm('Stop posting announcements to Discord?')) return; const { error } = await sb.rpc('set_discord_webhook', { p_url: '', p_mention: '' }); toast(error ? error.message : 'Disconnected'); discordPanel(box, after); if (after) after(); };
+}
 COACH.announce = async function (box) {
-  const rows = await db.list('announcements');
-  box.innerHTML = '<div class="card"><form id="an"><label class="f"><span>Title</span><input name="title" required></label>' +
+  const [rows, dst] = await Promise.all([db.list('announcements'), sb.rpc('discord_status').then(r => r.data || {}, () => ({}))]);
+  const dOn = !!dst.connected;
+  box.innerHTML = '<div class="card" id="dcbox" style="margin-bottom:12px"></div><div class="card"><form id="an"><label class="f"><span>Title</span><input name="title" required></label>' +
     '<label class="f"><span>Message (you can use **bold**, lists and links)</span><textarea name="body"></textarea></label>' +
     '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="pinned"> Pin to the top</label>' +
-    (S.me.is_admin ? '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="everyone"> Show to every team (owner)</label>' : '') + '<button class="btn">Post</button></form></div>' +
-    '<h2 style="margin-top:18px">Posted</h2>' + (rows.length ? rows.map(a => '<div class="card row spread" style="margin-bottom:8px"><div><b>' + esc(a.title) + '</b> ' + (a.pinned ? '<span class="pill red">Pinned</span>' : '') + (a.team_id == null ? ' <span class="pill">All teams</span>' : '') + '<div class="small muted">' + fmtDate(a.created_at) + '</div></div>' + (a.team_id == null && !S.me.is_admin ? '' : '<button class="btn small danger" data-del="' + a.id + '">Delete</button>') + '</div>').join('') : '<p class="muted">Nothing yet.</p>');
+    (S.me.is_admin ? '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="everyone"> Show to every team (owner)</label>' : '') +
+    (dOn ? '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="discord" checked> Also post in Discord</label>' : '') + '<button class="btn">Post</button></form></div>' +
+    '<h2 style="margin-top:18px">Posted</h2>' + (rows.length ? rows.map(a => '<div class="card row spread" style="margin-bottom:8px"><div><b>' + esc(a.title) + '</b> ' + (a.pinned ? '<span class="pill red">Pinned</span>' : '') + (a.team_id == null ? ' <span class="pill">All teams</span>' : '') + (a.discord_sent_at ? ' <span class="pill blue" title="Posted to Discord ' + esc(new Date(a.discord_sent_at).toLocaleString()) + '">In Discord</span>' : '') + '<div class="small muted">' + fmtDate(a.created_at) + '</div></div>' +
+      '<div class="row" style="gap:6px">' + (dOn ? '<button class="btn small ghost" data-dc="' + a.id + '">' + (a.discord_sent_at ? 'Send again' : 'Send to Discord') + '</button>' : '') + (a.team_id == null && !S.me.is_admin ? '' : '<button class="btn small danger" data-del="' + a.id + '">Delete</button>') + '</div></div>').join('') : '<p class="muted">Nothing yet.</p>');
+  discordPanel($('#dcbox', box), () => COACH.announce(box));
+  $$('[data-dc]', box).forEach(b => b.onclick = async () => { b.disabled = true; b.textContent = 'Sending…'; try { await discordPost(Number(b.dataset.dc)); toast('Posted to Discord'); S.cache = {}; COACH.announce(box); } catch (err) { toast(err.message); b.disabled = false; b.textContent = 'Send to Discord'; } });
   $('#an').onsubmit = async e => {
     e.preventDefault();
     const rec = { title: e.target.title.value, body: e.target.body.value, pinned: e.target.pinned.checked };
     if (e.target.everyone && e.target.everyone.checked) rec.team_id = null;
-    try { await db.insert('announcements', [rec]); S.cache = {}; toast('Posted'); COACH.announce(box); }
+    const toDiscord = e.target.discord && e.target.discord.checked;
+    try {
+      const { data: made, error } = await sb.from('announcements').insert([rec]).select('id').single();
+      if (error) throw error;
+      let msg = 'Posted';
+      if (toDiscord && made) { try { await discordPost(made.id); msg = 'Posted here and in Discord'; } catch (err) { msg = 'Posted here, but Discord failed: ' + err.message; } }
+      S.cache = {}; toast(msg); COACH.announce(box);
+    }
     catch (err) { toast(err.message); }
   };
   $$('[data-del]', box).forEach(b => b.onclick = async () => { if (!confirm('Delete this announcement?')) return; await db.remove('announcements', Number(b.dataset.del)); S.cache = {}; COACH.announce(box); });
@@ -2431,7 +2498,7 @@ async function riotPanel(box) {
   const { data } = await sb.from('riot_links').select('riot_name,riot_tag,region,synced_at').eq('user_id', S.me.id).maybeSingle();
   if (!data) {
     box.innerHTML = '<p class="small muted" style="margin-top:0">Link your Riot account to pull your games automatically: K/D, headshot %, first kills and deaths, trades and a grade for every game. ' +
-      'Only you can see your Riot ID and your games. Your team just sees a short line under your name (K/D, HS%, games). No password needed.</p>' +
+      'Only you can see your Riot ID and your games. Your team just sees a short line under your name (rank, K/D, HS%, win %, main agents and role). No password needed.</p>' +
       '<form id="rl" class="row"><input name="rid" placeholder="Name#TAG" autocomplete="off" class="grow" required><button class="btn small">Link</button></form><p class="small error" id="rlerr"></p>';
     $('#rl', box).onsubmit = async e => { e.preventDefault(); const b = e.target.querySelector('button'); b.disabled = true; b.textContent = 'Linking…'; $('#rlerr', box).textContent = '';
       try { const r = await riotCall({ action: 'link', riot_id: e.target.rid.value.trim() }); toast('Linked' + (r.new_games ? ' · ' + r.new_games + ' games pulled' : '')); S.cache = {}; riotPanel(box); }
@@ -2449,26 +2516,31 @@ function riotRowAsStats(m) {
   return { rounds: m.rounds, kills: m.kills, deaths: m.deaths, assists: m.assists, first_kills: m.first_kills, first_deaths: m.first_deaths, trades: m.trades, hs_kill_pct: hits ? m.headshots / hits : null };
 }
 PAGES.games = async function (el) {
-  const [{ data: link }, { data: rows }] = await Promise.all([sb.from('riot_links').select('riot_name,riot_tag').eq('user_id', S.me.id).maybeSingle(), sb.from('riot_matches').select('*').eq('user_id', S.me.id).order('started_at', { ascending: false }).limit(60)]);
+  const [{ data: link }, { data: rows }, { data: mySum }] = await Promise.all([sb.from('riot_links').select('riot_name,riot_tag').eq('user_id', S.me.id).maybeSingle(), sb.from('riot_matches').select('*').eq('user_id', S.me.id).order('started_at', { ascending: false }).limit(60), sb.from('riot_summary').select('*').eq('user_id', S.me.id).maybeSingle()]);
   const list = rows || [];
   const sel = Number(location.hash.split('/')[2]) || null;
   if (sel) { const m = list.find(x => x.id === sel); return gameDetail(el, m); }
-  const qOf = m => ({ custom: 'Custom', competitive: 'Competitive', unrated: 'Unrated', premier: 'Premier', swiftplay: 'Swiftplay', deathmatch: 'Deathmatch', teamdeathmatch: 'Team DM', spikerush: 'Spike Rush' })[m.queue] || (m.queue || '–');
-  const real = list.filter(m => !/deathmatch/.test(m.queue || ''));
+  const qOf = m => RIOT_QUEUE[m.queue] || (m.queue || '–');
+  const isStd = m => RIOT_STD.includes(m.queue || '');
+  const real = list.filter(isStd);
+  const decided = real.filter(m => m.won != null), ag = riotAgents(mySum);
   const k = sum(real, 'kills'), d = sum(real, 'deaths'), hs = sum(real, 'headshots'), hits = hs + sum(real, 'bodyshots') + sum(real, 'legshots'), rn = sum(real, 'rounds');
   const scores = real.map(m => perfScore(riotRowAsStats(m))).filter(x => x != null);
-  el.innerHTML = '<div class="page-h"><div><h1>My games</h1><p class="muted">Pulled from Riot for ' + (link ? '<b>' + esc(link.riot_name) + '#' + esc(link.riot_tag) + '</b> (only you see this list)' : 'your linked account') + '. Your team only sees your K/D, HS% and games count.</p></div>' +
+  el.innerHTML = '<div class="page-h"><div><h1>My games</h1><p class="muted">Pulled from Riot for ' + (link ? '<b>' + esc(link.riot_name) + '#' + esc(link.riot_tag) + '</b> (only you see this list)' : 'your linked account') + '. Your team only sees your rank, K/D, HS%, win % and main agents.</p></div>' +
     '<div class="row">' + (link ? '<button class="btn small ghost" id="gsync">Update now</button>' : '<a class="btn small" href="#/account">Link Riot account</a>') + '</div></div>' +
     (!link ? empty('Link your Riot account on the Account page to see your games here.') : !list.length ? empty('No games pulled yet. Play a game, then press “Update now”.') :
-      '<div class="kpis">' + kpi(num(d ? k / d : k, 2), 'K/D') + kpi(pct(hits ? hs / hits : null), 'Headshot %') + kpi(rn ? Math.round(sum(real, 'score') / rn) : '–', 'ACS') + kpi(rn ? Math.round(sum(real, 'damage') / rn) : '–', 'ADR') +
+      '<div class="kpis">' + (mySum && mySum.rank ? '<div class="kpi"><div class="v">' + rankPill(mySum.rank) + '</div><div class="l">Rank' + (mySum.rank_rr != null ? ' · ' + mySum.rank_rr + ' RR' : '') + (mySum.peak_rank ? ' · peak ' + esc(mySum.peak_rank) : '') + '</div></div>' : '') +
+      kpi(num(d ? k / d : k, 2), 'K/D') + kpi(pct(hits ? hs / hits : null), 'Headshot %') + kpi(pct(decided.length ? decided.filter(m => m.won).length / decided.length : null), 'Win %') +
+      (ag.length ? '<div class="kpi"><div class="v" style="font-size:1rem">' + ag.map(a => esc(a.agent)).join(', ') + '</div><div class="l">Main agents' + (mySum.main_role ? ' · ' + esc(mySum.main_role) : '') + '</div></div>' : '') +
+      kpi(rn ? Math.round(sum(real, 'score') / rn) : '–', 'ACS') + kpi(rn ? Math.round(sum(real, 'damage') / rn) : '–', 'ADR') +
       kpi(sum(real, 'first_kills') + ' / ' + sum(real, 'first_deaths'), 'First kills / deaths') + kpi(sum(real, 'trades'), 'Trade kills') +
       (scores.length ? '<div class="kpi"><div class="v">' + gradePill(null, scores.reduce((a, b) => a + b, 0) / scores.length) + '</div><div class="l">Average grade</div></div>' : '') + kpi(real.length, 'Games') + '</div>' +
       '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Mode</th><th>Map</th><th>Agent</th><th>Result</th><th class="num">K / D / A</th><th class="num">K/D</th><th class="num">HS %</th><th class="num">ACS</th><th class="num">ADR</th><th class="num">First K / D</th><th class="num">Trades</th><th class="num">Grade</th></tr></thead><tbody>' +
       list.map(m => { const st = riotRowAsStats(m); return '<tr class="clickrow" data-g="' + m.id + '"><td>' + (m.started_at ? fmtDate(String(m.started_at).slice(0, 10)) : '–') + '</td><td>' + esc(qOf(m)) + '</td><td><b>' + esc(m.map || '–') + '</b></td><td>' + esc(m.agent || '–') + '</td>' +
         '<td>' + (m.won == null ? '–' : '<span class="pill ' + (m.won ? 'green' : 'red') + '">' + (m.won ? 'W' : 'L') + ' ' + (m.rounds_won ?? '') + '–' + (m.rounds_lost ?? '') + '</span>') + '</td>' +
         '<td class="num">' + m.kills + ' / ' + m.deaths + ' / ' + m.assists + '</td><td class="num"><b>' + num(m.deaths ? m.kills / m.deaths : m.kills, 2) + '</b></td><td class="num">' + pct(st.hs_kill_pct) + '</td>' +
-        '<td class="num">' + (m.rounds ? Math.round(m.score / m.rounds) : '–') + '</td><td class="num">' + (m.rounds ? Math.round(m.damage / m.rounds) : '–') + '</td><td class="num">' + m.first_kills + ' / ' + m.first_deaths + '</td><td class="num">' + m.trades + '</td><td class="num">' + (/deathmatch/.test(m.queue || '') ? '–' : gradePill(st)) + '</td></tr>'; }).join('') +
-      '</tbody></table></div><p class="small muted">HS % = headshots out of all hits. Trades = kills within 3 s of a teammate dying to that enemy. Grade = performance score (an even game is about a C/C+).</p>');
+        '<td class="num">' + (m.rounds ? Math.round(m.score / m.rounds) : '–') + '</td><td class="num">' + (m.rounds ? Math.round(m.damage / m.rounds) : '–') + '</td><td class="num">' + m.first_kills + ' / ' + m.first_deaths + '</td><td class="num">' + m.trades + '</td><td class="num">' + (!isStd(m) ? '–' : gradePill(st)) + '</td></tr>'; }).join('') +
+      '</tbody></table></div><p class="small muted">Stats at the top count 5v5 games only (no deathmatch, team deathmatch or arcade). HS % = headshots out of all hits. Trades = kills within 3 s of a teammate dying to that enemy. Grade = performance score (an even game is about a C/C+).</p>');
   $$('[data-g]', el).forEach(tr => tr.onclick = () => { location.hash = '#/games/' + tr.dataset.g; });
   if ($('#gsync')) $('#gsync').onclick = async () => { const b = $('#gsync'); b.disabled = true; b.textContent = 'Updating…'; try { const r = await riotCall({ action: 'sync', force: true }); toast(r.new_games ? r.new_games + ' games updated' : 'Up to date'); S.cache = {}; render(); } catch (err) { toast(err.message); b.disabled = false; b.textContent = 'Update now'; } };
 };

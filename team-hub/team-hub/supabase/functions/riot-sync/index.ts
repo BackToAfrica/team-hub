@@ -2,7 +2,7 @@
 // Secrets (Supabase → Edge Functions → Secrets): HENRIK_API_KEY. SUPABASE_URL / SUPABASE_ANON_KEY /
 // SUPABASE_SERVICE_ROLE_KEY are provided by Supabase automatically.
 // The API key never reaches the browser. A player's Riot ID and match list are stored owner-only;
-// teammates and coaches only get the riot_summary row (games, K/D, HS%, ACS, ADR).
+// teammates and coaches only get the riot_summary row (games, K/D, HS%, win %, main agents/role, rank).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 
@@ -15,6 +15,14 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const REGIONS = ["na", "eu", "ap", "kr", "latam", "br"];
 const API = "https://api.henrikdev.xyz";
 const TRADE_MS = 3000;
+// Only real 5v5 games count toward K/D, HS%, win % and agents (no deathmatch / TDM / arcade modes).
+const STANDARD = new Set(["competitive", "unrated", "premier", "custom", "swiftplay"]);
+const AGENT_ROLE: Record<string, string> = {
+  Jett: "Duelist", Phoenix: "Duelist", Reyna: "Duelist", Raze: "Duelist", Yoru: "Duelist", Neon: "Duelist", Iso: "Duelist", Waylay: "Duelist",
+  Sova: "Initiator", Breach: "Initiator", Skye: "Initiator", "KAY/O": "Initiator", Fade: "Initiator", Gekko: "Initiator", Tejo: "Initiator",
+  Brimstone: "Controller", Omen: "Controller", Viper: "Controller", Astra: "Controller", Harbor: "Controller", Clove: "Controller",
+  Sage: "Sentinel", Cypher: "Sentinel", Killjoy: "Sentinel", Chamber: "Sentinel", Deadlock: "Sentinel", Vyse: "Sentinel", Veto: "Sentinel",
+};
 
 async function henrik(path: string) {
   const key = Deno.env.get("HENRIK_API_KEY");
@@ -66,32 +74,65 @@ function summarise(match: any, puuid: string) {
   };
 }
 
+async function fetchRank(region: string, puuid: string) {
+  // v3 first, v2 as a fallback (older response shape)
+  try {
+    const r = await henrik(`/valorant/v3/by-puuid/mmr/${region}/pc/${puuid}`);
+    const d = r.body?.data;
+    if (d && (d.current || d.peak)) {
+      return { rank: d.current?.tier?.name || null, rank_rr: d.current?.rr ?? null, peak_rank: d.peak?.tier?.name || null };
+    }
+  } catch (_) { /* try v2 */ }
+  try {
+    const r = await henrik(`/valorant/v2/by-puuid/mmr/${region}/${puuid}`);
+    const d = r.body?.data;
+    if (d) return { rank: d.current_data?.currenttierpatched || null, rank_rr: d.current_data?.ranking_in_tier ?? null, peak_rank: d.highest_rank?.patched_tier || null };
+  } catch (_) { /* no rank */ }
+  return null;
+}
+
 async function syncUser(admin: SupabaseClient, userId: string, force = false) {
   const { data: link } = await admin.from("riot_links").select("*").eq("user_id", userId).maybeSingle();
   if (!link) return { linked: false };
   if (!force && link.synced_at && Date.now() - new Date(link.synced_at).getTime() < 5 * 60 * 1000) return { linked: true, skipped: true };
   const { data: prof } = await admin.from("profiles").select("team_id").eq("id", userId).maybeSingle();
-  const r = await henrik(`/valorant/v4/by-puuid/matches/${link.region}/pc/${link.puuid}?size=10`);
-  const matches: any[] = r.notFound ? [] : (r.body?.data || []);
+  // latest games of any mode (catches scrims/customs) + latest competitive games
+  const base = `/valorant/v4/by-puuid/matches/${link.region}/pc/${link.puuid}?size=10`;
+  const [all, comp] = await Promise.all([henrik(base), henrik(base + "&mode=competitive").catch(() => ({ body: { data: [] } } as any))]);
+  const seen = new Set<string>();
+  const matches: any[] = [...(all.notFound ? [] : (all.body?.data || [])), ...((comp as any).notFound ? [] : ((comp as any).body?.data || []))]
+    .filter((m) => { const id = m?.metadata?.match_id; if (!id || seen.has(id)) return false; seen.add(id); return true; });
   const rows = matches.map((m) => summarise(m, link.puuid)).filter((x) => x && x.match_id).map((x) => ({ ...x, user_id: userId, team_id: prof?.team_id ?? null }));
   if (rows.length) {
     const { error } = await admin.from("riot_matches").upsert(rows, { onConflict: "user_id,match_id" });
     if (error) throw new Error(error.message);
   }
-  // summary over the last 20 stored games
-  const { data: last } = await admin.from("riot_matches").select("*").eq("user_id", userId).order("started_at", { ascending: false }).limit(20);
-  const L = last || [];
+  const rank = await fetchRank(link.region, link.puuid);
+  // summary over the last 20 real 5v5 games
+  const { data: last } = await admin.from("riot_matches").select("*").eq("user_id", userId).order("started_at", { ascending: false }).limit(80);
+  const L = (last || []).filter((x: any) => STANDARD.has(String(x.queue || ""))).slice(0, 20);
   const sum = (k: string) => L.reduce((a: number, x: any) => a + (Number(x[k]) || 0), 0);
   const k = sum("kills"), d = sum("deaths"), hits = sum("headshots") + sum("bodyshots") + sum("legshots"), rnds = sum("rounds");
-  await admin.from("riot_summary").upsert({
-    user_id: userId, team_id: prof?.team_id ?? null, games: L.length, wins: L.filter((x: any) => x.won).length,
+  const decided = L.filter((x: any) => x.won != null);
+  const agents = new Map<string, number>();
+  for (const x of L) if (x.agent && x.agent !== "Unknown") agents.set(x.agent, (agents.get(x.agent) || 0) + 1);
+  const top = [...agents.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([agent, games]) => ({ agent, games, role: AGENT_ROLE[agent] || null }));
+  const roles = new Map<string, number>();
+  for (const [agent, n] of agents) { const r = AGENT_ROLE[agent]; if (r) roles.set(r, (roles.get(r) || 0) + n); }
+  const mainRole = [...roles.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  const row: Record<string, unknown> = {
+    user_id: userId, team_id: prof?.team_id ?? null, games: L.length, wins: decided.filter((x: any) => x.won).length,
+    win_pct: decided.length ? +(decided.filter((x: any) => x.won).length / decided.length).toFixed(3) : null,
     kills: k, deaths: d, assists: sum("assists"), kd: d ? +(k / d).toFixed(2) : k, hs_pct: hits ? +(sum("headshots") / hits).toFixed(3) : null,
     acs: rnds ? +(sum("score") / rnds).toFixed(0) : null, adr: rnds ? +(sum("damage") / rnds).toFixed(0) : null,
     first_kills: sum("first_kills"), first_deaths: sum("first_deaths"), trades: sum("trades"),
+    top_agents: top, main_role: mainRole,
     last_game_at: L[0]?.started_at ?? null, updated_at: new Date().toISOString(),
-  }, { onConflict: "user_id" });
+  };
+  if (rank) Object.assign(row, rank, { rank_at: new Date().toISOString() });
+  await admin.from("riot_summary").upsert(row, { onConflict: "user_id" });
   await admin.from("riot_links").update({ synced_at: new Date().toISOString() }).eq("user_id", userId);
-  return { linked: true, new_games: rows.length };
+  return { linked: true, new_games: rows.length, rank: rank?.rank || null };
 }
 
 Deno.serve(async (req: Request) => {
