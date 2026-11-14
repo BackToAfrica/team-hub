@@ -140,7 +140,7 @@ const TABLES = {
     F('date', 'Date', 'date'), F('source', 'From VOD', 'text', ['From VOD', 'Source', 'Scrim']), F('area', 'Area', 'select', ['Area'], { options: ['Comms', 'Utility', 'Trades', 'Opening duels', 'Executes', 'Retakes', 'Post-plant', 'Defense setups', 'Rotations', 'Economy', 'Positioning', 'Aim / mechanics', 'Mid-round calls'] }),
     F('player', 'Player (or Team)', 'text', ['Player']), F('issue', 'What we need to work on', 'long', ['What we need to work on', 'Issue']), F('tip', 'How to fix it', 'long', ['How to fix it', 'Tip']),
     F('priority', 'Priority', 'select', ['Priority'], { options: ['High', 'Medium', 'Low'] }), F('status', 'Status', 'select', ['Status'], { options: ['Open', 'Working on it', 'Fixed'] }),
-    F('watch', 'Watch it', 'link', ['Watch it']), F('drill', 'Drill', 'long', ['Drill'])] },
+    F('watch', 'Watch it', 'link', ['Watch it']), F('drill', 'Drill', 'long', ['Drill'])], keepOnAdd: ['review_id'] },
   opponent_scouting: { label: 'Opponent scouting', sheet: 'Opponent Scouting', order: 'date', req: 'opponent', fields: [
     F('date', 'Date', 'date'), F('opponent', 'Opponent'), F('map', 'Map'), F('veto', 'Their veto'), F('source', 'Source'), F('pistol_plan', 'Pistol plan (attack)', 'long'),
     F('fav_attack_site', 'Favorite attack site'), F('defense_setup', 'Defense setup', 'long'), F('after_losing', 'After losing a round', 'long'),
@@ -1170,7 +1170,7 @@ function thumbHtml(vi) {
 function sameVideo(a, b) { const x = videoInfo(a), y = videoInfo(b); return !!(x && y && x.id && x.kind === y.kind && x.id === y.id); }
 function isOurs(r) { return r.whose === 'Our team' || r.whose === 'Opponent (vs us)' || (!r.whose && /scrim|premier|tournament|qualifier/i.test(r.type || '')); }
 function workFor(r, items) {
-  return items.filter(w => (r.vod && w.watch && sameVideo(w.watch, r.vod)) || (r.date && w.date && String(w.date).slice(0, 10) === String(r.date).slice(0, 10) && w.source && r.opponent && normName(w.source).includes(normName(r.opponent).split(/[ ,(]/)[0])));
+  return items.filter(w => (w.review_id && w.review_id === r.id) || (r.vod && w.watch && sameVideo(w.watch, r.vod)) || (r.date && w.date && String(w.date).slice(0, 10) === String(r.date).slice(0, 10) && w.source && r.opponent && normName(w.source).includes(normName(r.opponent).split(/[ ,(]/)[0])));
 }
 const PRIO = { High: 'red', Medium: 'yellow', Low: '' };
 const WSTAT = { Open: '', 'Working on it': 'yellow', Fixed: 'green' };
@@ -1188,7 +1188,7 @@ function workCard(w, opts) {
     '<div class="wi"><span class="lbl">Mistake</span>' + inlineMd(w.issue || '') + '</div>' +
     (w.tip ? '<div class="wt"><span class="lbl">How to avoid it</span>' + inlineMd(w.tip) + '</div>' : '') +
     (w.drill ? '<div class="small muted" style="margin-top:6px">Drill: ' + inlineMd(w.drill) + '</div>' : '') + workProgressHtml(w) +
-    '<div class="small muted row" style="margin-top:8px;gap:10px">' + (w.date ? '<span>' + fmtDate(w.date) + '</span>' : '') + (w.source ? '<span>' + esc(w.source) + '</span>' : '') +
+    '<div class="small muted row" style="margin-top:8px;gap:10px">' + (w.date ? '<span>' + fmtDate(w.date) + '</span>' : '') + (w.source ? (w.review_id && !opts.onSeek ? '<a href="#/reviews/' + w.review_id + '">' + esc(w.source) + '</a>' : '<span>' + esc(w.source) + '</span>') : (w.review_id && !opts.onSeek ? '<a href="#/reviews/' + w.review_id + '">From VOD review</a>' : '')) +
       (vi ? (opts.onSeek && vi.id ? '<button type="button" class="linkbtn" data-seek="' + (vi.t || 0) + '">▶ Watch ' + fmtTs(vi.t || 0) + '</button>' : '<a href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch the moment</a>') : '') + '</div>' +
     (opts.coachView ? '<div class="row" style="margin-top:10px;gap:6px">' + (!w.approved ? '<button class="btn small" data-wapprove="' + w.id + '">Approve for ' + esc(isTeamWide(w) ? 'team' : w.player) + '</button>' : '<button class="btn small ghost" data-wunapprove="' + w.id + '">Hide from player</button>') +
       (w.approved ? '<button class="btn small ghost" data-wseen="' + w.id + '" title="This mistake showed up again">Seen again</button>' : '') + '<button class="btn small ghost" data-wedit="' + w.id + '">Edit</button><button class="btn small ghost" data-wdel="' + w.id + '">' + (w.approved ? 'Delete' : 'Dismiss') + '</button></div>' : '') + '</div>';
@@ -1296,7 +1296,9 @@ async function reviewDetail(el, r, work) {
     '<div class="ncol">' +
       scrimStatsPanel(revStats, 'Player stats from this VOD') +
       (r.summary ? panel('Key takeaways', '', '<div class="md takeaways">' + md(String(r.summary).replace(/\s(\d\))\s/g, '\n$1 ')) + '</div>') : '') +
-      (items.length ? panel('What we need to work on', '<a class="small" href="#/workon">All →</a>', items.map(w => workCard(w, { onSeek: true, coachView: isStaff() })).join('')) : '') +
+      (items.length || isStaff() ? panel('Work on', '<div class="row" style="gap:10px">' + (isStaff() ? '<button class="btn small" id="addwork">＋ Add</button>' : '') + '<a class="small" href="#/workon">Work on board →</a></div>',
+        (isStaff() ? '<p class="small muted" style="margin:0 0 8px">Add what the team or a player needs to fix from this VOD' + (r.summary ? ', or press <b>→ Work on</b> next to a takeaway' : '') + '. It goes straight onto the Work on board, linked to this review.</p>' : '') +
+        (items.length ? items.map(w => workCard(w, { onSeek: true, coachView: isStaff() })).join('') : '<p class="small muted" style="margin:0">Nothing added from this VOD yet.</p>')) : '') +
       (r.body ? panel('Notes &amp; tips', '', '<div class="md notes">' + md(r.body) + '</div>') : (!r.summary && !items.length && !revStats.length ? empty('No notes on this review yet.') : '')) +
     '</div></div>';
   // timestamps in the notes become buttons that seek the video
@@ -1313,6 +1315,18 @@ async function reviewDetail(el, r, work) {
       $('#vplayer').src = embedSrc(vi, Number(t.dataset.seek)); $('#vplayer').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
   }
   wireWork(el, items, () => render());
+  if (isStaff()) {
+    // new Work on item tied to this review (shows on the Work on board right away)
+    const addWork = issue => editRow('work_on', { review_id: r.id, issue: issue || '', date: r.date || todayISO(), source: r.title || [r.opponent, r.type].filter(Boolean).join(' · ') || 'VOD review',
+      watch: r.vod || '', player: 'Team', priority: 'Medium', status: 'Open', approved: true }, () => { S.cache = {}; render(); });
+    if ($('#addwork')) $('#addwork').onclick = () => addWork('');
+    $$('.takeaways li, .takeaways p', el).filter(x => !x.closest('li')).forEach(li => {
+      const txt = li.textContent.replace(/\s+/g, ' ').trim(); if (txt.length < 8) return;
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'linkbtn tk2w'; b.textContent = '→ Work on'; b.title = 'Add this to the Work on board';
+      b.onclick = e => { e.preventDefault(); e.stopPropagation(); addWork(txt.replace(/^\d+[).]\s*/, '')); };
+      li.appendChild(document.createTextNode(' ')); li.appendChild(b);
+    });
+  }
   if ($('#editrev')) $('#editrev').onclick = () => editRow('reviews', r, () => { S.cache = {}; render(); });
 }
 
@@ -1604,18 +1618,58 @@ function download(name, text) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' })); a.download = name; document.body.appendChild(a); a.click(); a.remove();
 }
 
+async function discordPost(id) { return discordCall({ action: 'post', id: id }); }
+async function discordCall(body) {
+  const { data, error } = await sb.functions.invoke('discord-announce', { body: body });
+  if (error) { let msg = error.message; try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* keep */ } throw new Error(msg); }
+  if (data && data.error) throw new Error(data.error);
+}
+async function discordPanel(box, after) {
+  const { data: st } = await sb.rpc('discord_status');
+  const s = st || { connected: false };
+  const mentionSel = '<select id="dcm">' + [['', 'No ping'], ['@here', '@here'], ['@everyone', '@everyone']].map(([v, l]) => '<option value="' + v + '"' + ((s.mention || '') === v ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
+  box.innerHTML = s.connected
+    ? '<div class="row spread"><div><b>Discord connected</b> <span class="pill green">On</span><div class="small muted">Webhook link ending …' + esc(s.hint || '') + '. New announcements post to that channel.</div></div>' +
+      '<div class="row" style="gap:6px"><label class="small row" style="gap:6px">Ping ' + mentionSel + '</label><button class="btn small ghost" id="dctest">Send test</button><button class="btn small ghost" id="dcchange">Change channel</button><button class="btn small ghost danger-t" id="dcoff">Disconnect</button></div></div><div id="dcform"></div>'
+    : '<b>Post announcements to Discord</b><p class="small muted" style="margin:4px 0 10px">In Discord: <b>Server Settings → Integrations → Webhooks → New Webhook</b>, pick the channel (e.g. #announcements), then <b>Copy Webhook URL</b> and paste it here. The link is stored so only the server can read it. Players never see it.</p><div id="dcform"></div>';
+  const form = () => {
+    $('#dcform', box).innerHTML = '<form id="dcf" class="row" style="gap:6px;margin-top:8px"><input name="url" class="grow" placeholder="https://discord.com/api/webhooks/…" autocomplete="off" required>' + (s.connected ? '' : '<label class="small row" style="gap:6px">Ping ' + mentionSel.replace('id="dcm"', 'name="m"') + '</label>') + '<button class="btn small">Connect</button></form>';
+    $('#dcf', box).onsubmit = async e => { e.preventDefault(); const f = e.target;
+      const { error } = await sb.rpc('set_discord_webhook', { p_url: f.url.value.trim(), p_mention: f.m ? f.m.value : (s.mention || '') });
+      if (error) { toast(error.message); return; }
+      try { await discordCall({ action: 'test' }); toast('Connected. A test message was sent to Discord'); } catch (err) { toast('Saved, but the test failed: ' + err.message); }
+      discordPanel(box, after); if (after) after(); };
+  };
+  if (!s.connected) { form(); return; }
+  $('#dcchange', box).onclick = form;
+  $('#dcm', box).onchange = async e => { const { error } = await sb.rpc('set_discord_mention', { p_mention: e.target.value }); toast(error ? error.message : 'Saved'); };
+  $('#dctest', box).onclick = async () => { try { await discordCall({ action: 'test' }); toast('Test sent. Check your Discord channel'); } catch (err) { toast(err.message); } };
+  $('#dcoff', box).onclick = async () => { if (!confirm('Stop posting announcements to Discord?')) return; const { error } = await sb.rpc('set_discord_webhook', { p_url: '', p_mention: '' }); toast(error ? error.message : 'Disconnected'); discordPanel(box, after); if (after) after(); };
+}
 COACH.announce = async function (box) {
-  const rows = await db.list('announcements');
-  box.innerHTML = '<div class="card"><form id="an"><label class="f"><span>Title</span><input name="title" required></label>' +
+  const [rows, dst] = await Promise.all([db.list('announcements'), sb.rpc('discord_status').then(r => r.data || {}, () => ({}))]);
+  const dOn = !!dst.connected;
+  box.innerHTML = '<div class="card" id="dcbox" style="margin-bottom:12px"></div><div class="card"><form id="an"><label class="f"><span>Title</span><input name="title" required></label>' +
     '<label class="f"><span>Message (you can use **bold**, lists and links)</span><textarea name="body"></textarea></label>' +
     '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="pinned"> Pin to the top</label>' +
-    (S.me.is_admin ? '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="everyone"> Show to every team (owner)</label>' : '') + '<button class="btn">Post</button></form></div>' +
-    '<h2 style="margin-top:18px">Posted</h2>' + (rows.length ? rows.map(a => '<div class="card row spread" style="margin-bottom:8px"><div><b>' + esc(a.title) + '</b> ' + (a.pinned ? '<span class="pill red">Pinned</span>' : '') + (a.team_id == null ? ' <span class="pill">All teams</span>' : '') + '<div class="small muted">' + fmtDate(a.created_at) + '</div></div>' + (a.team_id == null && !S.me.is_admin ? '' : '<button class="btn small danger" data-del="' + a.id + '">Delete</button>') + '</div>').join('') : '<p class="muted">Nothing yet.</p>');
+    (S.me.is_admin ? '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="everyone"> Show to every team (owner)</label>' : '') +
+    (dOn ? '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="discord" checked> Also post in Discord</label>' : '') + '<button class="btn">Post</button></form></div>' +
+    '<h2 style="margin-top:18px">Posted</h2>' + (rows.length ? rows.map(a => '<div class="card row spread" style="margin-bottom:8px"><div><b>' + esc(a.title) + '</b> ' + (a.pinned ? '<span class="pill red">Pinned</span>' : '') + (a.team_id == null ? ' <span class="pill">All teams</span>' : '') + (a.discord_sent_at ? ' <span class="pill blue" title="Posted to Discord ' + esc(new Date(a.discord_sent_at).toLocaleString()) + '">In Discord</span>' : '') + '<div class="small muted">' + fmtDate(a.created_at) + '</div></div>' +
+      '<div class="row" style="gap:6px">' + (dOn ? '<button class="btn small ghost" data-dc="' + a.id + '">' + (a.discord_sent_at ? 'Send again' : 'Send to Discord') + '</button>' : '') + (a.team_id == null && !S.me.is_admin ? '' : '<button class="btn small danger" data-del="' + a.id + '">Delete</button>') + '</div></div>').join('') : '<p class="muted">Nothing yet.</p>');
+  discordPanel($('#dcbox', box), () => COACH.announce(box));
+  $$('[data-dc]', box).forEach(b => b.onclick = async () => { b.disabled = true; b.textContent = 'Sending…'; try { await discordPost(Number(b.dataset.dc)); toast('Posted to Discord'); S.cache = {}; COACH.announce(box); } catch (err) { toast(err.message); b.disabled = false; b.textContent = 'Send to Discord'; } });
   $('#an').onsubmit = async e => {
     e.preventDefault();
     const rec = { title: e.target.title.value, body: e.target.body.value, pinned: e.target.pinned.checked };
     if (e.target.everyone && e.target.everyone.checked) rec.team_id = null;
-    try { await db.insert('announcements', [rec]); S.cache = {}; toast('Posted'); COACH.announce(box); }
+    const toDiscord = e.target.discord && e.target.discord.checked;
+    try {
+      const { data: made, error } = await sb.from('announcements').insert([rec]).select('id').single();
+      if (error) throw error;
+      let msg = 'Posted';
+      if (toDiscord && made) { try { await discordPost(made.id); msg = 'Posted here and in Discord'; } catch (err) { msg = 'Posted here, but Discord failed: ' + err.message; } }
+      S.cache = {}; toast(msg); COACH.announce(box);
+    }
     catch (err) { toast(err.message); }
   };
   $$('[data-del]', box).forEach(b => b.onclick = async () => { if (!confirm('Delete this announcement?')) return; await db.remove('announcements', Number(b.dataset.del)); S.cache = {}; COACH.announce(box); });
