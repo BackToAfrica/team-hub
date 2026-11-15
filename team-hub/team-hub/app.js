@@ -171,7 +171,7 @@ const TABLES = {
 
 // --------------------------------------------------------------- database
 let sb = null;
-const S = { session: null, me: null, team: null, route: 'home', cache: {} };
+const S = { session: null, me: null, team: null, organization: null, organizationMembership: null, route: 'home', cache: {} };
 function teamName() { return (S.team && S.team.name) || TEAM; }
 // can this person edit a table (shared tables: owner only)
 // Assistant coaches and analysts can add and edit these (not the roster, members, team settings or map picks)
@@ -274,10 +274,20 @@ async function loadMe() {
   const { data } = await sb.from('profiles').select('*').eq('id', S.session.user.id).limit(1);
   S.me = (data && data[0]) || null;
   S.team = null;
+  S.organization = null;
+  S.organizationMembership = null;
   if (S.me && S.me.team_id) {
     const { data: t } = await sb.from('teams').select('*').eq('id', S.me.team_id).limit(1);
     S.team = (t && t[0]) || null;
     if (S.me.is_admin) { S.me.is_coach = true; S.me.approved = true; } // the app owner can run any team they open
+    if (S.team && S.team.organization_id) {
+      const [orgResult, membershipResult] = await Promise.all([
+        sb.from('organizations').select('*').eq('id', S.team.organization_id).maybeSingle(),
+        sb.from('organization_members').select('id, organization_id, user_id, role, status').eq('organization_id', S.team.organization_id).eq('user_id', S.me.id).maybeSingle()
+      ]);
+      if (!orgResult.error) S.organization = orgResult.data || null;
+      if (!membershipResult.error) S.organizationMembership = membershipResult.data || null;
+    }
   }
 }
 
@@ -425,16 +435,16 @@ function render() {
   if (me && !me.team_id) { renderOnboard(); return; }
   if (!me || !me.approved) { renderPending(); return; }
   const items = NAV.filter(navAllowed);
-  if (!items.some(n => n.r === S.route) && S.route !== 'player' && !((S.route === 'coach' || S.route === 'explore' || S.route === 'report') && isStaff()) && !(S.route === 'owner' && me.is_admin) && S.route !== 'account') S.route = 'home';
+  if (!items.some(n => n.r === S.route) && S.route !== 'player' && !((S.route === 'coach' || S.route === 'explore' || S.route === 'report' || S.route === 'organization') && isStaff()) && !(S.route === 'owner' && me.is_admin) && S.route !== 'account') S.route = 'home';
   const ownerView = me.is_admin && S.team && S.team.owner_id !== me.id;
   const link = (r, label, i) => '<a href="#/' + r + '" class="' + (S.route === r ? 'active' : '') + '">' + icon(i) + '<span>' + esc(label) + '</span></a>';
   const groups = groupBy(items, 'g');
   const navHtml = groups.map(([g, list]) => '<div class="nav-g">' + esc(g) + '</div>' + list.map(n => link(n.r, n.label, n.i)).join('')).join('') +
     (isStaff() || me.is_admin ? '<div class="nav-g">Manage</div>' : '') +
-    (isStaff() ? link('coach', me.is_coach ? 'Coach panel' : 'Staff panel', 'gear') + link('report', 'Weekly report', 'doc') + link('explore', 'Other teams', 'eye') : '') +
+    (isStaff() ? link('coach', me.is_coach ? 'Coach panel' : 'Staff panel', 'gear') + link('report', 'Weekly report', 'doc') + link('explore', 'Other teams', 'eye') + (S.organization ? link('organization', 'Organization', 'globe') : '') : '') +
     (me.is_admin ? link('owner', 'All teams', 'globe') : '');
   $('#app').innerHTML =
-    '<div class="topbar"><button id="menubtn" aria-label="Menu">☰</button><span class="dot"></span><b>' + esc(teamName()) + '</b></div>' +
+    '<div class="topbar"><button id="menubtn" aria-label="Menu">☰</button><span class="dot"></span><b>' + esc(teamName()) + '</b>' + (S.organization ? '<span class="org-context">' + esc(S.organization.name) + '</span>' : '') + '</div>' +
     '<div class="layout"><aside class="sidebar" id="sidebar"><div class="brand"><span class="dot"></span><span class="bn">' + esc(teamName()) + '</span>' + (S.team && S.team.tag ? '<span class="tag">' + esc(S.team.tag) + '</span>' : '') + '</div>' +
     (ownerView ? '<a href="#/owner" class="ownerbar">Owner view: another team.<br><b>Back to all teams</b></a>' : '') +
     '<nav class="nav">' + navHtml + '</nav>' +
@@ -1572,6 +1582,51 @@ COACH.team = async function (box) {
     e.preventDefault();
     const { error } = await sb.from('teams').update({ name: e.target.name.value.trim(), tag: e.target.tag.value.trim().toUpperCase() || null }).eq('id', t.id);
     toast(error ? error.message : 'Saved'); if (!error) { await loadMe(); render(); }
+  };
+};
+
+PAGES.organization = async function (el) {
+  if (!isStaff() || !S.organization || !S.organizationMembership) {
+    el.innerHTML = '<div class="card"><h2>Organization workspace unavailable</h2><p class="muted">Your account is not an active member of an organization yet. Ask an organization owner to review your access.</p></div>';
+    return;
+  }
+  const org = S.organization;
+  const membership = S.organizationMembership;
+  const canManage = ['owner', 'org_admin'].includes(membership.role);
+  const [{ data: members, error: memberError }, { data: profiles }] = await Promise.all([
+    sb.from('organization_members').select('user_id, role, status, created_at').eq('organization_id', org.id).order('created_at'),
+    sb.from('profiles').select('id, display_name, ign, discord, is_coach, staff_role, approved').eq('team_id', S.me.team_id)
+  ]);
+  if (memberError) {
+    el.innerHTML = '<div class="card error">Could not load organization members: ' + esc(memberError.message) + '</div>';
+    return;
+  }
+  const list = members || [];
+  const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+  const counts = list.reduce((out, m) => { out[m.role] = (out[m.role] || 0) + 1; return out; }, {});
+  const roleNames = ['owner','org_admin','general_manager','head_coach','coach','analyst','player','guest'];
+  const displayRole = r => ({owner:'Owner',org_admin:'Organization admin',general_manager:'General manager',head_coach:'Head coach',coach:'Coach',analyst:'Analyst',player:'Player',guest:'Guest'}[r] || r);
+  el.innerHTML = '<div class="page-h"><div><div class="eyebrow">ORGANIZATION WORKSPACE</div><h1>' + esc(org.name) + '</h1><p class="muted">Organization access is separate from team membership. Existing team records remain attached to their original team.</p></div><span class="pill green">' + esc(displayRole(membership.role)) + '</span></div>' +
+    '<div class="kpis">' + kpi(list.length, 'Organization members') + kpi(Object.keys(counts).filter(r => ['owner','org_admin','general_manager','head_coach','coach','analyst'].includes(r)).reduce((n,r)=>n+counts[r],0), 'Staff') + kpi(counts.player || 0, 'Players') + '</div>' +
+    '<div class="org-grid">' +
+      '<section class="card stack"><div class="row spread"><h2>Organization profile</h2><span class="pill">' + esc(S.team && S.team.name || 'Current team') + '</span></div>' +
+      (canManage ? '<form id="orgprofile" class="stack"><label class="f"><span>Organization name</span><input name="name" value="' + esc(org.name) + '" minlength="2" maxlength="80" required></label><label class="f"><span>Organization slug (optional)</span><input name="slug" value="' + esc(org.slug || '') + '" maxlength="48" placeholder="your-org"></label><button class="btn">Save organization</button></form>' : '<p class="muted">Only organization owners and admins can edit the organization profile.</p><div><b>' + esc(org.name) + '</b><div class="small muted">' + esc(org.slug || 'No public slug configured') + '</div></div>') +
+      '<p class="small muted">This is the first organization foundation release. Teams, invitations, and staff assignments remain governed by the existing team workflows while organization-level controls are introduced safely.</p></section>' +
+      '<section class="card stack"><h2>Role distribution</h2>' + roleNames.filter(r=>counts[r]).map(r=>'<div class="org-role-row"><span>' + esc(displayRole(r)) + '</span><b>' + counts[r] + '</b></div>').join('') + '<div class="small muted">Roles are stored in the organization membership table; team-scoped permissions are not expanded automatically.</div></section>' +
+    '</div>' +
+    '<section class="card stack" style="margin-top:14px"><div class="row spread"><h2>Organization members</h2><span class="small muted">' + list.length + ' total</span></div>' +
+    (list.length ? '<div class="tablewrap"><table><thead><tr><th>Member</th><th>Organization role</th><th>Status</th><th>Joined</th></tr></thead><tbody>' + list.map(m=>{const p=profileMap.get(m.user_id);return '<tr><td><b>' + esc(p ? (p.display_name || p.ign || p.discord || 'Team member') : 'Member') + '</b>' + (p && p.ign ? '<div class="small muted">' + esc(p.ign) + '</div>' : '') + '</td><td>' + esc(displayRole(m.role)) + '</td><td><span class="pill ' + (m.status === 'active' ? 'green' : 'yellow') + '">' + esc(m.status) + '</span></td><td>' + fmtDate(m.created_at) + '</td></tr>';}).join('') + '</tbody></table></div>' : '<p class="muted">No organization members have been added yet.</p>') +
+    '</section>';
+  const form = $('#orgprofile', el);
+  if (form) form.onsubmit = async e => {
+    e.preventDefault();
+    const name = e.target.name.value.trim();
+    const slug = e.target.slug.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || null;
+    const { error } = await sb.from('organizations').update({ name, slug, updated_at: new Date().toISOString() }).eq('id', org.id);
+    if (error) { toast('Could not save: ' + error.message); return; }
+    await loadMe();
+    toast('Organization updated');
+    PAGES.organization(el);
   };
 };
 
