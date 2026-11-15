@@ -724,3 +724,9 @@ tr.clickrow:hover td { background: rgba(255,255,255,.04); }
 .rsagents .pill, .rsagents .rankpill { font-size: .68rem; }
 .takeaways .tk2w { font-size: .75rem; opacity: .75; white-space: nowrap; }
 .takeaways .tk2w:hover { opacity: 1; }
+.rstrip { display: inline-flex; gap: 2px; align-items: center; vertical-align: middle; }
+.rstrip .r { display: inline-block; width: 7px; height: 14px; border-radius: 2px; background: var(--accent); opacity: .85; }
+.rstrip .r.w { background: var(--good); }
+.rstrip .r.def { height: 10px; }
+.rstrip .r.p { outline: 1.5px solid var(--text); outline-offset: 1px; }
+.rstrip .rgap { display: inline-block; width: 6px; }

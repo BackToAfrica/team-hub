@@ -2163,7 +2163,29 @@ PAGES.maps = async function (el) {
     (matches.length || coach ? '<div class="mapgrid">' + cards.filter(c => c.n || c.pool.status).map(card).join('') + '</div>' +
       (cards.some(c => !c.n && !c.pool.status) ? '<details class="item" style="margin-top:14px"' + (matches.length ? '' : ' open') + '><summary><span class="t">Other maps (' + cards.filter(c => !c.n && !c.pool.status).length + ')</span> <span class="muted small">not played' + (since ? ' in this period' : ' yet') + '</span></summary><div class="body"><div class="mapgrid">' +
         cards.filter(c => !c.n && !c.pool.status).map(card).join('') + '</div></div></details>' : '') : empty('No matches logged yet. Results show up here after the coach logs scrim results (Schedule → Log result) or imports the Matches tab.')) +
+    (isStaff() ? '<div class="card panel" style="margin-top:16px" id="riotimp"><div class="card-h"><h2>Scrims from Riot</h2><button class="btn small ghost" id="riotlist">Find scrims</button></div>' +
+      '<p class="small muted" style="margin:0">Custom games show up here once players link their Riot account. A game is imported automatically when 3 or more linked teammates played on the same side. ' +
+      'Imports count the real result: if you played out all rounds, rounds after a team reached 13 are left out. You can also import any game below by hand.</p><div id="riotgames"></div></div>' : '') +
     (matches.length ? gamesPanel(matches, canEdit('matches')) : '');
+  if ($('#riotlist', el)) $('#riotlist', el).onclick = async () => {
+    const box = $('#riotgames', el); box.innerHTML = '<p class="small muted">Looking…</p>';
+    const { data, error } = await sb.functions.invoke('riot-sync', { body: { action: 'scrim_candidates' } });
+    let msg = data && data.error; if (error) { msg = error.message; try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* keep */ } }
+    if (msg) { box.innerHTML = '<p class="small muted">' + esc(msg) + '</p>'; return; }
+    const games = (data && data.games) || [];
+    box.innerHTML = games.length ? '<div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>When</th><th>Map</th><th class="num">Score*</th><th class="num">Teammates linked</th><th></th></tr></thead><tbody>' +
+      games.map(g => '<tr><td>' + esc(new Date(g.started_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) + '</td><td><b>' + esc(g.map || '–') + '</b></td><td class="num">' + esc((g.score || []).join('–')) + '</td><td class="num">' + g.players + '</td>' +
+        '<td class="num">' + (g.imported ? '<span class="pill green">Imported</span>' : '<button class="btn small" data-rimp="' + esc(g.match_id) + '">Import</button>') + '</td></tr>').join('') +
+      '</tbody></table></div><p class="small muted">*Score as played (all rounds). Importing works out the real result.</p>' : '<p class="small muted">No custom games yet. Players need to link their Riot account (Account page), then play the scrim as a custom game.</p>';
+    $$('[data-rimp]', box).forEach(b => b.onclick = async () => {
+      const opp = prompt('Opponent name for this scrim?', '') ; if (opp === null) return;
+      b.disabled = true; b.textContent = 'Importing…';
+      const { data: d2, error: e2 } = await sb.functions.invoke('riot-sync', { body: { action: 'import_scrim', match_id: b.dataset.rimp, opponent: opp } });
+      let m2 = d2 && d2.error; if (e2) { m2 = e2.message; try { const j = await e2.context.json(); if (j && j.error) m2 = j.error; } catch (e) { /* keep */ } }
+      if (m2 || (d2 && d2.skipped)) { toast(m2 || d2.skipped); b.disabled = false; b.textContent = 'Import'; return; }
+      toast('Imported: ' + (d2.map || '') + ' ' + (d2.result || '')); S.cache = {}; render();
+    });
+  };
   const gf = $('#gmap', el);
   if (gf) gf.onchange = () => { $$('#games tbody tr', el).forEach(tr => { tr.style.display = !gf.value || tr.dataset.map === gf.value.toLowerCase() ? '' : 'none'; }); };
   $$('[data-gedit]', el).forEach(b => b.onclick = () => { const m = allMatches.find(x => x.id === Number(b.dataset.gedit)); if (m) editRow('matches', m, () => { S.cache = {}; render(); }); });
@@ -2178,6 +2200,15 @@ PAGES.maps = async function (el) {
   $$('.poolnote', el).forEach(i => i.onchange = () => savePool(i.dataset.map, { notes: i.value.trim() || null }));
   if ($('#logm')) $('#logm').onclick = () => editRow('matches', { date: todayISO(), type: 'Scrim', event: 'Scrim' }, () => { S.cache = {}; render(); });
 };
+// round-by-round strip: one block per counted round (pistols ringed, half-time gap)
+const ROUND_END = { elim: 'Elimination', det: 'Spike detonated', defuse: 'Spike defused', time: 'Time ran out', ff: 'Surrender' };
+function roundStrip(rounds) {
+  const rs = Array.isArray(rounds) ? rounds : [];
+  if (!rs.length) return '';
+  return '<span class="rstrip">' + rs.map((r, i) => (i === 12 ? '<span class="rgap"></span>' : '') +
+    '<i class="r ' + (r.w ? 'w' : 'l') + (i === 0 || i === 12 ? ' p' : '') + (r.side === 'A' ? ' atk' : ' def') + '" title="' +
+    esc('R' + (r.n || i + 1) + ' · ' + (r.side === 'A' ? 'Attack' : 'Defense') + ' · ' + (r.w ? 'Won' : 'Lost') + (r.end ? ' · ' + (ROUND_END[r.end] || r.end) : '') + (i === 0 || i === 12 ? ' · Pistol' : '')) + '"></i>').join('') + '</span>';
+}
 function gamesPanel(matches, edit) {
   const list = matches.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || b.id - a.id);
   const maps = Array.from(new Set(list.map(m => m.map))).sort();
@@ -2185,9 +2216,9 @@ function gamesPanel(matches, edit) {
   return '<div class="card panel" style="margin-top:16px"><div class="card-h"><h2>Logged games <span class="muted small">' + list.length + '</span></h2>' +
     '<select id="gmap" style="width:auto;padding:5px 8px"><option value="">All maps</option>' + maps.map(m => '<option>' + esc(m) + '</option>').join('') + '</select></div>' +
     (edit ? '<p class="small muted" style="margin-top:-6px">Fix a score, map or opponent with Edit. Changes update every map card above.</p>' : '') +
-    '<div class="tablewrap" id="games"><table><thead><tr><th>Date</th><th>Opponent</th><th>Map</th><th class="num">Score</th><th>Type</th><th class="num">Atk</th><th class="num">Def</th><th class="num">Pistols</th>' + (edit ? '<th></th>' : '') + '</tr></thead><tbody>' +
+    '<div class="tablewrap" id="games"><table><thead><tr><th>Date</th><th>Opponent</th><th>Map</th><th class="num">Score</th><th>Rounds</th><th>Type</th><th class="num">Atk</th><th class="num">Def</th><th class="num">Pistols</th>' + (edit ? '<th></th>' : '') + '</tr></thead><tbody>' +
     list.map(m => '<tr data-map="' + esc(String(m.map).toLowerCase()) + '"><td>' + (m.date ? fmtDate(m.date) : '–') + '</td><td>' + esc(m.opponent || '–') + '</td><td><b>' + esc(m.map) + '</b></td>' +
-      '<td class="num"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span> ' + (Number(m.rounds_won) || 0) + '–' + (Number(m.rounds_lost) || 0) + '</td><td>' + esc(matchType(m)) + '</td>' +
+      '<td class="num"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span> ' + (Number(m.rounds_won) || 0) + '–' + (Number(m.rounds_lost) || 0) + '</td><td>' + (roundStrip(m.rounds) || '<span class="muted small">–</span>') + '</td><td>' + esc(matchType(m)) + (m.source === 'riot' ? ' <span class="pill blue" title="Imported from Riot: exact rounds and player stats">Riot</span>' : '') + '</td>' +
       '<td class="num">' + side(m.atk_won, m.atk_lost) + '</td><td class="num">' + side(m.def_won, m.def_lost) + '</td><td class="num">' + (m.pistols_won == null ? '–' : m.pistols_won + '/2') + '</td>' +
       (edit ? '<td class="num" style="white-space:nowrap"><button class="btn small ghost" data-gedit="' + m.id + '">Edit</button> <button class="btn small ghost danger-t" data-gdel="' + m.id + '">Delete</button></td>' : '') + '</tr>').join('') +
     '</tbody></table></div></div>';
