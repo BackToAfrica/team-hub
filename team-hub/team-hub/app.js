@@ -425,13 +425,13 @@ function render() {
   if (me && !me.team_id) { renderOnboard(); return; }
   if (!me || !me.approved) { renderPending(); return; }
   const items = NAV.filter(navAllowed);
-  if (!items.some(n => n.r === S.route) && !((S.route === 'coach' || S.route === 'explore') && isStaff()) && !(S.route === 'owner' && me.is_admin) && S.route !== 'account') S.route = 'home';
+  if (!items.some(n => n.r === S.route) && S.route !== 'player' && !((S.route === 'coach' || S.route === 'explore' || S.route === 'report') && isStaff()) && !(S.route === 'owner' && me.is_admin) && S.route !== 'account') S.route = 'home';
   const ownerView = me.is_admin && S.team && S.team.owner_id !== me.id;
   const link = (r, label, i) => '<a href="#/' + r + '" class="' + (S.route === r ? 'active' : '') + '">' + icon(i) + '<span>' + esc(label) + '</span></a>';
   const groups = groupBy(items, 'g');
   const navHtml = groups.map(([g, list]) => '<div class="nav-g">' + esc(g) + '</div>' + list.map(n => link(n.r, n.label, n.i)).join('')).join('') +
     (isStaff() || me.is_admin ? '<div class="nav-g">Manage</div>' : '') +
-    (isStaff() ? link('coach', me.is_coach ? 'Coach panel' : 'Staff panel', 'gear') + link('explore', 'Other teams', 'eye') : '') +
+    (isStaff() ? link('coach', me.is_coach ? 'Coach panel' : 'Staff panel', 'gear') + link('report', 'Weekly report', 'doc') + link('explore', 'Other teams', 'eye') : '') +
     (me.is_admin ? link('owner', 'All teams', 'globe') : '');
   $('#app').innerHTML =
     '<div class="topbar"><button id="menubtn" aria-label="Menu">☰</button><span class="dot"></span><b>' + esc(teamName()) + '</b></div>' +
@@ -708,7 +708,7 @@ function scrimStatsPanel(rows, title) {
 function pcard(p, ps) {
   const s = ps && p.ign ? statsFor(ps, p.ign) : null;
   const key = p.rid ? 'r' + p.rid : 'u' + p.user_id;
-  return '<div class="pcard' + (p.bench ? ' bench' : '') + '">' + avatar(p, 52) + '<div class="nm">' + esc(p.name) + '</div>' +
+  return '<div class="pcard' + (p.bench ? ' bench' : '') + '">' + avatar(p, 52) + '<div class="nm">' + (p.ign || p.name ? playerLink(p.name) : esc(p.name)) + '</div>' +
     '<div class="sub">' + esc([p.ign && p.ign !== p.name ? p.ign : '', p.discord ? '@' + p.discord : ''].filter(Boolean).join(' · ')) + '</div>' +
     '<div class="row" style="justify-content:center;gap:4px">' + rolePill(p.role) + (p.is_igl ? '<span class="pill yellow">IGL</span>' : '') + (p.is_trial ? '<span class="pill yellow">Trial</span>' : '') + (p.bench ? '<span class="pill">Bench</span>' : '') + (p.coachSlot ? '<span class="pill blue">Coach</span>' : '') + (!p.user_id ? '<span class="pill">Not joined</span>' : '') + '</div>' +
     (p.rank ? '<div style="margin-top:6px">' + rankPill(p.rank, true) + '</div>' : '') + riotLine(p.rs) +
@@ -3180,9 +3180,9 @@ PAGES.analytics = async function (el) {
       an.maps.map(m => '<tr><td><b>' + esc(m.map) + '</b></td><td class="num">' + m.games + '</td><td>' + rateCell(m.all) + bar2(m.all.p) + '</td><td>' + rateCell(m.atk) + '</td><td>' + rateCell(m.def) + '</td><td>' + rateCell(m.pistols) + '</td><td>' + (m.fk ? pct(m.fk.p) : '<span class="muted">–</span>') + '</td></tr>').join('') + '</tbody></table></div>') +
     panel('How rounds end', '<span class="small muted">longest losing streak: ' + an.longestLosing + '</span>', ends('AW', 'Attack wins') + ends('AL', 'Attack losses') + ends('DW', 'Defense wins') + ends('DL', 'Defense losses') +
       (an.sites.length ? '<div class="endrow"><b>Attack by plant site</b>' + an.sites.slice(0, 8).map(s => '<span class="pill">' + esc(s.k) + ' ' + s.w + '–' + s.l + '</span>').join(' ') + '</div>' : '')) +
-    econ) +
+    econ + compsPanel(matches, psIn)) +
     (players.length ? panel('Players', '<span class="small muted">' + psIn.length + ' map stat lines</span>', '<div class="tablewrap"><table><thead><tr><th>Player</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">Kills / rd</th><th class="num">First K / D</th><th class="num">Opening win %</th><th class="num">Deaths traded</th><th class="num">HS %</th><th class="num">Grade</th></tr></thead><tbody>' +
-      players.map(p => '<tr><td><b>' + esc(p.name) + '</b></td><td class="num">' + p.maps + '</td><td class="num">' + num(p.kd, 2) + '</td><td class="num">' + num(p.kpr, 2) + '</td><td class="num">' + (p.openMaps ? p.fk + ' / ' + p.fd : '–') + '</td><td class="num">' + pct(p.open) + '</td><td class="num">' + pct(p.tradedPct) + '</td><td class="num">' + pct(p.hs) + '</td><td class="num">' + (p.score != null ? gradePill({}, p.score) : '–') + '</td></tr>').join('') +
+      players.map(p => '<tr><td><b>' + playerLink(p.name) + '</b></td><td class="num">' + p.maps + '</td><td class="num">' + num(p.kd, 2) + '</td><td class="num">' + num(p.kpr, 2) + '</td><td class="num">' + (p.openMaps ? p.fk + ' / ' + p.fd : '–') + '</td><td class="num">' + pct(p.open) + '</td><td class="num">' + pct(p.tradedPct) + '</td><td class="num">' + pct(p.hs) + '</td><td class="num">' + (p.score != null ? gradePill({}, p.score) : '–') + '</td></tr>').join('') +
       '</tbody></table></div>') : '');
   $$('[data-ins]', el).forEach(b => b.onclick = () => { const x = insights[Number(b.dataset.ins)];
     editRow('work_on', { issue: x.title + ' — ' + x.detail, tip: x.drill, drill: x.focus, area: TABLES.work_on.fields.find(f => f.k === 'area').options.includes(x.area) ? x.area : null, player: x.player || 'Team', priority: x.sev >= 60 ? 'High' : 'Medium', status: 'Open', date: todayISO(), source: 'Scrim analytics', approved: true, metric: x.metric ? METRICS[x.metric].label : null }, () => { S.cache = {}; render(); }); });
@@ -3493,8 +3493,144 @@ COACH.names = async function (box) {
   });
 };
 
+
+// =============================================================== SMALL SVG LINE CHART
+function lineChart(series, opts) {
+  opts = opts || {};
+  const W = opts.w || 640, H = opts.h || 170, P = { l: 34, r: 10, t: 10, b: 22 };
+  const all = series.flatMap(s => s.pts.map(p => p.y)).filter(v => v != null && !isNaN(v));
+  const n = Math.max(1, ...series.map(s => s.pts.length));
+  if (!all.length || n < 2) return '<p class="small muted" style="margin:0">Not enough games yet for a trend.</p>';
+  let lo = opts.min != null ? opts.min : Math.min(...all), hi = opts.max != null ? opts.max : Math.max(...all);
+  if (hi === lo) { hi += 1; lo -= 1; }
+  const X = i => P.l + (W - P.l - P.r) * (n === 1 ? 0.5 : i / (n - 1)), Y = v => P.t + (H - P.t - P.b) * (1 - (v - lo) / (hi - lo));
+  const fmt = opts.fmt || (v => Math.round(v * 100) / 100);
+  const grid = [lo, (lo + hi) / 2, hi].map(v => '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" class="cg"/><text x="' + (P.l - 4) + '" y="' + (Y(v) + 3) + '" class="ct" text-anchor="end">' + esc(fmt(v)) + '</text>').join('');
+  const ref = opts.ref != null && opts.ref >= lo && opts.ref <= hi ? '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + Y(opts.ref) + '" y2="' + Y(opts.ref) + '" class="cref"/>' : '';
+  const lines = series.map((s, si) => { const pts = s.pts.map((p, i) => p.y == null || isNaN(p.y) ? null : [X(i), Y(p.y), p]).filter(Boolean);
+    return '<polyline class="cl c' + si + '" points="' + pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '"/>' +
+      pts.map(p => '<circle class="cd c' + si + '" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3"><title>' + esc((p[2].label ? p[2].label + ' · ' : '') + s.name + ' ' + fmt(p[2].y)) + '</title></circle>').join(''); }).join('');
+  const labels = (series[0].pts || []).map((p, i) => (n <= 12 || i % Math.ceil(n / 10) === 0) && p.short ? '<text x="' + X(i) + '" y="' + (H - 6) + '" class="ct" text-anchor="middle">' + esc(p.short) + '</text>' : '').join('');
+  const legend = series.length > 1 ? '<div class="clegend">' + series.map((s, si) => '<span><i class="c' + si + '"></i>' + esc(s.name) + '</span>').join('') + '</div>' : '';
+  return '<div class="chart"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(opts.label || 'Trend') + '">' + grid + ref + lines + labels + '</svg>' + legend + '</div>';
+}
+
+// =============================================================== PLAYER PROFILE
+function playerLink(name) { const n = String(name || '').replace(/\s*\*\s*trial\s*$/i, ''); return '<a href="#/player/' + encodeURIComponent(n) + '">' + esc(n) + '</a>'; }
+PAGES.player = async function (el) {
+  const name = decodeURIComponent(location.hash.split('/').slice(2).join('/') || '');
+  const me = S.me, mine = me && [me.ign, me.display_name].filter(Boolean).some(n => normName(n) === normName(name));
+  if (!can('team_stats') && !mine && !isStaff()) { el.innerHTML = empty('You can only see your own profile.', '<a class="btn small" href="#/home">Home</a>'); return; }
+  const [team, ps, work, matches] = await Promise.all([teamPlayers(), cached('player_stats'), cached('work_on'), can('team_stats') || isStaff() ? cached('matches') : []]);
+  await loadTrackCtx().catch(() => null);
+  const p = team.players.find(x => [x.name, x.ign].filter(Boolean).some(n => normName(n) === normName(name))) || { name: name };
+  const rows = ps.filter(r => normName(r.player) === normName(name) || (p.ign && normName(r.player) === normName(p.ign))).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || a.id - b.id);
+  const pa = playerAnalytics(rows)[0];
+  const resultOf = r => { const m = matches.find(x => (r.match_id && x.id === r.match_id) || (x.date === r.date && String(x.map || '').toLowerCase() === String(r.map || '').toLowerCase())); return m ? isWin(m) : null; };
+  const pts = rows.map(r => ({ label: fmtDate(r.date) + ' ' + (r.map || ''), short: r.date ? String(r.date).slice(5).replace('-', '/') : '', grade: perfScore(r), kd: Number(r.deaths) ? r.kills / r.deaths : Number(r.kills) || null }));
+  const roll = (arr, k, n) => arr.map((x, i) => { const w = arr.slice(Math.max(0, i - n + 1), i + 1).map(y => y[k]).filter(v => v != null); return w.length ? w.reduce((a, b) => a + b, 0) / w.length : null; });
+  const gR = roll(pts, 'grade', 3);
+  const byKey = (k) => groupBy(rows.filter(r => r[k]), k).map(([v, list]) => { const a = playerAnalytics(list)[0]; const res = list.map(resultOf).filter(x => x != null);
+    return { v: v, maps: list.length, kd: a.kd, score: a.score, open: a.open, w: res.filter(Boolean).length, n: res.length }; }).sort((a, b) => b.maps - a.maps);
+  const agents = byKey('agent'), maps = byKey('map');
+  const items = work.filter(w => w.approved !== false && normName(w.player) === normName(name));
+  const recent = rows.slice(-5), before = rows.slice(-10, -5);
+  const avgG = l => { const g = l.map(perfScore).filter(x => x != null); return g.length ? g.reduce((a, b) => a + b, 0) / g.length : null; };
+  const form = avgG(recent), prevForm = avgG(before);
+  el.innerHTML = '<div class="page-h"><div class="row" style="gap:14px">' + avatar(p, 56) + '<div><h1 style="margin:0">' + esc(p.name || name) + '</h1><div class="row small" style="gap:6px;margin-top:4px">' + rolePill(p.role) +
+      (p.is_igl ? '<span class="pill yellow">IGL</span>' : '') + (p.is_trial ? '<span class="pill yellow">Trial</span>' : '') + (p.rank ? rankPill(p.rank, true) : '') + (p.discord ? '<span class="muted">@' + esc(p.discord) + '</span>' : '') + '</div></div></div>' +
+      '<a class="small" href="#/team">← Team</a></div>' +
+    (p.rs ? panel('Ranked & recent games (Riot)', '', riotLine(p.rs, true)) : '') +
+    (!rows.length ? empty('No scrim stats for ' + esc(name) + ' yet.') :
+    '<div class="kpis">' + kpi(pa.maps, 'Maps') + kpi(num(pa.kd, 2), 'K/D') + kpi(pa.score != null ? gradePill({}, pa.score) : '–', 'Avg grade') + kpi(pct(pa.open), 'Opening duels won') + kpi(pct(pa.tradedPct), 'Deaths traded') + kpi(pct(pa.hs), 'HS %') + '</div>' +
+    (form != null && prevForm != null ? '<p class="small" style="margin-top:-6px">Last 5 maps: <b>' + gradePill({}, form) + '</b> vs ' + gradePill({}, prevForm) + ' the 5 before — ' + (form > prevForm + 2 ? '<span class="pill green">trending up</span>' : form < prevForm - 2 ? '<span class="pill red">trending down</span>' : '<span class="pill">steady</span>') + '</p>' : '') +
+    panel('Performance over time', '<span class="small muted">grade per map (line: 3-map average)</span>', lineChart([{ name: 'Grade', pts: pts.map(x => ({ y: x.grade, label: x.label, short: x.short })) }, { name: '3-map avg', pts: gR.map((y, i) => ({ y: y, label: pts[i].label, short: pts[i].short })) }], { min: 40, max: 100, ref: 72, fmt: v => Math.round(v), label: 'Grade over time' })) +
+    panel('K/D over time', '', lineChart([{ name: 'K/D', pts: pts.map(x => ({ y: x.kd, label: x.label, short: x.short })) }], { min: 0, ref: 1, label: 'K/D over time' })) +
+    '<div class="an-grid">' +
+    panel('Agents', '', '<div class="tablewrap"><table><thead><tr><th>Agent</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">Grade</th><th class="num">Won</th></tr></thead><tbody>' +
+      agents.map(a => '<tr><td><b>' + esc(a.v) + '</b></td><td class="num">' + a.maps + '</td><td class="num">' + num(a.kd, 2) + '</td><td class="num">' + (a.score != null ? gradePill({}, a.score) : '–') + '</td><td class="num">' + (a.n ? a.w + '/' + a.n : '–') + '</td></tr>').join('') + '</tbody></table></div>') +
+    panel('Maps', '', '<div class="tablewrap"><table><thead><tr><th>Map</th><th class="num">Played</th><th class="num">K/D</th><th class="num">Grade</th><th class="num">Won</th></tr></thead><tbody>' +
+      maps.map(a => '<tr><td><b>' + esc(a.v) + '</b></td><td class="num">' + a.maps + '</td><td class="num">' + num(a.kd, 2) + '</td><td class="num">' + (a.score != null ? gradePill({}, a.score) : '–') + '</td><td class="num">' + (a.n ? a.w + '/' + a.n : '–') + '</td></tr>').join('') + '</tbody></table></div>') +
+    '</div>' +
+    panel('Recent maps', '', '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Map</th><th>Agent</th><th class="num">K / D / A</th><th class="num">First K / D</th><th class="num">Grade</th></tr></thead><tbody>' +
+      rows.slice().reverse().slice(0, 12).map(r => '<tr><td>' + fmtDate(r.date) + '</td><td>' + esc(r.map || '–') + '</td><td>' + esc(r.agent || '–') + '</td><td class="num">' + (r.kills ?? '–') + ' / ' + (r.deaths ?? '–') + ' / ' + (r.assists ?? '–') + '</td><td class="num">' + (r.first_kills ?? '–') + ' / ' + (r.first_deaths ?? '–') + '</td><td class="num">' + gradePill(r) + '</td></tr>').join('') + '</tbody></table></div>')) +
+    (items.length ? panel('Work on', '<a class="small" href="#/workon/' + encodeURIComponent(name) + '">All →</a>', '<div class="wgrid">' + items.filter(w => w.status !== 'Fixed').slice(0, 6).map(w => workCard(w, { coachView: isStaff() })).join('') + '</div>' +
+      (items.filter(w => w.status === 'Fixed').length ? '<p class="small muted">' + items.filter(w => w.status === 'Fixed').length + ' item(s) fixed.</p>' : '')) : '');
+  wireWork(el, items, () => render());
+};
+
+// =============================================================== COMPS THAT WIN (from player stats agents)
+function compStats(matches, ps) {
+  const out = [];
+  matches.forEach(m => {
+    const lines = ps.filter(r => (r.match_id && r.match_id === m.id) || (!r.match_id && r.date === m.date && String(r.map || '').toLowerCase() === String(m.map || '').toLowerCase()));
+    const agents = Array.from(new Set(lines.map(r => r.agent).filter(Boolean))).sort();
+    if (agents.length === 5) out.push({ map: m.map, comp: agents.join(', '), win: isWin(m), rw: Number(m.rounds_won) || 0, rl: Number(m.rounds_lost) || 0 });
+  });
+  return groupBy(out, 'map').map(([map, list]) => ({ map: map, comps: groupBy(list, 'comp').map(([comp, l]) => ({ comp: comp, n: l.length, w: l.filter(x => x.win).length, rw: sum(l, 'rw'), rl: sum(l, 'rl') }))
+    .sort((a, b) => b.n - a.n || b.w - a.w) }));
+}
+function compsPanel(matches, ps) {
+  const cs = compStats(matches, ps);
+  if (!cs.length) return panel('Comps we ran', '', '<p class="small muted" style="margin:0">Shows once games have all five players\' agents logged (Riot imports do this automatically).</p>');
+  return panel('Comps we ran', '<span class="small muted">from games with all five agents logged</span>', cs.map(m => '<div class="comprow"><b>' + esc(m.map) + '</b><div>' +
+    m.comps.map(c => '<div class="small"><span class="pill ' + (c.w / c.n >= 0.5 ? 'green' : 'red') + '">' + c.w + '–' + (c.n - c.w) + '</span> ' + esc(c.comp) + ' <span class="muted">· rounds ' + c.rw + '–' + c.rl + '</span></div>').join('') + '</div></div>').join(''));
+}
+
+// =============================================================== WEEKLY REPORT (staff)
+PAGES.report = async function (el) {
+  if (!isStaff()) { el.innerHTML = '<p>Coaches only.</p>'; return; }
+  const off = Number(location.hash.split('/')[2]) || 0;
+  const mon = weekMonday(off), sun = new Date(mon); sun.setDate(sun.getDate() + 6);
+  const from = isoOf(mon), to = isoOf(sun), pFrom = addDays(from, -7), pTo = addDays(from, -1);
+  const [matches, ps, work, team, checkins, plans] = await Promise.all([cached('matches'), cached('player_stats'), db.list('work_on', { order: 'date', limit: 2000 }), teamPlayers(),
+    db.list('checkins', { gte: { day: pFrom }, order: 'day', limit: 3000 }).catch(() => []), db.list('practice_plans', { eq: { week_start: from }, limit: 3 }).catch(() => [])]);
+  const inW = (d, a, b) => d && String(d).slice(0, 10) >= a && String(d).slice(0, 10) <= b;
+  const wk = matches.filter(m => inW(m.date, from, to)), prev = matches.filter(m => inW(m.date, pFrom, pTo));
+  const anW = teamAnalytics(wk), anP = teamAnalytics(prev);
+  const rec = l => { const w = l.filter(isWin).length; return w + '–' + (l.length - w); };
+  const rp = l => { const a = sum(l, 'rounds_won'), b = sum(l, 'rounds_lost'); return a + b ? a / (a + b) : null; };
+  const delta = (a, b) => a == null || b == null ? '' : ' <span class="' + (a >= b ? 'up' : 'down') + ' small">' + (a >= b ? '▲' : '▼') + ' ' + Math.abs(Math.round((a - b) * 100)) + '</span>';
+  const psW = ps.filter(r => inW(r.date, from, to)), psP = ps.filter(r => inW(r.date, pFrom, pTo));
+  const plW = playerAnalytics(psW).filter(p => p.maps >= 1), plP = new Map(playerAnalytics(psP).map(p => [normName(p.name), p]));
+  const top = plW.filter(p => p.score != null)[0];
+  const improved = plW.map(p => { const b = plP.get(normName(p.name)); return b && b.score != null && p.score != null ? Object.assign({ d: p.score - b.score }, p) : null; }).filter(Boolean).sort((a, b) => b.d - a.d)[0];
+  const active = team.players.filter(p => p.user_id && !p.bench);
+  const ciRows = active.map(p => { const mine = checkins.filter(c => c.user_id === p.user_id && inW(c.day, from, to)); return { p: p, n: mine.length, mins: sum(mine, 'minutes') }; });
+  const daysSoFar = Math.max(1, Math.min(7, Math.floor((Math.min(Date.now(), sun.getTime() + 86400000) - mon.getTime()) / 86400000)));
+  const opened = work.filter(w => inW(w.date, from, to)), fixed = work.filter(w => w.status === 'Fixed' && inW(w.fixed_at, from, to)), back = work.filter(w => w.came_back && (w.seen || []).some(s => inW(s.date, from, to)));
+  const plan = plans.find(x => x.published) || plans[0];
+  const label = 'Week of ' + mon.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const text = [teamName() + ' — ' + label,
+    'Results: ' + (wk.length ? rec(wk) + ' in maps, ' + pct(rp(wk)) + ' of rounds' + (prev.length ? ' (last week ' + rec(prev) + ', ' + pct(rp(prev)) + ')' : '') : 'no games logged'),
+    anW.rounds ? 'Attack ' + pct(anW.atk.p) + ' · Defense ' + pct(anW.def.p) + ' · Pistols ' + anW.pistols.w + '/' + anW.pistols.n : '',
+    top ? 'Top performer: ' + top.name + ' (' + letterOf(top.score) + ', ' + num(top.kd, 2) + ' K/D)' : '',
+    improved && improved.d > 0 ? 'Most improved: ' + improved.name + ' (+' + Math.round(improved.d) + ' score)' : '',
+    'Check-ins: ' + ciRows.map(x => x.p.name + ' ' + x.n + '/' + daysSoFar).join(', '),
+    'Work on: ' + opened.length + ' new, ' + fixed.length + ' fixed' + (back.length ? ', ' + back.length + ' came back' : ''),
+    plan ? 'Practice plan: ' + (plan.title || 'set') : ''].filter(Boolean).join('\n');
+  el.innerHTML = '<div class="page-h"><div><h1>Weekly report</h1><p class="muted">' + esc(label) + ' — results, form, check-ins and progress in one place.</p></div>' +
+    '<div class="row"><a class="btn small ghost" href="#/report/' + (off - 1) + '">← Previous</a>' + (off < 0 ? '<a class="btn small ghost" href="#/report/' + (off + 1) + '">Next →</a>' : '') + '<button class="btn small" id="rcopy">Copy for Discord</button></div></div>' +
+    '<div class="kpis">' + kpi(wk.length ? rec(wk) : '–', 'Maps this week') + kpi(pct(rp(wk)) + delta(rp(wk), rp(prev)), 'Round win %') + kpi(anW.rounds ? pct(anW.atk.p) + delta(anW.atk.p, anP.atk.p) : '–', 'Attack') +
+      kpi(anW.rounds ? pct(anW.def.p) + delta(anW.def.p, anP.def.p) : '–', 'Defense') + kpi(anW.pistols.n ? anW.pistols.w + '/' + anW.pistols.n : '–', 'Pistols') + kpi(opened.length + ' / ' + fixed.length, 'Work on new / fixed') + '</div>' +
+    '<div class="an-grid">' +
+    panel('Standouts', '', (top ? '<div class="small"><span class="muted">Top performer</span><br><b>' + playerLink(top.name) + '</b> ' + gradePill({}, top.score) + ' · ' + num(top.kd, 2) + ' K/D over ' + top.maps + ' map(s)</div>' : '<p class="small muted">No stat lines this week.</p>') +
+      (improved && improved.d > 0 ? '<div class="small" style="margin-top:10px"><span class="muted">Most improved vs last week</span><br><b>' + playerLink(improved.name) + '</b> +' + Math.round(improved.d) + ' score</div>' : '')) +
+    panel('Check-ins', '<a class="small" href="#/coach/checkins">Details →</a>', ciRows.length ? ciRows.map(x => '<div class="row spread small"><span>' + playerLink(x.p.name) + '</span><span>' + x.n + '/' + daysSoFar + ' days' + (x.mins ? ' · ' + x.mins + ' min' : '') + ' ' + (x.n >= daysSoFar - 1 ? '<span class="pill green">✓</span>' : x.n === 0 ? '<span class="pill red">none</span>' : '') + '</span></div>').join('') : '<p class="small muted">No linked players yet.</p>') +
+    '</div>' +
+    (wk.length ? panel('Games', '', '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Opponent</th><th>Map</th><th class="num">Score</th><th>Rounds</th></tr></thead><tbody>' +
+      wk.slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).map(m => '<tr><td>' + fmtDate(m.date) + '</td><td>' + esc(m.opponent || '–') + '</td><td><b>' + esc(m.map) + '</b></td><td class="num"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span> ' + (Number(m.rounds_won) || 0) + '–' + (Number(m.rounds_lost) || 0) + '</td><td>' + (roundStrip(m.rounds) || '–') + '</td></tr>').join('') + '</tbody></table></div>') : '') +
+    (plW.length ? panel('Players this week', '', '<div class="tablewrap"><table><thead><tr><th>Player</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">Opening win %</th><th class="num">Grade</th><th class="num">vs last week</th></tr></thead><tbody>' +
+      plW.map(p => { const b = plP.get(normName(p.name)); return '<tr><td><b>' + playerLink(p.name) + '</b></td><td class="num">' + p.maps + '</td><td class="num">' + num(p.kd, 2) + '</td><td class="num">' + pct(p.open) + '</td><td class="num">' + (p.score != null ? gradePill({}, p.score) : '–') + '</td><td class="num">' + (b && b.score != null && p.score != null ? (p.score >= b.score ? '<span class="up">▲ ' : '<span class="down">▼ ') + Math.abs(Math.round(p.score - b.score)) + '</span>' : '–') + '</td></tr>'; }).join('') + '</tbody></table></div>') : '') +
+    panel('Work on this week', '<a class="small" href="#/workon">Board →</a>', '<div class="small">' + (opened.length ? '<b>New:</b> ' + opened.slice(0, 8).map(w => esc((isTeamWide(w) ? 'Team' : w.player) + ': ' + String(w.issue || '').slice(0, 60))).join(' · ') : 'Nothing new.') + '</div>' +
+      (fixed.length ? '<div class="small" style="margin-top:6px"><b>Fixed:</b> ' + fixed.map(w => esc((isTeamWide(w) ? 'Team' : w.player) + ': ' + String(w.issue || '').slice(0, 60))).join(' · ') + '</div>' : '') +
+      (back.length ? '<div class="small" style="margin-top:6px"><b>Came back:</b> ' + back.map(w => esc(String(w.issue || '').slice(0, 60))).join(' · ') + '</div>' : '')) +
+    '<details class="item"><summary><span class="t">Text version</span></summary><div class="body"><pre class="rtext">' + esc(text) + '</pre></div></details>';
+  $('#rcopy', el).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('Copied — paste it in Discord'); } catch (e) { toast('Couldn\'t copy — open "Text version" below'); } };
+};
+
 // expose pure helpers for tests
-window.__TEAMHUB__ = { teamAnalytics: teamAnalytics, playerAnalytics: playerAnalytics, buildInsights: buildInsights, makePracticePlan: makePracticePlan, metricValue: metricValue, md: md, planImport: planImport, mergeWork: mergeWork, coerce: coerce, compAnalysis: compAnalysis, calcStreak: calcStreak, parseCSV: parseCSV, TABLES: TABLES, normName: normName };
+window.__TEAMHUB__ = { compStats: compStats, lineChart: lineChart, teamAnalytics: teamAnalytics, playerAnalytics: playerAnalytics, buildInsights: buildInsights, makePracticePlan: makePracticePlan, metricValue: metricValue, md: md, planImport: planImport, mergeWork: mergeWork, coerce: coerce, compAnalysis: compAnalysis, calcStreak: calcStreak, parseCSV: parseCSV, TABLES: TABLES, normName: normName };
 
 if (!window.__TEAMHUB_NO_BOOT__) boot();
 })();
