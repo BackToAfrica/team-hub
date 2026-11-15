@@ -178,10 +178,7 @@ with check (public.has_organization_role(id, array['owner','org_admin']));
 drop policy if exists organization_members_read on public.organization_members;
 create policy organization_members_read
 on public.organization_members for select to authenticated
-using (
-  user_id = auth.uid()
-  or public.has_organization_role(organization_id, array['owner','org_admin','general_manager'])
-);
+using (public.is_organization_member(organization_id));
 
 revoke all on function public.create_organization_for_new_team() from public, anon, authenticated;
 revoke all on function public.is_organization_member(uuid) from public, anon;
