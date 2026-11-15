@@ -140,7 +140,10 @@ const TABLES = {
     F('date', 'Date', 'date'), F('source', 'From VOD', 'text', ['From VOD', 'Source', 'Scrim']), F('area', 'Area', 'select', ['Area'], { options: ['Comms', 'Utility', 'Trades', 'Opening duels', 'Executes', 'Retakes', 'Post-plant', 'Defense setups', 'Rotations', 'Economy', 'Positioning', 'Aim / mechanics', 'Mid-round calls'] }),
     F('player', 'Player (or Team)', 'text', ['Player']), F('issue', 'What we need to work on', 'long', ['What we need to work on', 'Issue']), F('tip', 'How to fix it', 'long', ['How to fix it', 'Tip']),
     F('priority', 'Priority', 'select', ['Priority'], { options: ['High', 'Medium', 'Low'] }), F('status', 'Status', 'select', ['Status'], { options: ['Open', 'Working on it', 'Fixed'] }),
-    F('watch', 'Watch it', 'link', ['Watch it']), F('drill', 'Drill', 'long', ['Drill'])], keepOnAdd: ['review_id'] },
+    F('watch', 'Watch it', 'link', ['Watch it']), F('drill', 'Drill', 'long', ['Drill']),
+    F('metric', 'Track with a stat (optional)', 'select', ['Track with'], { options: ['', 'First deaths per round', 'First kills per round', 'Opening duel win %', 'K/D', 'Deaths traded %', 'Trade kills per round', 'Headshot %', 'Performance score',
+      'Team: pistol win %', 'Team: attack round win %', 'Team: defense round win %', 'Team: rounds 2–3 after a won pistol', 'Team: first kill is ours %', 'Team: anti-eco win %'] }),
+    F('target', 'Target for that stat (optional, e.g. 0.12 or 60%)', 'num', ['Target'])], keepOnAdd: ['review_id'] },
   opponent_scouting: { label: 'Opponent scouting', sheet: 'Opponent Scouting', order: 'date', req: 'opponent', fields: [
     F('date', 'Date', 'date'), F('opponent', 'Opponent'), F('map', 'Map'), F('veto', 'Their veto'), F('source', 'Source'), F('pistol_plan', 'Pistol plan (attack)', 'long'),
     F('fav_attack_site', 'Favorite attack site'), F('defense_setup', 'Defense setup', 'long'), F('after_losing', 'After losing a round', 'long'),
@@ -392,11 +395,13 @@ const NAV = [
   { r: 'checkin', label: 'My check-ins', sec: 'checkin', i: 'check', g: 'Team' },
   { r: 'stats', label: 'My stats', sec: 'my_stats', i: 'chart', g: 'Team' },
   { r: 'workon', label: 'Work on', sec: 'reviews', i: 'target', g: 'Team' },
+  { r: 'practice', label: 'Practice plan', sec: null, i: 'route', g: 'Team' },
   { r: 'live', label: 'Live match', sec: 'scouting', i: 'bolt', g: 'Prepare' },
   { r: 'prep', label: 'Match prep center', sec: 'scouting', i: 'target', g: 'Prepare' },
   { r: 'plans', label: 'Game plans', sec: 'scouting', i: 'flag', g: 'Prepare' },
   { r: 'veto', label: 'Veto simulator', sec: 'team_stats', i: 'swap', g: 'Prepare' },
   { r: 'maps', label: 'Map pool', sec: 'team_stats', i: 'map', g: 'Prepare' },
+  { r: 'analytics', label: 'Scrim analytics', sec: 'team_stats', i: 'chart', g: 'Prepare' },
   { r: 'playbook', label: 'Playbook', sec: ['playbook', 'comms'], i: 'book', g: 'Prepare' },
   { r: 'lineups', label: 'Lineups', sec: 'playbook', i: 'pin', g: 'Prepare' },
   { r: 'comms', label: 'Comms', sec: 'comms', i: 'mic', g: 'Prepare' },
@@ -420,13 +425,13 @@ function render() {
   if (me && !me.team_id) { renderOnboard(); return; }
   if (!me || !me.approved) { renderPending(); return; }
   const items = NAV.filter(navAllowed);
-  if (!items.some(n => n.r === S.route) && !((S.route === 'coach' || S.route === 'explore') && isStaff()) && !(S.route === 'owner' && me.is_admin) && S.route !== 'account') S.route = 'home';
+  if (!items.some(n => n.r === S.route) && S.route !== 'player' && !((S.route === 'coach' || S.route === 'explore' || S.route === 'report') && isStaff()) && !(S.route === 'owner' && me.is_admin) && S.route !== 'account') S.route = 'home';
   const ownerView = me.is_admin && S.team && S.team.owner_id !== me.id;
   const link = (r, label, i) => '<a href="#/' + r + '" class="' + (S.route === r ? 'active' : '') + '">' + icon(i) + '<span>' + esc(label) + '</span></a>';
   const groups = groupBy(items, 'g');
   const navHtml = groups.map(([g, list]) => '<div class="nav-g">' + esc(g) + '</div>' + list.map(n => link(n.r, n.label, n.i)).join('')).join('') +
     (isStaff() || me.is_admin ? '<div class="nav-g">Manage</div>' : '') +
-    (isStaff() ? link('coach', me.is_coach ? 'Coach panel' : 'Staff panel', 'gear') + link('explore', 'Other teams', 'eye') : '') +
+    (isStaff() ? link('coach', me.is_coach ? 'Coach panel' : 'Staff panel', 'gear') + link('report', 'Weekly report', 'doc') + link('explore', 'Other teams', 'eye') : '') +
     (me.is_admin ? link('owner', 'All teams', 'globe') : '');
   $('#app').innerHTML =
     '<div class="topbar"><button id="menubtn" aria-label="Menu">☰</button><span class="dot"></span><b>' + esc(teamName()) + '</b></div>' +
@@ -703,7 +708,7 @@ function scrimStatsPanel(rows, title) {
 function pcard(p, ps) {
   const s = ps && p.ign ? statsFor(ps, p.ign) : null;
   const key = p.rid ? 'r' + p.rid : 'u' + p.user_id;
-  return '<div class="pcard' + (p.bench ? ' bench' : '') + '">' + avatar(p, 52) + '<div class="nm">' + esc(p.name) + '</div>' +
+  return '<div class="pcard' + (p.bench ? ' bench' : '') + '">' + avatar(p, 52) + '<div class="nm">' + (p.ign || p.name ? playerLink(p.name) : esc(p.name)) + '</div>' +
     '<div class="sub">' + esc([p.ign && p.ign !== p.name ? p.ign : '', p.discord ? '@' + p.discord : ''].filter(Boolean).join(' · ')) + '</div>' +
     '<div class="row" style="justify-content:center;gap:4px">' + rolePill(p.role) + (p.is_igl ? '<span class="pill yellow">IGL</span>' : '') + (p.is_trial ? '<span class="pill yellow">Trial</span>' : '') + (p.bench ? '<span class="pill">Bench</span>' : '') + (p.coachSlot ? '<span class="pill blue">Coach</span>' : '') + (!p.user_id ? '<span class="pill">Not joined</span>' : '') + '</div>' +
     (p.rank ? '<div style="margin-top:6px">' + rankPill(p.rank, true) + '</div>' : '') + riotLine(p.rs) +
@@ -903,7 +908,8 @@ PAGES.home = async function (el) {
   el.innerHTML = '<div class="home-dashboard"><div class="home-topline"><div><div class="eyebrow">TEAM OPERATIONS / OVERVIEW</div><div class="home-date">' + new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }) + '</div></div><div class="home-live"><span></span> TEAM SPACE ACTIVE</div></div>' +
     hero.replace('class="hero"', 'class="hero home-hero"') + performanceHtml +
     '<div class="home-section-label"><span>YOUR TEAM WORKSPACE</span><i></i></div>' +
-    (coach ? coachOpsHtml : playerGrowthHtml) + '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + schedHtml + (coach ? '' : focusHtml) + annHtml + statsHtml + rosterHtml + '</div></div></div>';
+    (coach ? coachOpsHtml : playerGrowthHtml) + '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + schedHtml + (coach ? '' : focusHtml) + '<div id="home-practice"></div>' + annHtml + statsHtml + rosterHtml + '</div></div></div>';
+  homePractice($('#home-practice', el)).catch(() => {});
   if (doCheckin) {
     const mineToday = myHist.find(h => String(h.day).slice(0, 10) === today);
     const showForm = () => checkinForm($('#ci-box'), today, () => { S.cache = {}; render(); });
@@ -1064,10 +1070,12 @@ PAGES.playbook = async function (el) {
 
 // ---- Scouting
 PAGES.scouting = async function (el) {
-  const sub = location.hash.split('/')[2] || 'opponents';
-  el.innerHTML = '<div class="page-h"><h1>Scouting</h1></div><div class="tabs"><button data-t="opponents" class="' + (sub === 'opponents' ? 'active' : '') + '">Opponents</button><button data-t="comps" class="' + (sub === 'comps' ? 'active' : '') + '">Comp notes</button></div><div id="sc"></div>';
+  const sub = location.hash.split('/')[2] || 'teams';
+  if (sub === 'team') return opponentProfile(el, decodeURIComponent(location.hash.split('/').slice(3).join('/') || ''));
+  el.innerHTML = '<div class="page-h"><h1>Scouting</h1></div><div class="tabs"><button data-t="teams" class="' + (sub === 'teams' ? 'active' : '') + '">Teams we play</button><button data-t="opponents" class="' + (sub === 'opponents' ? 'active' : '') + '">Scouting reports</button><button data-t="comps" class="' + (sub === 'comps' ? 'active' : '') + '">Comp notes</button></div><div id="sc"></div>';
   $$('.tabs button', el).forEach(b => b.onclick = () => { location.hash = '#/scouting/' + b.dataset.t; });
   const box = $('#sc');
+  if (sub === 'teams') return opponentsTab(box);
   const table = sub === 'comps' ? 'comp_notes' : 'opponent_scouting';
   const cfg = TABLES[table];
   const rows = await cached(table);
@@ -1077,7 +1085,7 @@ PAGES.scouting = async function (el) {
   const list = document.createElement('div'); box.appendChild(list);
   function draw() {
     list.innerHTML = fb.apply(rows).map(r => {
-      const title = sub === 'comps' ? esc(r.team || '') + ' — ' + [r.a1, r.a2, r.a3, r.a4, r.a5].filter(Boolean).map(esc).join(', ') : esc(r.opponent || '');
+      const title = sub === 'comps' ? esc(r.team || '') + ' — ' + [r.a1, r.a2, r.a3, r.a4, r.a5].filter(Boolean).map(esc).join(', ') : esc(r.opponent || '') + (r.opponent ? ' <a class="small" href="#/scouting/team/' + encodeURIComponent(r.opponent) + '">profile →</a>' : '');
       const meta = [r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '', r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '', r.result ? '<span class="pill">' + esc(r.result) + '</span>' : ''].join(' ');
       return '<details class="item"><summary><div class="t">' + title + '</div><div class="row small" style="margin-top:4px">' + meta + '</div></summary><div class="body">' +
         detailFields(cfg, r, sub === 'comps' ? ['a1', 'a2', 'a3', 'a4', 'a5', 'team', 'map', 'date', 'result'] : ['opponent', 'map', 'date']) + '</div></details>';
@@ -1159,7 +1167,7 @@ function videoInfo(v) {
 }
 function embedSrc(vi, sec) {
   sec = Math.max(0, Math.round(sec || 0));
-  if (vi.kind === 'yt') return 'https://www.youtube.com/embed/' + vi.id + '?rel=0&start=' + sec + (sec ? '&autoplay=1' : '');
+  if (vi.kind === 'yt') return 'https://www.youtube.com/embed/' + vi.id + '?rel=0&enablejsapi=1&origin=' + encodeURIComponent(location.origin) + '&start=' + sec + (sec ? '&autoplay=1' : '');
   if (vi.kind === 'tw') return 'https://player.twitch.tv/?video=v' + vi.id + '&parent=' + location.hostname + '&time=' + Math.floor(sec / 3600) + 'h' + Math.floor(sec % 3600 / 60) + 'm' + (sec % 60) + 's&autoplay=' + (sec ? 'true' : 'false');
   return null;
 }
@@ -1187,7 +1195,7 @@ function workCard(w, opts) {
       (canMark || opts.coachView ? '<select class="wstat" data-wid="' + w.id + '">' + ['Open', 'Working on it', 'Fixed'].map(x => '<option' + (x === (w.status || 'Open') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select>' : '<span class="pill ' + (WSTAT[w.status] || '') + '">' + esc(w.status || 'Open') + '</span>') + '</div>' +
     '<div class="wi"><span class="lbl">Mistake</span>' + inlineMd(w.issue || '') + '</div>' +
     (w.tip ? '<div class="wt"><span class="lbl">How to avoid it</span>' + inlineMd(w.tip) + '</div>' : '') +
-    (w.drill ? '<div class="small muted" style="margin-top:6px">Drill: ' + inlineMd(w.drill) + '</div>' : '') + workProgressHtml(w) +
+    (w.drill ? '<div class="small muted" style="margin-top:6px">Drill: ' + inlineMd(w.drill) + '</div>' : '') + workProgressHtml(w) + workMetricHtml(w, S.trackCtx) +
     '<div class="small muted row" style="margin-top:8px;gap:10px">' + (w.date ? '<span>' + fmtDate(w.date) + '</span>' : '') + (w.source ? (w.review_id && !opts.onSeek ? '<a href="#/reviews/' + w.review_id + '">' + esc(w.source) + '</a>' : '<span>' + esc(w.source) + '</span>') : (w.review_id && !opts.onSeek ? '<a href="#/reviews/' + w.review_id + '">From VOD review</a>' : '')) +
       (vi ? (opts.onSeek && vi.id ? '<button type="button" class="linkbtn" data-seek="' + (vi.t || 0) + '">▶ Watch ' + fmtTs(vi.t || 0) + '</button>' : '<a href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch the moment</a>') : '') + '</div>' +
     (opts.coachView ? '<div class="row" style="margin-top:10px;gap:6px">' + (!w.approved ? '<button class="btn small" data-wapprove="' + w.id + '">Approve for ' + esc(isTeamWide(w) ? 'team' : w.player) + '</button>' : '<button class="btn small ghost" data-wunapprove="' + w.id + '">Hide from player</button>') +
@@ -1281,6 +1289,7 @@ function vodUploadModal() {
 
 async function reviewDetail(el, r, work) {
   if (!r) { el.innerHTML = empty('That review isn\'t here any more.', '<a class="btn small" href="#/reviews">All reviews</a>'); return; }
+  await loadTrackCtx().catch(() => null);
   const vi = videoInfo(r.vod), items = workFor(r, work), start = vi ? (vi.t || tsToSec(r.starts_at)) : 0;
   const vodJob = isStaff() ? await db.list('vod_analysis_jobs', { eq: { review_id: r.id }, limit: 1 }).then(rows => rows[0] || null).catch(() => null) : null;
   const revStats = (can('team_stats') || can('my_stats') || isStaff()) ? await db.list('player_stats', { eq: { review_id: r.id }, limit: 50 }).catch(() => []) : [];
@@ -1312,9 +1321,13 @@ async function reviewDetail(el, r, work) {
       $$('a', box).forEach(a => { const v2 = videoInfo(a.href); if (v2 && v2.id && v2.id === vi.id) { a.dataset.seek = v2.t || 0; } });
     });
     el.addEventListener('click', e => { const t = e.target.closest('[data-seek]'); if (!t) return; e.preventDefault();
-      $('#vplayer').src = embedSrc(vi, Number(t.dataset.seek)); $('#vplayer').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+      const fr = $('#vplayer'); fr.src = embedSrc(vi, Number(t.dataset.seek)); ytListen(fr); fr.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
   }
   wireWork(el, items, () => render());
+  if (canEmbed) ytListen($('#vplayer'));
+  const seekTo = sec => { if (!canEmbed) { if (vi) window.open(vi.kind === 'yt' ? 'https://www.youtube.com/watch?v=' + vi.id + '&t=' + Math.round(sec) + 's' : vi.url, '_blank', 'noopener'); return; }
+    const fr = $('#vplayer'); fr.src = embedSrc(vi, sec); ytListen(fr); fr.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
+  if (isOurs(r) || isStaff()) reviewRoundsPanel(el, r, vi, seekTo).catch(err => console.warn('rounds', err));
   if (isStaff()) {
     // new Work on item tied to this review (shows on the Work on board right away)
     const addWork = issue => editRow('work_on', { review_id: r.id, issue: issue || '', date: r.date || todayISO(), source: r.title || [r.opponent, r.type].filter(Boolean).join(' · ') || 'VOD review',
@@ -1333,7 +1346,8 @@ async function reviewDetail(el, r, work) {
 // ---- Work on: mistakes from VODs and how to avoid them
 PAGES.workon = async function (el) {
   const me = S.me, coach = isStaff();
-  const items = (await cached('work_on')).filter(w => coach ? w.approved : true);
+  const [allItems] = await Promise.all([cached('work_on'), loadTrackCtx()]);
+  const items = allItems.filter(w => coach ? w.approved : true);
   const who = location.hash.split('/')[2] || (coach ? 'all' : 'me');
   const showFixed = location.hash.split('/')[3] === 'fixed';
   const players = Array.from(new Set(items.filter(w => !isTeamWide(w)).map(w => String(w.player).trim()))).sort();
@@ -1353,7 +1367,7 @@ PAGES.workon = async function (el) {
 
 // Coach: approve what each player sees
 async function coachWork(box) {
-  const items = await db.list('work_on', { order: 'date' });
+  const [items] = await Promise.all([db.list('work_on', { order: 'date' }), loadTrackCtx()]);
   const pending = items.filter(w => !w.approved), live = items.filter(w => w.approved && w.status !== 'Fixed');
   const byPlayer = groupBy(pending, 'player');
   box.innerHTML = '<div class="row spread" style="margin-bottom:10px"><p class="muted small" style="margin:0;max-width:720px">Mistakes found in VOD reviews land here first. <b>Approve</b> the ones you want each player to work on (you can edit the wording), and <b>dismiss</b> the rest. Players only ever see approved items, on their Home page and in Work on.</p>' +
@@ -1409,8 +1423,8 @@ PAGES.account = async function (el) {
 PAGES.coach = async function (el) {
   if (!isStaff()) { el.innerHTML = '<p>Coaches only.</p>'; return; }
   const head = S.me.is_coach;
-  const tabs = head ? [['members', 'Members'], ['work', 'Work on'], ['team', 'Team & invites'], ['publicpage', 'Public page & maps'], ['checkins', 'Check-ins'], ['announce', 'Announcements'], ['data', 'Content & import']]
-    : [['work', 'Work on'], ['checkins', 'Check-ins'], ['data', 'Content & import']];
+  const tabs = head ? [['members', 'Members'], ['work', 'Work on'], ['team', 'Team & invites'], ['publicpage', 'Public page & maps'], ['checkins', 'Check-ins'], ['announce', 'Announcements'], ['names', 'Player names'], ['data', 'Content & import']]
+    : [['work', 'Work on'], ['checkins', 'Check-ins'], ['names', 'Player names'], ['data', 'Content & import']];
   let sub = location.hash.split('/')[2] || tabs[0][0];
   if (!tabs.some(t => t[0] === sub)) sub = tabs[0][0];
   el.innerHTML = '<div class="page-h"><div><h1>' + (head ? 'Coach panel' : 'Staff panel') + '</h1>' + (head ? '' : '<p class="muted">You\'re ' + esc(S.me.staff_role === 'Analyst' ? 'an analyst' : 'an assistant coach') + ': you can add VOD reviews, work-on items, stats and plays. Members, the roster, invites and map picks are managed by the head coach.</p>') + '</div></div><div class="tabs">' + tabs.map(t => '<button data-t="' + t[0] + '" class="' + (t[0] === sub ? 'active' : '') + '">' + t[1] + '</button>').join('') + '</div><div id="cp"></div>';
@@ -1716,7 +1730,7 @@ function editRow(table, row, refresh) {
     const v = row[f.k];
     if (f.type === 'long') return '<textarea name="' + f.k + '" rows="' + (f.k === 'body' ? 14 : 4) + '">' + esc(v || '') + '</textarea>';
     if (f.type === 'bool') return '<input type="checkbox" name="' + f.k + '"' + (v ? ' checked' : '') + '>';
-    if (f.type === 'select') return '<select name="' + f.k + '">' + f.options.map(o => '<option' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>';
+    if (f.type === 'select') return '<select name="' + f.k + '">' + f.options.map(o => '<option value="' + esc(o) + '"' + (o === (v || '') ? ' selected' : '') + '>' + esc(o || '—') + '</option>').join('') + '</select>';
     if (f.type === 'date') return '<input type="date" name="' + f.k + '" value="' + esc(v ? String(v).slice(0, 10) : '') + '">';
     if (f.type === 'pct') return '<input name="' + f.k + '" placeholder="e.g. 45%" value="' + esc(v == null ? '' : Math.round(v * 1000) / 10 + '%') + '">';
     if (/int|num/.test(f.type)) return '<input name="' + f.k + '" inputmode="decimal" value="' + esc(v == null ? '' : v) + '">';
@@ -2163,7 +2177,29 @@ PAGES.maps = async function (el) {
     (matches.length || coach ? '<div class="mapgrid">' + cards.filter(c => c.n || c.pool.status).map(card).join('') + '</div>' +
       (cards.some(c => !c.n && !c.pool.status) ? '<details class="item" style="margin-top:14px"' + (matches.length ? '' : ' open') + '><summary><span class="t">Other maps (' + cards.filter(c => !c.n && !c.pool.status).length + ')</span> <span class="muted small">not played' + (since ? ' in this period' : ' yet') + '</span></summary><div class="body"><div class="mapgrid">' +
         cards.filter(c => !c.n && !c.pool.status).map(card).join('') + '</div></div></details>' : '') : empty('No matches logged yet. Results show up here after the coach logs scrim results (Schedule → Log result) or imports the Matches tab.')) +
+    (isStaff() ? '<div class="card panel" style="margin-top:16px" id="riotimp"><div class="card-h"><h2>Scrims from Riot</h2><button class="btn small ghost" id="riotlist">Find scrims</button></div>' +
+      '<p class="small muted" style="margin:0">Custom games show up here once players link their Riot account. A game is imported automatically when 3 or more linked teammates played on the same side. ' +
+      'Imports count the real result: if you played out all rounds, rounds after a team reached 13 are left out. You can also import any game below by hand.</p><div id="riotgames"></div></div>' : '') +
     (matches.length ? gamesPanel(matches, canEdit('matches')) : '');
+  if ($('#riotlist', el)) $('#riotlist', el).onclick = async () => {
+    const box = $('#riotgames', el); box.innerHTML = '<p class="small muted">Looking…</p>';
+    const { data, error } = await sb.functions.invoke('riot-sync', { body: { action: 'scrim_candidates' } });
+    let msg = data && data.error; if (error) { msg = error.message; try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* keep */ } }
+    if (msg) { box.innerHTML = '<p class="small muted">' + esc(msg) + '</p>'; return; }
+    const games = (data && data.games) || [];
+    box.innerHTML = games.length ? '<div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>When</th><th>Map</th><th class="num">Score*</th><th class="num">Teammates linked</th><th></th></tr></thead><tbody>' +
+      games.map(g => '<tr><td>' + esc(new Date(g.started_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) + '</td><td><b>' + esc(g.map || '–') + '</b></td><td class="num">' + esc((g.score || []).join('–')) + '</td><td class="num">' + g.players + '</td>' +
+        '<td class="num">' + (g.imported ? '<span class="pill green">Imported</span>' : '<button class="btn small" data-rimp="' + esc(g.match_id) + '">Import</button>') + '</td></tr>').join('') +
+      '</tbody></table></div><p class="small muted">*Score as played (all rounds). Importing works out the real result.</p>' : '<p class="small muted">No custom games yet. Players need to link their Riot account (Account page), then play the scrim as a custom game.</p>';
+    $$('[data-rimp]', box).forEach(b => b.onclick = async () => {
+      const opp = prompt('Opponent name for this scrim?', '') ; if (opp === null) return;
+      b.disabled = true; b.textContent = 'Importing…';
+      const { data: d2, error: e2 } = await sb.functions.invoke('riot-sync', { body: { action: 'import_scrim', match_id: b.dataset.rimp, opponent: opp } });
+      let m2 = d2 && d2.error; if (e2) { m2 = e2.message; try { const j = await e2.context.json(); if (j && j.error) m2 = j.error; } catch (e) { /* keep */ } }
+      if (m2 || (d2 && d2.skipped)) { toast(m2 || d2.skipped); b.disabled = false; b.textContent = 'Import'; return; }
+      toast('Imported: ' + (d2.map || '') + ' ' + (d2.result || '')); S.cache = {}; render();
+    });
+  };
   const gf = $('#gmap', el);
   if (gf) gf.onchange = () => { $$('#games tbody tr', el).forEach(tr => { tr.style.display = !gf.value || tr.dataset.map === gf.value.toLowerCase() ? '' : 'none'; }); };
   $$('[data-gedit]', el).forEach(b => b.onclick = () => { const m = allMatches.find(x => x.id === Number(b.dataset.gedit)); if (m) editRow('matches', m, () => { S.cache = {}; render(); }); });
@@ -2178,6 +2214,15 @@ PAGES.maps = async function (el) {
   $$('.poolnote', el).forEach(i => i.onchange = () => savePool(i.dataset.map, { notes: i.value.trim() || null }));
   if ($('#logm')) $('#logm').onclick = () => editRow('matches', { date: todayISO(), type: 'Scrim', event: 'Scrim' }, () => { S.cache = {}; render(); });
 };
+// round-by-round strip: one block per counted round (pistols ringed, half-time gap)
+const ROUND_END = { elim: 'Elimination', det: 'Spike detonated', defuse: 'Spike defused', time: 'Time ran out', ff: 'Surrender' };
+function roundStrip(rounds) {
+  const rs = Array.isArray(rounds) ? rounds : [];
+  if (!rs.length) return '';
+  return '<span class="rstrip">' + rs.map((r, i) => (i === 12 ? '<span class="rgap"></span>' : '') +
+    '<i class="r ' + (r.w ? 'w' : 'l') + (i === 0 || i === 12 ? ' p' : '') + (r.side === 'A' ? ' atk' : ' def') + '" title="' +
+    esc('R' + (r.n || i + 1) + ' · ' + (r.side === 'A' ? 'Attack' : 'Defense') + ' · ' + (r.w ? 'Won' : 'Lost') + (r.end ? ' · ' + (ROUND_END[r.end] || r.end) : '') + (i === 0 || i === 12 ? ' · Pistol' : '')) + '"></i>').join('') + '</span>';
+}
 function gamesPanel(matches, edit) {
   const list = matches.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || b.id - a.id);
   const maps = Array.from(new Set(list.map(m => m.map))).sort();
@@ -2185,10 +2230,10 @@ function gamesPanel(matches, edit) {
   return '<div class="card panel" style="margin-top:16px"><div class="card-h"><h2>Logged games <span class="muted small">' + list.length + '</span></h2>' +
     '<select id="gmap" style="width:auto;padding:5px 8px"><option value="">All maps</option>' + maps.map(m => '<option>' + esc(m) + '</option>').join('') + '</select></div>' +
     (edit ? '<p class="small muted" style="margin-top:-6px">Fix a score, map or opponent with Edit. Changes update every map card above.</p>' : '') +
-    '<div class="tablewrap" id="games"><table><thead><tr><th>Date</th><th>Opponent</th><th>Map</th><th class="num">Score</th><th>Type</th><th class="num">Atk</th><th class="num">Def</th><th class="num">Pistols</th>' + (edit ? '<th></th>' : '') + '</tr></thead><tbody>' +
+    '<div class="tablewrap" id="games"><table><thead><tr><th>Date</th><th>Opponent</th><th>Map</th><th class="num">Score</th><th>Rounds</th><th>Type</th><th class="num">Atk</th><th class="num">Def</th><th class="num">Pistols</th><th></th>' + (edit ? '<th></th>' : '') + '</tr></thead><tbody>' +
     list.map(m => '<tr data-map="' + esc(String(m.map).toLowerCase()) + '"><td>' + (m.date ? fmtDate(m.date) : '–') + '</td><td>' + esc(m.opponent || '–') + '</td><td><b>' + esc(m.map) + '</b></td>' +
-      '<td class="num"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span> ' + (Number(m.rounds_won) || 0) + '–' + (Number(m.rounds_lost) || 0) + '</td><td>' + esc(matchType(m)) + '</td>' +
-      '<td class="num">' + side(m.atk_won, m.atk_lost) + '</td><td class="num">' + side(m.def_won, m.def_lost) + '</td><td class="num">' + (m.pistols_won == null ? '–' : m.pistols_won + '/2') + '</td>' +
+      '<td class="num"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span> ' + (Number(m.rounds_won) || 0) + '–' + (Number(m.rounds_lost) || 0) + '</td><td>' + (roundStrip(m.rounds) || '<span class="muted small">–</span>') + '</td><td>' + esc(matchType(m)) + (m.source === 'riot' ? ' <span class="pill blue" title="Imported from Riot: exact rounds and player stats">Riot</span>' : '') + '</td>' +
+      '<td class="num">' + side(m.atk_won, m.atk_lost) + '</td><td class="num">' + side(m.def_won, m.def_lost) + '</td><td class="num">' + (m.pistols_won == null ? '–' : m.pistols_won + '/2') + '</td><td>' + gameVodLink(m) + '</td>' +
       (edit ? '<td class="num" style="white-space:nowrap"><button class="btn small ghost" data-gedit="' + m.id + '">Edit</button> <button class="btn small ghost danger-t" data-gdel="' + m.id + '">Delete</button></td>' : '') + '</tr>').join('') +
     '</tbody></table></div></div>';
 }
@@ -2992,8 +3037,600 @@ cached = async function (table, opts) {
   return _origCached(table, opts);
 };
 
+
+// =============================================================== ANALYTICS
+// Everything here works from the round-by-round data on each logged game (matches.rounds).
+// Riot-imported scrims also carry first kills (fk), buys (buy / obuy) and the plant site.
+const BUYS = ['pistol', 'eco', 'semi', 'full'];
+const BUY_LABEL = { pistol: 'Pistol', eco: 'Eco', semi: 'Force / half buy', full: 'Full buy' };
+const END_LABEL = { elim: 'Elimination', det: 'Spike detonated', defuse: 'Spike defused', time: 'Time ran out', ff: 'Surrender' };
+function roundsOf(m) { return Array.isArray(m && m.rounds) ? m.rounds.filter(r => r && typeof r.w === 'boolean') : []; }
+function rateOf(list) { const n = list.length, w = list.filter(r => r.w).length; return { w: w, l: n - w, n: n, p: n ? w / n : null }; }
+function teamAnalytics(matches) {
+  const games = (matches || []).filter(m => roundsOf(m).length);
+  const R = [];
+  games.forEach(m => roundsOf(m).forEach((r, i) => R.push(Object.assign({ i: i, map: m.map, mid: m.id }, r))));
+  const after = won => { const out = []; games.forEach(m => { const rs = roundsOf(m); [0, 12].forEach(p => { if (!rs[p] || rs[p].w !== won) return; [p + 1, p + 2].forEach(j => { if (rs[j] && j < p + 12) out.push(rs[j]); }); }); }); return rateOf(out); };
+  const fkR = R.filter(r => r.fk === 'us' || r.fk === 'them');
+  const ends = {};
+  R.forEach(r => { if (!r.end) return; const k = (r.side === 'A' ? 'A' : 'D') + (r.w ? 'W' : 'L'); ends[k] = ends[k] || {}; ends[k][r.end] = (ends[k][r.end] || 0) + 1; });
+  let longest = 0; games.forEach(m => { let cur = 0; roundsOf(m).forEach(r => { cur = r.w ? 0 : cur + 1; longest = Math.max(longest, cur); }); });
+  const maps = groupBy(R, 'map').map(([map, list]) => ({ map: map, games: new Set(list.map(r => r.mid)).size, all: rateOf(list), atk: rateOf(list.filter(r => r.side === 'A')), def: rateOf(list.filter(r => r.side === 'D')),
+    pistols: rateOf(list.filter(r => r.i === 0 || r.i === 12)), fk: fkR.filter(r => r.map === map).length ? rateOf(fkR.filter(r => r.map === map).map(r => ({ w: r.fk === 'us' }))) : null }))
+    .sort((a, b) => b.all.n - a.all.n);
+  const sites = {}; R.filter(r => r.side === 'A' && r.site).forEach(r => { const k = r.map + ' ' + r.site; sites[k] = sites[k] || []; sites[k].push(r); });
+  return {
+    games: games.length, rounds: R.length, all: rateOf(R), atk: rateOf(R.filter(r => r.side === 'A')), def: rateOf(R.filter(r => r.side === 'D')),
+    pistols: rateOf(R.filter(r => r.i === 0 || r.i === 12)), conv: after(true), comeback: after(false),
+    fkRounds: fkR.length, fkShare: fkR.length ? fkR.filter(r => r.fk === 'us').length / fkR.length : null,
+    afterFkUs: rateOf(fkR.filter(r => r.fk === 'us')), afterFkThem: rateOf(fkR.filter(r => r.fk === 'them')),
+    econRounds: R.filter(r => r.buy).length,
+    byBuy: BUYS.map(b => Object.assign({ b: b }, rateOf(R.filter(r => r.buy === b)))),
+    vsBuy: BUYS.map(b => Object.assign({ b: b }, rateOf(R.filter(r => r.obuy === b)))),
+    antiEco: rateOf(R.filter(r => r.obuy === 'eco' && (r.buy === 'full' || r.buy === 'semi'))),
+    upsets: rateOf(R.filter(r => (r.buy === 'eco' || r.buy === 'semi') && r.obuy === 'full')),
+    fullVsFull: rateOf(R.filter(r => r.buy === 'full' && r.obuy === 'full')),
+    ends: ends, longestLosing: longest, maps: maps,
+    sites: Object.keys(sites).map(k => Object.assign({ k: k }, rateOf(sites[k]))).sort((a, b) => b.n - a.n)
+  };
+}
+function playerAnalytics(ps) {
+  const by = new Map();
+  (ps || []).forEach(r => { const n = normName(r.player); if (!n) return; if (!by.has(n)) by.set(n, { name: String(r.player).replace(/\s*\*\s*trial\s*$/i, ''), rows: [] }); by.get(n).rows.push(r); });
+  return Array.from(by.values()).map(p => {
+    const rows = p.rows, R = sum(rows, 'rounds'), k = sum(rows, 'kills'), d = sum(rows, 'deaths');
+    const withOpen = rows.filter(r => r.first_kills != null || r.first_deaths != null), oR = sum(withOpen, 'rounds');
+    const fk = sum(withOpen, 'first_kills'), fd = sum(withOpen, 'first_deaths');
+    const withTr = rows.filter(r => r.traded_deaths != null), trD = sum(withTr, 'deaths');
+    const grades = rows.map(perfScore).filter(x => x != null);
+    return { name: p.name, maps: rows.length, rounds: R, kd: d ? k / d : (k || null), kpr: R ? k / R : null, dpr: R ? d / R : null, apr: R ? sum(rows, 'assists') / R : null,
+      fk: fk, fd: fd, openMaps: withOpen.length, fkpr: oR ? fk / oR : null, fdpr: oR ? fd / oR : null, open: fk + fd ? fk / (fk + fd) : null,
+      trades: sum(withTr, 'trades'), tradedPct: trD ? sum(withTr, 'traded_deaths') / trD : null, trMaps: withTr.length,
+      hs: avg(rows.filter(r => r.true_hs_pct != null), 'true_hs_pct'), score: grades.length ? grades.reduce((a, b) => a + b, 0) / grades.length : null };
+  }).sort((a, b) => (b.score || 0) - (a.score || 0));
+}
+// Weak spots, most important first. Each one says what to practise.
+function buildInsights(an, players, work) {
+  const out = [];
+  const add = (sev, area, title, detail, focus, drill, extra) => out.push(Object.assign({ sev: sev, area: area, title: title, detail: detail, focus: focus, drill: drill }, extra || {}));
+  const P = v => Math.round(v * 100) + '%';
+  const maps = an.maps.filter(m => m.all.n >= 20);
+  if (maps.length >= 2) {
+    const worst = maps.slice().sort((a, b) => a.all.p - b.all.p)[0];
+    if (worst.all.p < 0.5) add(60 + (0.5 - worst.all.p) * 100, 'Map', 'Weakest map: ' + worst.map, 'Round win ' + P(worst.all.p) + ' over ' + worst.games + ' game(s) (' + worst.all.w + '–' + worst.all.l + ').', worst.map + ' map practice',
+      'Walk the map as a five: defaults, rotations and two executes per site. Review the lost rounds from the last ' + worst.map + ' VOD.', { map: worst.map });
+  }
+  an.maps.forEach(m => {
+    if (m.atk.n >= 10 && m.atk.p < 0.42) add(50 + (0.42 - m.atk.p) * 120, 'Executes', 'Attack on ' + m.map + ': ' + m.atk.w + '–' + m.atk.l, 'Only ' + P(m.atk.p) + ' of attack rounds won.', m.map + ' attack executes',
+      'Rehearse two set plays per site with full util until timings are clean; drill post-plant positions after each one.', { map: m.map });
+    if (m.def.n >= 10 && m.def.p < 0.42) add(50 + (0.42 - m.def.p) * 120, 'Defense setups', 'Defense on ' + m.map + ': ' + m.def.w + '–' + m.def.l, 'Only ' + P(m.def.p) + ' of defense rounds won.', m.map + ' defense setups & retakes',
+      'Lock in a default setup per site, then run 3v3 and 4v3 retakes on each site.', { map: m.map });
+  });
+  if (an.pistols.n >= 4 && an.pistols.p < 0.5) add(55 + (0.5 - an.pistols.p) * 80, 'Pistols', 'Pistol rounds: ' + an.pistols.w + '/' + an.pistols.n + ' won', 'Pistols swing the next two rounds too.', 'Pistol rounds',
+    'Script one attack and one defense pistol for each map in the pool; run each one five times in a custom.');
+  if (an.conv.n >= 4 && an.conv.p < 0.7) add(50 + (0.7 - an.conv.p) * 100, 'Economy', 'Converting won pistols: ' + P(an.conv.p), 'Rounds 2–3 after a won pistol should be near-automatic (' + an.conv.w + '/' + an.conv.n + ').', 'Bonus rounds after pistol',
+    'Agree the buy after a won pistol (who keeps what), play together off the man advantage and don\'t dry-peek into shotguns.');
+  if (an.antiEco.n >= 3 && an.antiEco.p < 0.8) add(45 + (0.8 - an.antiEco.p) * 100, 'Economy', 'Anti-eco rounds: ' + an.antiEco.w + '/' + an.antiEco.n + ' won', 'Losing rounds when they save gives away the economy.', 'Anti-eco discipline',
+    'Hold long angles at range, never swing alone into close corners, trade in pairs and use util to clear shotgun spots.');
+  if (an.fkRounds >= 15 && an.fkShare < 0.48) add(50 + (0.48 - an.fkShare) * 120, 'Opening duels', 'Opening duels: we get the first kill ' + P(an.fkShare) + ' of the time', 'After the first kill we win ' + P(an.afterFkUs.p || 0) + ' of rounds; after giving it up, ' + P(an.afterFkThem.p || 0) + '.', 'Opening duels with util',
+    'Entry with util first (flash, drone, dart), then the swing. 1v1 entry drills in the range, deathmatch for first-bullet accuracy.');
+  if (an.afterFkUs.n >= 10 && an.afterFkUs.p < 0.7) add(40 + (0.7 - an.afterFkUs.p) * 100, 'Trades', 'Throwing the man advantage: ' + P(an.afterFkUs.p) + ' after first kill', 'A 5v4 should be won most of the time.', 'Playing the man advantage',
+    'Practise slowing down after the first pick: group up, take space together, don\'t give free refrags.');
+  const dl = (an.ends.DL || {}), dlN = Object.values(dl).reduce((a, b) => a + b, 0);
+  if (dlN >= 8 && (dl.det || 0) / dlN > 0.35) add(40 + ((dl.det || 0) / dlN) * 30, 'Retakes', 'Failed retakes: ' + (dl.det || 0) + ' of ' + dlN + ' defense losses end in a detonation', 'The site falls and we can\'t get it back in time.', 'Retakes',
+    '3v2 and 4v3 retake drills on every site; agree the util order for each retake.');
+  const al = (an.ends.AL || {}), alN = Object.values(al).reduce((a, b) => a + b, 0);
+  if (alN >= 8 && (al.defuse || 0) / alN > 0.3) add(40 + ((al.defuse || 0) / alN) * 30, 'Post-plant', 'Post-plant: ' + (al.defuse || 0) + ' of ' + alN + ' attack losses are defuses', 'We plant and still lose the round.', 'Post-plant setups',
+    'Learn two plant spots per site with crossfires; save util (mollies, stuns) to stop the defuse.');
+  if (alN >= 8 && (al.time || 0) / alN > 0.15) add(35 + ((al.time || 0) / alN) * 40, 'Executes', 'Running out of time on attack (' + (al.time || 0) + ' rounds)', 'Calls come too late.', 'Pace & mid-round calls',
+    'Set a hard decision time (about 0:40 left) for the IGL; practise fast fallback executes.');
+  (players || []).forEach(p => {
+    if (p.openMaps >= 3 && p.fdpr != null && p.fdpr > 0.16 && p.fd > p.fk) add(35 + p.fdpr * 100, 'Opening duels', p.name + ': ' + num(p.fdpr, 2) + ' first deaths per round', p.fk + ' first kills vs ' + p.fd + ' first deaths over ' + p.openMaps + ' maps.', 'Opening duels: ' + p.name,
+      'Only take first contact with util or a teammate ready to trade; work on off-angles and jiggle-peeking for info.', { player: p.name, metric: 'fd_round' });
+    if (p.trMaps >= 3 && p.tradedPct != null && p.tradedPct < 0.2) add(30 + (0.2 - p.tradedPct) * 100, 'Trades', p.name + ' dies alone: ' + P(p.tradedPct) + ' of deaths traded', 'Positioning too far from teammates.', 'Trade spacing: ' + p.name,
+      'Play within trade distance of a teammate; call your position before you peek.', { player: p.name, metric: 'traded' });
+  });
+  const hi = (work || []).filter(w => w.approved && w.status !== 'Fixed' && w.priority === 'High');
+  if (hi.length) add(30 + hi.length * 4, 'Work on', hi.length + ' high-priority Work on item' + (hi.length > 1 ? 's' : '') + ' still open', hi.slice(0, 3).map(w => String(w.issue || '').slice(0, 60)).join(' · '), 'Open Work on items', 'Go through the high-priority items from the Work on board as a team.');
+  return out.sort((a, b) => b.sev - a.sev);
+}
+
+function bar2(p) { return '<div class="bar sm"><div style="width:' + Math.round((p || 0) * 100) + '%"></div></div>'; }
+function rateCell(x) { return x && x.n ? '<b>' + pct(x.p) + '</b> <span class="muted small">' + x.w + '–' + x.l + '</span>' : '<span class="muted">–</span>'; }
+PAGES.analytics = async function (el) {
+  const parts = location.hash.split('/'); const typ = parts[2] || 'scrim', per = parts[3] || '90';
+  const [allMatches, ps, work] = await Promise.all([cached('matches'), can('team_stats') ? cached('player_stats') : [], cached('work_on')]);
+  const since = per === 'all' ? null : addDays(todayISO(), -Number(per));
+  const inRange = m => (typ === 'all' || matchType(m).toLowerCase() === typ) && (!since || String(m.date || '') >= since);
+  const matches = allMatches.filter(inRange);
+  const an = teamAnalytics(matches);
+  const keys = new Set(matches.map(m => (m.date || '') + '|' + String(m.map || '').toLowerCase()));
+  const psIn = ps.filter(r => (!since || String(r.date || '') >= since) && (typ === 'all' || keys.has((r.date || '') + '|' + String(r.map || '').toLowerCase())));
+  const players = playerAnalytics(psIn);
+  const insights = buildInsights(an, players, work);
+  S.lastInsights = insights;
+  const tab = (href, label, on) => '<a href="' + href + '" class="' + (on ? 'active' : '') + '">' + label + '</a>';
+  const noRounds = matches.filter(m => !roundsOf(m).length).length;
+  const ends = (k, label) => { const e = an.ends[k] || {}; const n = Object.values(e).reduce((a, b) => a + b, 0); if (!n) return '';
+    return '<div class="endrow"><b>' + label + '</b>' + Object.keys(e).sort((a, b) => e[b] - e[a]).map(x => '<span class="pill">' + esc(END_LABEL[x] || x) + ' ' + Math.round(e[x] / n * 100) + '%</span>').join(' ') + '</div>'; };
+  const econ = an.econRounds ? panel('Economy', '<span class="small muted">' + an.econRounds + ' rounds with buy data</span>',
+      '<div class="tablewrap"><table><thead><tr><th>What we bought</th><th class="num">Rounds</th><th>Win %</th><th></th><th>What they bought</th><th class="num">Rounds</th><th>Our win %</th></tr></thead><tbody>' +
+      BUYS.map((b, i) => { const x = an.byBuy[i], y = an.vsBuy[i]; return '<tr><td>' + BUY_LABEL[b] + '</td><td class="num">' + x.n + '</td><td>' + rateCell(x) + '</td><td style="width:16px"></td><td>' + BUY_LABEL[b] + '</td><td class="num">' + y.n + '</td><td>' + rateCell(y) + '</td></tr>'; }).join('') +
+      '</tbody></table></div><div class="mini-kpis" style="margin-top:12px">' + kpi(an.antiEco.n ? pct(an.antiEco.p) : '–', 'Anti-eco (they save)') + kpi(an.upsets.n ? pct(an.upsets.p) : '–', 'Our eco/force vs full') + kpi(an.fullVsFull.n ? pct(an.fullVsFull.p) : '–', 'Full buy vs full buy') + '</div>')
+    : panel('Economy', '', '<p class="small muted" style="margin:0">Buy data comes from Riot-imported scrims (custom games with linked players). Once a few are in, you\'ll see win % on eco, force and full-buy rounds here.</p>');
+  el.innerHTML = '<div class="page-h"><div><h1>Scrim analytics</h1><p class="muted">Round-by-round patterns from logged games, and the weak spots worth practising.</p></div>' +
+    (isStaff() ? '<a class="btn small" href="#/practice/build">Build practice plan</a>' : '') + '</div>' +
+    '<div class="row spread" style="margin-bottom:6px"><div class="tabs" style="margin:0">' + tab('#/analytics/scrim/' + per, 'Scrims', typ === 'scrim') + tab('#/analytics/official/' + per, 'Official', typ === 'official') + tab('#/analytics/all/' + per, 'All games', typ === 'all') + '</div>' +
+    '<div class="tabs" style="margin:0">' + tab('#/analytics/' + typ + '/30', '30 days', per === '30') + tab('#/analytics/' + typ + '/90', '90 days', per === '90') + tab('#/analytics/' + typ + '/all', 'All time', per === 'all') + '</div></div>' +
+    (!an.games ? empty(matches.length ? 'These games don\'t have round-by-round results yet. Riot-imported scrims fill them in automatically.' : 'No games in this period yet.') :
+    '<div class="kpis">' + kpi(pct(an.all.p), 'Round win %') + kpi(pct(an.atk.p), 'Attack rounds') + kpi(pct(an.def.p), 'Defense rounds') + kpi(an.pistols.n ? an.pistols.w + '/' + an.pistols.n : '–', 'Pistols won') +
+      kpi(an.conv.n ? pct(an.conv.p) : '–', 'After a won pistol') + kpi(an.fkShare == null ? '–' : pct(an.fkShare), 'First kill is ours') + '</div>' +
+    (noRounds ? '<p class="small muted" style="margin-top:-6px">' + an.games + ' game(s) with round data; ' + noRounds + ' more without (hand-logged scores only).</p>' : '') +
+    panel('Weak spots to practise', isStaff() ? '<a class="small" href="#/practice/build">Turn into a practice plan →</a>' : '',
+      insights.length ? '<div class="insights">' + insights.slice(0, 8).map((x, i) => '<div class="insight"><div class="row spread"><div><span class="pill ' + (x.sev >= 60 ? 'red' : x.sev >= 45 ? 'yellow' : '') + '">' + esc(x.area) + '</span> <b>' + esc(x.title) + '</b></div>' +
+        (isStaff() ? '<button class="btn small ghost" data-ins="' + i + '">→ Work on</button>' : '') + '</div><div class="small muted" style="margin-top:4px">' + esc(x.detail) + '</div><div class="small" style="margin-top:4px"><span class="muted">Practise:</span> ' + esc(x.drill) + '</div></div>').join('') + '</div>'
+        : '<p class="small muted" style="margin:0">Nothing stands out yet. More games with round data make this sharper.</p>') +
+    '<div class="an-grid">' +
+    panel('Pistols & the rounds after', '', '<div class="mini-kpis">' + kpi(an.pistols.n ? pct(an.pistols.p) : '–', 'Pistol win %') + kpi(an.conv.n ? pct(an.conv.p) : '–', 'Rounds 2–3 after a win') + kpi(an.comeback.n ? pct(an.comeback.p) : '–', 'Rounds 2–3 after a loss') + '</div>' +
+      '<p class="small muted" style="margin:10px 0 0">After a won pistol, rounds 2–3 should be close to 100%. After a lost one, every round won is a break of their economy.</p>') +
+    panel('Opening duels', '', an.fkRounds ? '<div class="mini-kpis">' + kpi(pct(an.fkShare), 'First kill is ours') + kpi(pct(an.afterFkUs.p), 'Win % after our first kill') + kpi(pct(an.afterFkThem.p), 'Win % after their first kill') + '</div>' +
+      '<p class="small muted" style="margin:10px 0 0">From ' + an.fkRounds + ' rounds with kill data.</p>' : '<p class="small muted" style="margin:0">First-kill data comes from Riot-imported scrims.</p>') +
+    '</div>' +
+    panel('By map', '', '<div class="tablewrap"><table><thead><tr><th>Map</th><th class="num">Games</th><th>Rounds</th><th>Attack</th><th>Defense</th><th>Pistols</th><th>First kill ours</th></tr></thead><tbody>' +
+      an.maps.map(m => '<tr><td><b>' + esc(m.map) + '</b></td><td class="num">' + m.games + '</td><td>' + rateCell(m.all) + bar2(m.all.p) + '</td><td>' + rateCell(m.atk) + '</td><td>' + rateCell(m.def) + '</td><td>' + rateCell(m.pistols) + '</td><td>' + (m.fk ? pct(m.fk.p) : '<span class="muted">–</span>') + '</td></tr>').join('') + '</tbody></table></div>') +
+    panel('How rounds end', '<span class="small muted">longest losing streak: ' + an.longestLosing + '</span>', ends('AW', 'Attack wins') + ends('AL', 'Attack losses') + ends('DW', 'Defense wins') + ends('DL', 'Defense losses') +
+      (an.sites.length ? '<div class="endrow"><b>Attack by plant site</b>' + an.sites.slice(0, 8).map(s => '<span class="pill">' + esc(s.k) + ' ' + s.w + '–' + s.l + '</span>').join(' ') + '</div>' : '')) +
+    econ + compsPanel(matches, psIn)) +
+    (players.length ? panel('Players', '<span class="small muted">' + psIn.length + ' map stat lines</span>', '<div class="tablewrap"><table><thead><tr><th>Player</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">Kills / rd</th><th class="num">First K / D</th><th class="num">Opening win %</th><th class="num">Deaths traded</th><th class="num">HS %</th><th class="num">Grade</th></tr></thead><tbody>' +
+      players.map(p => '<tr><td><b>' + playerLink(p.name) + '</b></td><td class="num">' + p.maps + '</td><td class="num">' + num(p.kd, 2) + '</td><td class="num">' + num(p.kpr, 2) + '</td><td class="num">' + (p.openMaps ? p.fk + ' / ' + p.fd : '–') + '</td><td class="num">' + pct(p.open) + '</td><td class="num">' + pct(p.tradedPct) + '</td><td class="num">' + pct(p.hs) + '</td><td class="num">' + (p.score != null ? gradePill({}, p.score) : '–') + '</td></tr>').join('') +
+      '</tbody></table></div>') : '');
+  $$('[data-ins]', el).forEach(b => b.onclick = () => { const x = insights[Number(b.dataset.ins)];
+    editRow('work_on', { issue: x.title + ' — ' + x.detail, tip: x.drill, drill: x.focus, area: TABLES.work_on.fields.find(f => f.k === 'area').options.includes(x.area) ? x.area : null, player: x.player || 'Team', priority: x.sev >= 60 ? 'High' : 'Medium', status: 'Open', date: todayISO(), source: 'Scrim analytics', approved: true, metric: x.metric ? METRICS[x.metric].label : null }, () => { S.cache = {}; render(); }); });
+};
+
+// =============================================================== PRACTICE PLAN
+const PDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+function makePracticePlan(insights, opts) {
+  opts = opts || {};
+  const days = (opts.days && opts.days.length ? opts.days : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']).slice();
+  const mins = Number(opts.minutes) || 120;
+  const top = (insights || []).filter(x => !x.player).slice(0, 4), indiv = (insights || []).filter(x => x.player).slice(0, 3);
+  const generic = [{ area: 'Aim', focus: 'Team deathmatch & duels', drill: 'Deathmatch, then 1v1s off common angles on the maps you play next.' }, { area: 'Comms', focus: 'Comms & mid-round calls', drill: 'Review one lost round per map: who called what, and what the call should have been.' }];
+  const focus = top.length ? top : generic;
+  const items = [];
+  days.forEach((d, i) => {
+    const a = focus[i % focus.length], b = focus.length > 1 ? focus[(i + 1) % focus.length] : null;
+    const block1 = Math.round(mins * 0.4), block2 = b ? Math.round(mins * 0.25) : 0, warm = 15, rest = Math.max(0, mins - warm - block1 - block2);
+    items.push({ day: d, minutes: warm, focus: 'Warm-up', detail: 'Aim routine and role drills from the daily check-in.' });
+    items.push({ day: d, minutes: block1, focus: a.focus, detail: a.drill, area: a.area });
+    if (b) items.push({ day: d, minutes: block2, focus: b.focus, detail: b.drill, area: b.area });
+    if (rest >= 20) items.push({ day: d, minutes: rest, focus: i % 2 ? 'Scrim or custom 5v5' : 'VOD review', detail: i % 2 ? 'Play with the focus above in mind; log the result so analytics keep up.' : 'Watch the lost rounds from the last scrim, add what we find to Work on.' });
+  });
+  indiv.forEach((x, i) => items.push({ day: days[i % days.length], minutes: 20, focus: x.focus, detail: x.drill, area: x.area, player: x.player }));
+  return items;
+}
+function weekStartISO(off) { return isoOf(weekMonday(off || 0)); }
+PAGES.practice = async function (el) {
+  const coach = isStaff();
+  const parts = location.hash.split('/');
+  const plans = await db.list('practice_plans', { order: 'week_start', asc: false, limit: 60 });
+  const thisWeek = weekStartISO(0);
+  if (parts[2] === 'build' && coach) return practiceEditor(el, null, plans);
+  const id = Number(parts[2]) || null;
+  if (id && parts[3] === 'edit' && coach) return practiceEditor(el, plans.find(p => p.id === id), plans);
+  const plan = id ? plans.find(p => p.id === id) : (plans.find(p => p.week_start === thisWeek && (p.published || coach)) || plans.find(p => p.week_start > thisWeek && (p.published || coach)) || plans.find(p => p.published || coach));
+  const me = S.me, mine = it => !it.player || (me && [me.ign, me.display_name].filter(Boolean).some(n => normName(n) === normName(it.player)));
+  el.innerHTML = '<div class="page-h"><div><h1>Practice plan</h1><p class="muted">What we practise this week, built from our scrim results and the Work on board.</p></div>' +
+    (coach ? '<div class="row">' + (plan ? '<a class="btn small ghost" href="#/practice/' + plan.id + '/edit">Edit</a>' : '') + '<a class="btn small" href="#/practice/build">Build a new plan</a></div>' : '') + '</div>' +
+    (plan ? '<div class="row" style="gap:8px;margin-bottom:12px"><b>' + esc(plan.title || 'Week of ' + fmtDate(plan.week_start)) + '</b><span class="muted small">week of ' + fmtDate(plan.week_start) + '</span>' + (plan.published ? '<span class="pill green">Players can see it</span>' : '<span class="pill yellow">Draft</span>') + '</div>' +
+      (plan.notes ? '<div class="card quote small" style="margin-bottom:12px">' + inlineMd(plan.notes) + '</div>' : '') +
+      '<div class="pweek">' + PDAYS.map(d => { const list = (plan.items || []).filter(it => it.day === d); if (!list.length) return '';
+        const total = list.filter(it => !it.player).reduce((a, it) => a + (Number(it.minutes) || 0), 0);
+        return '<section class="card pday"><div class="row spread"><h3>' + d + '</h3><span class="muted small">' + (total ? total + ' min' : '') + '</span></div>' +
+          list.map(it => '<div class="pitem' + (it.player ? ' solo' : '') + (it.player && mine(it) ? ' me' : '') + '"><div class="row spread"><b>' + esc(it.focus || '') + '</b><span class="muted small">' + (it.minutes ? esc(it.minutes) + ' min' : '') + '</span></div>' +
+            (it.player ? '<span class="pill">' + esc(it.player) + '</span> ' : '') + (it.area ? '<span class="pill blue">' + esc(it.area) + '</span>' : '') + (it.detail ? '<div class="small muted" style="margin-top:4px">' + inlineMd(it.detail) + '</div>' : '') + '</div>').join('') + '</section>'; }).join('') + '</div>'
+      : empty(coach ? 'No practice plan yet. Build one from your scrim data in one click.' : 'Your coach hasn\'t published a practice plan yet.', coach ? '<a class="btn small" href="#/practice/build">Build practice plan</a>' : '')) +
+    (plans.length > 1 ? '<details class="item" style="margin-top:16px"><summary><span class="t">Other weeks (' + (plans.length - 1) + ')</span></summary><div class="body">' + plans.filter(p => p !== plan && (p.published || coach)).map(p => '<div><a href="#/practice/' + p.id + '">' + esc(p.title || 'Week of ' + fmtDate(p.week_start)) + '</a> <span class="muted small">' + fmtDate(p.week_start) + (p.published ? '' : ' · draft') + '</span></div>').join('') + '</div></details>' : '');
+};
+async function practiceEditor(el, plan, plans) {
+  let insights = S.lastInsights;
+  if (!plan && !insights) {
+    const [matches, ps, work] = await Promise.all([cached('matches'), can('team_stats') ? cached('player_stats') : [], cached('work_on')]);
+    const since = addDays(todayISO(), -90);
+    const m2 = matches.filter(m => String(m.date || '') >= since);
+    insights = buildInsights(teamAnalytics(m2), playerAnalytics(ps.filter(r => String(r.date || '') >= since)), work);
+  }
+  const used = new Set((plans || []).map(p => p.week_start));
+  const ws = plan ? plan.week_start : (used.has(weekStartISO(0)) ? weekStartISO(1) : weekStartISO(0));
+  let items = plan ? JSON.parse(JSON.stringify(plan.items || [])) : makePracticePlan(insights, {});
+  el.innerHTML = '<div class="page-h"><div><a href="#/practice" class="small">← Practice plan</a><h1 style="margin-top:6px">' + (plan ? 'Edit practice plan' : 'Build a practice plan') + '</h1>' +
+    '<p class="muted">' + (plan ? 'Change anything, then save.' : 'Built from ' + (insights && insights.length ? 'your top weak spots: ' + insights.slice(0, 4).map(x => esc(x.focus)).join(', ') : 'general practice (log more games with round data for a sharper plan)') + '. Edit anything before saving.') + '</p></div></div>' +
+    '<section class="card panel"><div class="row" style="gap:12px;align-items:flex-end">' +
+      '<label class="f"><span>Week starting (Monday)</span><input type="date" id="pws" value="' + esc(ws) + '"></label>' +
+      '<label class="f grow"><span>Title</span><input id="ptitle" value="' + esc((plan && plan.title) || '') + '" placeholder="e.g. Fix pistols + Bind attack"></label>' +
+      (!plan ? '<div class="f"><span>Practice days</span><div class="row small" id="pdays">' + PDAYS.map((d, i) => '<label><input type="checkbox" value="' + d + '"' + (i < 5 ? ' checked' : '') + '> ' + d + '</label>').join(' ') + '</div></div>' +
+        '<label class="f"><span>Minutes per day</span><input id="pmin" inputmode="numeric" value="120" style="width:90px"></label><button class="btn small ghost" id="regen" type="button">Rebuild</button>' : '') +
+    '</div><label class="f"><span>Note for players (optional)</span><textarea id="pnotes" rows="2">' + esc((plan && plan.notes) || '') + '</textarea></label></section>' +
+    '<div id="pitems"></div><div class="row" style="margin-top:12px"><button class="btn small ghost" id="padd" type="button">＋ Add a block</button><span class="grow"></span>' +
+    (plan ? '<button class="btn small ghost danger-t" id="pdel" type="button">Delete plan</button>' : '') +
+    '<button class="btn ghost" id="psave" type="button">Save draft</button><button class="btn" id="ppub" type="button">Save &amp; show players</button></div>';
+  const box = $('#pitems', el);
+  const draw = () => {
+    box.innerHTML = '<div class="tablewrap"><table class="pedit"><thead><tr><th>Day</th><th>Min</th><th>Focus</th><th>What to do</th><th>Player</th><th></th></tr></thead><tbody>' +
+      items.map((it, i) => '<tr data-i="' + i + '"><td><select data-k="day">' + PDAYS.map(d => '<option' + (d === it.day ? ' selected' : '') + '>' + d + '</option>').join('') + '</select></td>' +
+        '<td><input data-k="minutes" inputmode="numeric" value="' + esc(it.minutes == null ? '' : it.minutes) + '" style="width:60px"></td><td><input data-k="focus" value="' + esc(it.focus || '') + '"></td>' +
+        '<td><textarea data-k="detail" rows="2">' + esc(it.detail || '') + '</textarea></td><td><input data-k="player" value="' + esc(it.player || '') + '" placeholder="Team" style="width:110px"></td>' +
+        '<td><button class="btn small ghost" data-rm="' + i + '" type="button">×</button></td></tr>').join('') + '</tbody></table></div>';
+    $$('[data-k]', box).forEach(inp => inp.oninput = inp.onchange = () => { const it = items[Number(inp.closest('tr').dataset.i)]; const k = inp.dataset.k; it[k] = k === 'minutes' ? (inp.value === '' ? null : Number(inp.value) || 0) : (inp.value.trim() || null); });
+    $$('[data-rm]', box).forEach(b => b.onclick = () => { items.splice(Number(b.dataset.rm), 1); draw(); });
+  };
+  draw();
+  $('#padd', el).onclick = () => { items.push({ day: 'Mon', minutes: 30, focus: '', detail: '' }); draw(); };
+  if ($('#regen', el)) $('#regen', el).onclick = () => { items = makePracticePlan(insights, { days: $$('#pdays input:checked', el).map(c => c.value), minutes: $('#pmin', el).value }); draw(); };
+  const save = async pub => {
+    const ws2 = $('#pws', el).value; if (!ws2) { toast('Pick the week'); return; }
+    const d0 = new Date(ws2 + 'T12:00:00'); d0.setDate(d0.getDate() - ((d0.getDay() + 6) % 7)); // always the Monday of that week
+    const rec = { week_start: isoOf(d0), title: $('#ptitle', el).value.trim() || null, notes: $('#pnotes', el).value.trim() || null, items: items.filter(it => it.focus || it.detail), published: !!pub };
+    try {
+      if (plan) await db.update('practice_plans', plan.id, rec); else await db.insert('practice_plans', [rec]);
+      S.cache = {}; toast(rec.published ? 'Saved — players can see it' : 'Draft saved'); location.hash = '#/practice';
+    } catch (err) { toast('Couldn\'t save: ' + err.message); }
+  };
+  $('#psave', el).onclick = () => save(false);
+  $('#ppub', el).onclick = () => save(true);
+  if ($('#pdel', el)) $('#pdel', el).onclick = async () => { if (!confirm('Delete this practice plan?')) return; await db.remove('practice_plans', plan.id); S.cache = {}; location.hash = '#/practice'; };
+}
+
+// =============================================================== WORK ON: track a goal with a stat
+const METRICS = {
+  fd_round: { label: 'First deaths per round', lower: true, fmt: v => num(v, 2) },
+  fk_round: { label: 'First kills per round', fmt: v => num(v, 2) },
+  opening: { label: 'Opening duel win %', fmt: pct, isPct: true },
+  kd: { label: 'K/D', fmt: v => num(v, 2) },
+  traded: { label: 'Deaths traded %', fmt: pct, isPct: true },
+  trade_round: { label: 'Trade kills per round', fmt: v => num(v, 2) },
+  hs: { label: 'Headshot %', fmt: pct, isPct: true },
+  grade: { label: 'Performance score', fmt: v => num(v, 0) },
+  team_pistol: { label: 'Team: pistol win %', team: true, fmt: pct, isPct: true },
+  team_atk: { label: 'Team: attack round win %', team: true, fmt: pct, isPct: true },
+  team_def: { label: 'Team: defense round win %', team: true, fmt: pct, isPct: true },
+  team_conv: { label: 'Team: rounds 2–3 after a won pistol', team: true, fmt: pct, isPct: true },
+  team_fk: { label: 'Team: first kill is ours %', team: true, fmt: pct, isPct: true },
+  team_antieco: { label: 'Team: anti-eco win %', team: true, fmt: pct, isPct: true }
+};
+function metricKey(v) { if (!v) return null; if (METRICS[v]) return v; const k = Object.keys(METRICS).find(x => METRICS[x].label === v); return k || null; }
+function metricValue(key, rows, matches) {
+  const m = METRICS[key]; if (!m) return null;
+  if (m.team) { const an = teamAnalytics(matches); const x = { team_pistol: an.pistols, team_atk: an.atk, team_def: an.def, team_conv: an.conv, team_antieco: an.antiEco }[key];
+    if (key === 'team_fk') return an.fkRounds ? { v: an.fkShare, n: an.games } : null; return x && x.n ? { v: x.p, n: an.games } : null; }
+  if (!rows.length) return null;
+  const p = playerAnalytics(rows)[0]; if (!p) return null;
+  const v = { fd_round: p.fdpr, fk_round: p.fkpr, opening: p.open, kd: p.kd, traded: p.tradedPct, trade_round: p.rounds ? p.trades / p.rounds : null, hs: p.hs, grade: p.score }[key];
+  return v == null ? null : { v: v, n: rows.length };
+}
+function workMetricHtml(w, ctx) {
+  const key = metricKey(w.metric); if (!key || !ctx) return '';
+  const m = METRICS[key], since = String(w.date || '').slice(0, 10);
+  let before, after;
+  if (m.team) {
+    const ms = ctx.matches.slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+    before = metricValue(key, null, ms.filter(x => since && String(x.date || '') < since).slice(-8));
+    after = metricValue(key, null, ms.filter(x => !since || String(x.date || '') >= since).slice(-8));
+  } else {
+    if (isTeamWide(w)) return '';
+    const rows = ctx.ps.filter(r => normName(r.player) === normName(w.player)).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+    before = metricValue(key, rows.filter(r => since && String(r.date || '') < since).slice(-8), null);
+    after = metricValue(key, rows.filter(r => !since || String(r.date || '') >= since).slice(-8), null);
+  }
+  let target = w.target == null || w.target === '' ? null : Number(w.target); if (target != null && m.isPct && target > 1) target = target / 100;
+  const better = (a, b) => m.lower ? a < b : a > b;
+  const trend = before && after ? (better(after.v, before.v) ? 'up' : after.v === before.v ? 'flat' : 'down') : null;
+  const hit = target != null && after ? (m.lower ? after.v <= target : after.v >= target) : null;
+  return '<div class="wmetric ' + (hit ? 'hit' : trend === 'up' ? 'up' : trend === 'down' ? 'down' : '') + '"><span class="lbl">Tracking</span> <b>' + esc(m.label) + '</b>: ' +
+    (before ? m.fmt(before.v) + ' before' : '<span class="muted">no games before</span>') + ' → ' + (after ? '<b>' + m.fmt(after.v) + '</b> since <span class="muted small">(' + after.n + (m.team ? ' game' : ' map') + (after.n === 1 ? '' : 's') + ')</span>' : '<span class="muted">no games since yet</span>') +
+    (target != null ? ' · target ' + m.fmt(target) + (hit ? ' <span class="pill green">On target</span>' : '') : '') + (trend === 'up' && !hit ? ' <span class="pill green">Improving</span>' : trend === 'down' ? ' <span class="pill red">Getting worse</span>' : '') + '</div>';
+}
+async function loadTrackCtx() {
+  const [ps, matches] = await Promise.all([(can('team_stats') || can('my_stats') || isStaff()) ? cached('player_stats') : [], can('team_stats') || isStaff() ? cached('matches') : []]);
+  S.trackCtx = { ps: ps || [], matches: matches || [] };
+  return S.trackCtx;
+}
+
+// =============================================================== OPPONENT PROFILES
+function oppKey(n) { return normName(n).replace(/[^a-z0-9]+/g, ' ').trim(); }
+function isPlaceholderOpp(n) { return !n || /^scrim \(from riot\)$/i.test(String(n).trim()) || /^(tbd|unknown|-|–)$/i.test(String(n).trim()); }
+async function opponentList() {
+  const [matches, scouting, plans, scrims, reviews] = await Promise.all([can('team_stats') ? cached('matches') : [], cached('opponent_scouting'), db.list('game_plans', { limit: 500 }).catch(() => []), listScrims().catch(() => []), cached('reviews')]);
+  const by = new Map();
+  const touch = (name, f) => { if (isPlaceholderOpp(name)) return; const k = oppKey(name); if (!k) return; let o = Array.from(by.values()).find(x => sameOpp(x.name, name));
+    if (!o) { o = { name: String(name).trim(), games: [], reports: [], plans: [], scrims: [], reviews: [] }; by.set(k, o); } f(o); };
+  matches.forEach(m => touch(m.opponent, o => o.games.push(m)));
+  scouting.forEach(s => touch(s.opponent, o => o.reports.push(s)));
+  plans.forEach(p => touch(p.opponent, o => o.plans.push(p)));
+  scrims.forEach(s => touch(s.opponent, o => o.scrims.push(s)));
+  reviews.filter(isOurs).forEach(r => touch(r.opponent, o => o.reviews.push(r)));
+  return Array.from(by.values()).map(o => { const w = o.games.filter(isWin).length; const dates = o.games.map(g => g.date).filter(Boolean).sort();
+    const next = o.scrims.filter(s => s.status === 'Planned' && new Date(s.starts_at).getTime() > Date.now() - 3 * 3600000).sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)))[0];
+    return Object.assign(o, { w: w, l: o.games.length - w, last: dates[dates.length - 1] || null, next: next || null }); })
+    .sort((a, b) => (b.next ? 1 : 0) - (a.next ? 1 : 0) || String(b.last || '').localeCompare(String(a.last || '')) || b.games.length - a.games.length);
+}
+async function opponentsTab(box) {
+  const list = await opponentList();
+  if (!list.length) { box.innerHTML = empty('No opponents yet. They show up here once you book scrims, log results or add scouting reports.'); return; }
+  box.innerHTML = '<div class="oppgrid">' + list.map(o => '<a class="card oppcard" href="#/scouting/team/' + encodeURIComponent(o.name) + '"><div class="row spread"><b>' + esc(o.name) + '</b>' +
+    (o.games.length ? '<span class="pill ' + (o.w > o.l ? 'green' : o.w < o.l ? 'red' : '') + '">' + o.w + '–' + o.l + '</span>' : '') + '</div>' +
+    '<div class="small muted" style="margin-top:6px">' + [o.games.length ? o.games.length + ' map' + (o.games.length > 1 ? 's' : '') + ' played' : 'Not played yet', o.reports.length ? o.reports.length + ' report' + (o.reports.length > 1 ? 's' : '') : '', o.plans.length ? 'game plan' : ''].filter(Boolean).join(' · ') + '</div>' +
+    (o.next ? '<div class="small" style="margin-top:6px"><span class="pill blue">Next: ' + esc(new Date(o.next.starts_at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })) + '</span></div>' : o.last ? '<div class="small muted" style="margin-top:6px">Last played ' + fmtDate(o.last) + '</div>' : '') + '</a>').join('') + '</div>';
+}
+async function opponentProfile(el, name) {
+  const list = await opponentList();
+  const o = list.find(x => sameOpp(x.name, name)) || { name: name, games: [], reports: [], plans: [], scrims: [], reviews: [], w: 0, l: 0 };
+  const games = o.games.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || b.id - a.id);
+  const an = teamAnalytics(games);
+  const comps = (await cached('comp_notes')).filter(c => sameOpp(c.team, o.name));
+  const byMap = groupBy(games, 'map').map(([m, l]) => ({ m: m, w: l.filter(isWin).length, l: l.length - l.filter(isWin).length, rw: sum(l, 'rounds_won'), rl: sum(l, 'rounds_lost') }));
+  const cfg = TABLES.opponent_scouting;
+  el.innerHTML = '<div class="page-h"><div><a href="#/scouting/teams" class="small">← All opponents</a><h1 style="margin-top:6px">' + esc(o.name) + '</h1>' +
+    (o.next ? '<p class="muted">Next scrim ' + esc(fmtWhen(o.next.starts_at)) + (o.next.maps ? ' · ' + esc(o.next.maps) : '') + '</p>' : '') + '</div>' +
+    (isStaff() ? '<div class="row"><button class="btn small ghost" id="oaddrep">Add scouting report</button><a class="btn small ghost" href="#/plans">Game plans</a></div>' : '') + '</div>' +
+    '<div class="kpis">' + kpi(o.games.length ? o.w + '–' + o.l : '–', 'Maps vs them') + kpi(games.length ? pct((sum(games, 'rounds_won')) / Math.max(1, sum(games, 'rounds_won') + sum(games, 'rounds_lost'))) : '–', 'Round win %') +
+      kpi(an.rounds ? pct(an.atk.p) : '–', 'Attack vs them') + kpi(an.rounds ? pct(an.def.p) : '–', 'Defense vs them') + kpi(an.pistols.n ? an.pistols.w + '/' + an.pistols.n : '–', 'Pistols') + kpi(o.last ? fmtDate(o.last) : '–', 'Last played') + '</div>' +
+    (byMap.length ? panel('Maps vs ' + esc(o.name), '', '<div class="row" style="gap:8px">' + byMap.map(x => '<span class="pill ' + (x.w > x.l ? 'green' : x.w < x.l ? 'red' : '') + '">' + esc(x.m) + ' ' + x.w + '–' + x.l + ' <span class="muted">(' + x.rw + '–' + x.rl + ' rds)</span></span>').join('') + '</div>') : '') +
+    (games.length ? panel('Games', '', '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Map</th><th class="num">Score</th><th>Rounds</th><th>Type</th><th></th></tr></thead><tbody>' +
+      games.map(m => '<tr><td>' + (m.date ? fmtDate(m.date) : '–') + '</td><td><b>' + esc(m.map || '–') + '</b></td><td class="num"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span> ' + (Number(m.rounds_won) || 0) + '–' + (Number(m.rounds_lost) || 0) + '</td><td>' + (roundStrip(m.rounds) || '<span class="muted small">–</span>') + '</td><td>' + esc(matchType(m)) + '</td><td>' + gameVodLink(m) + '</td></tr>').join('') +
+      '</tbody></table></div>') : '') +
+    panel('Scouting reports', '', o.reports.length ? o.reports.map(r => '<details class="item" open><summary><div class="t">' + esc([r.map, r.date ? fmtDate(r.date) : ''].filter(Boolean).join(' · ') || 'Report') + '</div></summary><div class="body">' + detailFields(cfg, r, ['opponent']) +
+      (isStaff() ? '<button class="btn small ghost" data-repedit="' + r.id + '">Edit</button>' : '') + '</div></details>').join('') : '<p class="small muted" style="margin:0">No scouting report yet.' + (isStaff() ? ' Add one with what you learn about how they play.' : '') + '</p>') +
+    (comps.length ? panel('Comps they ran', '', comps.map(c => '<div class="small"><b>' + esc([c.a1, c.a2, c.a3, c.a4, c.a5].filter(Boolean).join(', ')) + '</b>' + (c.map ? ' <span class="pill">' + esc(c.map) + '</span>' : '') + (c.weaknesses ? '<div class="muted">' + inlineMd(c.weaknesses) + '</div>' : '') + '</div>').join('<hr>')) : '') +
+    (o.plans.length || o.reviews.length ? panel('Plans & VODs', '', o.plans.map(p => '<div><a href="#/plans/' + p.id + '">Game plan' + (p.match_date ? ' · ' + fmtDate(p.match_date) : '') + '</a></div>').join('') + o.reviews.map(r => '<div><a href="#/reviews/' + r.id + '">▶ ' + esc(r.title || 'VOD review') + '</a> <span class="muted small">' + (r.date ? fmtDate(r.date) : '') + '</span></div>').join('')) : '');
+  if ($('#oaddrep', el)) $('#oaddrep', el).onclick = () => editRow('opponent_scouting', { opponent: o.name, date: todayISO() }, () => { S.cache = {}; render(); });
+  $$('[data-repedit]', el).forEach(b => b.onclick = () => editRow('opponent_scouting', o.reports.find(r => r.id === Number(b.dataset.repedit)), () => { S.cache = {}; render(); }));
+}
+function gameVodLink(m) {
+  if (m.review_id) return '<a class="small" href="#/reviews/' + m.review_id + '">▶ VOD</a>';
+  const vi = videoInfo(m.vod_link); return vi ? '<a class="small" href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ VOD</a>' : '';
+}
+
+// =============================================================== VOD REVIEW: jump to any round
+// YouTube players report their current time through postMessage once we say we're listening.
+const YT_TIME = { t: null, at: 0 };
+window.addEventListener('message', e => {
+  if (!/youtube(-nocookie)?\.com$/.test(String(e.origin).replace(/^https?:\/\//, '').replace(/^www\./, ''))) return;
+  let d = e.data; if (typeof d === 'string') { try { d = JSON.parse(d); } catch (er) { return; } }
+  if (d && d.info && typeof d.info.currentTime === 'number') { YT_TIME.t = d.info.currentTime; YT_TIME.at = Date.now(); }
+});
+function ytListen(frame) {
+  if (!frame) return;
+  const hello = () => { try { frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*'); } catch (e) { /* not ready */ } };
+  frame.addEventListener('load', () => { hello(); setTimeout(hello, 800); });
+  hello();
+}
+function ytNow() { return YT_TIME.t != null && Date.now() - YT_TIME.at < 3000 ? YT_TIME.t : null; }
+async function reviewRoundsPanel(el, r, vi, seek) {
+  const matches = can('team_stats') || isStaff() ? await cached('matches') : [];
+  let game = matches.find(m => m.review_id === r.id);
+  const guess = !game && r.date ? matches.filter(m => String(m.date || '').slice(0, 10) === String(r.date).slice(0, 10) && (!r.map || String(m.map || '').toLowerCase() === String(r.map).toLowerCase()) && (!r.opponent || !m.opponent || sameOpp(m.opponent, r.opponent) || isPlaceholderOpp(m.opponent))) : [];
+  if (!game && guess.length === 1) game = guess[0];
+  const box = document.createElement('div'); box.id = 'vrounds';
+  const host = $('.vcol', el); if (!host) return; host.appendChild(box);
+  const canMark = isStaff() && vi && (vi.kind === 'yt' || vi.kind === 'tw');
+  let marking = false, nextIdx = 0;
+  const draw = () => {
+    const rs = game ? roundsOf(game) : [];
+    if (!game) {
+      box.innerHTML = isStaff() ? panel('Rounds', '', '<p class="small muted" style="margin:0 0 8px">Link this VOD to its logged game to jump to any round.</p>' +
+        '<select id="vlink"><option value="">Pick the game…</option>' + matches.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 40).map(m => '<option value="' + m.id + '">' + esc([m.date ? fmtDate(m.date) : '', m.map, m.opponent ? 'vs ' + m.opponent : '', (Number(m.rounds_won) || 0) + '–' + (Number(m.rounds_lost) || 0)].filter(Boolean).join(' · ')) + '</option>').join('') + '</select>') : '';
+      if ($('#vlink', box)) $('#vlink', box).onchange = async e => { const id = Number(e.target.value); if (!id) return; try { await db.update('matches', id, { review_id: r.id }); S.cache = {}; game = (await cached('matches')).find(m => m.id === id); toast('Linked'); draw(); } catch (err) { toast('Error: ' + err.message); } };
+      return;
+    }
+    if (!rs.length) { box.innerHTML = panel('Rounds', '', '<p class="small muted" style="margin:0">This game has a final score but no round-by-round results.</p>'); return; }
+    const marked = rs.filter(x => x.t != null).length;
+    while (nextIdx < rs.length && rs[nextIdx].t != null && marking) nextIdx++;
+    box.innerHTML = panel('Rounds', '<span class="small muted">' + esc([game.map, (Number(game.rounds_won) || 0) + '–' + (Number(game.rounds_lost) || 0)].join(' · ')) + (marked ? ' · ' + marked + '/' + rs.length + ' timed' : '') + '</span>',
+      '<div class="vround-strip">' + rs.map((x, i) => (i === 12 ? '<span class="rgap"></span>' : '') + '<button type="button" class="vr ' + (x.w ? 'w' : 'l') + (x.side === 'A' ? ' atk' : ' def') + (i === 0 || i === 12 ? ' p' : '') + (x.t != null ? ' timed' : '') + (marking && i === nextIdx ? ' next' : '') + '" data-ri="' + i + '" title="' +
+        esc('R' + (i + 1) + ' · ' + (x.side === 'A' ? 'Attack' : 'Defense') + ' · ' + (x.w ? 'Won' : 'Lost') + (x.end ? ' · ' + (END_LABEL[x.end] || x.end) : '') + (x.fkp ? ' · first kill ' + x.fkp : '') + (x.buy ? ' · ' + BUY_LABEL[x.buy] : '') + (x.t != null ? ' · ' + fmtTs(x.t) : '')) + '">' + (i + 1) + '</button>').join('') + '</div>' +
+      '<p class="small muted" style="margin:8px 0 0">' + (marked ? 'Click a round to jump to it.' : (canMark ? 'No round times yet. Press “Mark round times”, play the VOD and press the button as each round starts.' : 'Round times haven\'t been marked yet.')) + '</p>' +
+      (canMark ? '<div class="row" style="margin-top:10px;gap:8px">' + (marking ? '<button class="btn small" id="vmarknow" type="button">Round ' + (nextIdx + 1) + ' starts now</button><button class="btn small ghost" id="vmarkdone" type="button">Done</button>' : '<button class="btn small ghost" id="vmark" type="button">' + (marked ? 'Edit round times' : 'Mark round times') + '</button>') +
+        (marking ? '<span class="small muted">' + (vi.kind === 'yt' ? 'Or click any round to type its time.' : 'Twitch: click a round to type its time (mm:ss).') + '</span>' : '') + '</div>' : ''));
+    $$('[data-ri]', box).forEach(b => b.onclick = async () => {
+      const i = Number(b.dataset.ri), x = rs[i];
+      if (marking) { const v = prompt('Round ' + (i + 1) + ' starts at (e.g. 12:34)', x.t != null ? fmtTs(x.t) : (ytNow() != null ? fmtTs(ytNow()) : '')); if (v === null) return;
+        await setT(i, v.trim() === '' ? null : tsToSec(v)); nextIdx = i + 1; draw(); return; }
+      if (x.t != null) seek(x.t); else if (canMark) toast('This round has no time yet — use “Mark round times”');
+    });
+    if ($('#vmark', box)) $('#vmark', box).onclick = () => { marking = true; nextIdx = rs.findIndex(x => x.t == null); if (nextIdx < 0) nextIdx = 0; draw(); };
+    if ($('#vmarkdone', box)) $('#vmarkdone', box).onclick = () => { marking = false; draw(); };
+    if ($('#vmarknow', box)) $('#vmarknow', box).onclick = async () => {
+      const t = ytNow();
+      if (t == null) { const v = prompt('Couldn\'t read the video time. Type when round ' + (nextIdx + 1) + ' starts (e.g. 12:34):', ''); if (!v) return; await setT(nextIdx, tsToSec(v)); }
+      else await setT(nextIdx, Math.max(0, Math.round(t) - 1));
+      nextIdx++; if (nextIdx >= rs.length) { marking = false; toast('All rounds timed ✓'); } draw();
+    };
+  };
+  async function setT(i, t) {
+    const rs = (Array.isArray(game.rounds) ? game.rounds : []).map(x => Object.assign({}, x));
+    if (!rs[i]) return; if (t == null) delete rs[i].t; else rs[i].t = t;
+    const patch = { rounds: rs }; if (!game.review_id) patch.review_id = r.id;
+    try { await db.update('matches', game.id, patch); game.rounds = rs; game.review_id = r.id; S.cache = {}; } catch (err) { toast('Couldn\'t save: ' + err.message); }
+  }
+  draw();
+}
+
+// Home: today's block from this week's practice plan
+async function homePractice(box) {
+  if (!box) return;
+  const ws = weekStartISO(0);
+  const plans = await db.list('practice_plans', { eq: { week_start: ws }, limit: 3 });
+  const plan = plans.find(p => p.published) || (isStaff() ? plans[0] : null);
+  if (!plan) { if (isStaff()) box.innerHTML = panel('Practice this week', '<a class="small" href="#/practice/build">Build plan →</a>', '<p class="small muted" style="margin:0">No practice plan for this week yet. One click builds it from your scrim data.</p>'); return; }
+  const day = PDAYS[(new Date().getDay() + 6) % 7];
+  const me = S.me, mine = it => !it.player || (me && [me.ign, me.display_name].filter(Boolean).some(n => normName(n) === normName(it.player)));
+  const today = (plan.items || []).filter(it => it.day === day && mine(it));
+  box.innerHTML = panel('Practice today', '<a class="small" href="#/practice">Full week →</a>', today.length ? today.map(it => '<div class="pitem' + (it.player ? ' me' : '') + '"><div class="row spread"><b>' + esc(it.focus || '') + '</b><span class="muted small">' + (it.minutes ? esc(it.minutes) + ' min' : '') + '</span></div>' + (it.detail ? '<div class="small muted">' + inlineMd(it.detail) + '</div>' : '') + '</div>').join('') : '<p class="small muted" style="margin:0">Rest day on the plan. 💤</p>');
+}
+
+// =============================================================== COACH: merge player names in stats
+COACH.names = async function (box) {
+  const [ps, team] = await Promise.all([db.list('player_stats', { limit: 5000 }), teamPlayers()]);
+  const roster = team.players.map(p => p.ign || p.name).filter(Boolean);
+  const known = new Set(roster.map(normName));
+  const counts = new Map(); ps.forEach(r => { const n = String(r.player || '').trim(); if (!n) return; counts.set(n, (counts.get(n) || 0) + 1); });
+  const names = Array.from(counts.entries()).sort((a, b) => (known.has(normName(a[0])) ? 1 : 0) - (known.has(normName(b[0])) ? 1 : 0) || b[1] - a[1]);
+  box.innerHTML = '<p class="muted small" style="max-width:760px">Every name that appears in the player stats. If someone shows up under two names (an alt account, a typo, a sub with their Riot name), pick who they really are and their stats are merged into one player everywhere.</p>' +
+    '<div class="tablewrap"><table><thead><tr><th>Name in stats</th><th class="num">Map lines</th><th>Status</th><th>Merge into</th></tr></thead><tbody>' +
+    names.map(([n, c]) => { const ok = known.has(normName(n)); return '<tr><td><b>' + esc(n) + '</b></td><td class="num">' + c + '</td><td>' + (ok ? '<span class="pill green">On roster</span>' : '<span class="pill yellow">Not on roster</span>') + '</td>' +
+      '<td><div class="row" style="gap:6px"><select data-from="' + esc(n) + '"><option value="">—</option>' + roster.filter(x => normName(x) !== normName(n)).map(x => '<option>' + esc(x) + '</option>').join('') + '</select><button class="btn small ghost" data-merge="' + esc(n) + '">Merge</button></div></td></tr>'; }).join('') +
+    '</tbody></table></div>';
+  $$('[data-merge]', box).forEach(b => b.onclick = async () => {
+    const from = b.dataset.merge, sel = $$('select[data-from]', box).find(s => s.dataset.from === from), to = sel && sel.value;
+    if (!to) { toast('Pick who ' + from + ' really is'); return; }
+    if (!confirm('Merge all ' + counts.get(from) + ' stat line(s) for "' + from + '" into ' + to + '?')) return;
+    b.disabled = true;
+    try {
+      for (const t of ['player_stats', 'utility_usage']) { const { error } = await sb.from(t).update({ player: to }).eq('team_id', S.me.team_id).eq('player', from); if (error && t === 'player_stats') throw error; }
+      S.cache = {}; toast('Merged ' + from + ' into ' + to); COACH.names(box);
+    } catch (err) { toast('Error: ' + err.message); b.disabled = false; }
+  });
+};
+
+
+// =============================================================== SMALL SVG LINE CHART
+function lineChart(series, opts) {
+  opts = opts || {};
+  const W = opts.w || 640, H = opts.h || 170, P = { l: 34, r: 10, t: 10, b: 22 };
+  const all = series.flatMap(s => s.pts.map(p => p.y)).filter(v => v != null && !isNaN(v));
+  const n = Math.max(1, ...series.map(s => s.pts.length));
+  if (!all.length || n < 2) return '<p class="small muted" style="margin:0">Not enough games yet for a trend.</p>';
+  let lo = opts.min != null ? opts.min : Math.min(...all), hi = opts.max != null ? opts.max : Math.max(...all);
+  if (hi === lo) { hi += 1; lo -= 1; }
+  const X = i => P.l + (W - P.l - P.r) * (n === 1 ? 0.5 : i / (n - 1)), Y = v => P.t + (H - P.t - P.b) * (1 - (v - lo) / (hi - lo));
+  const fmt = opts.fmt || (v => Math.round(v * 100) / 100);
+  const grid = [lo, (lo + hi) / 2, hi].map(v => '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" class="cg"/><text x="' + (P.l - 4) + '" y="' + (Y(v) + 3) + '" class="ct" text-anchor="end">' + esc(fmt(v)) + '</text>').join('');
+  const ref = opts.ref != null && opts.ref >= lo && opts.ref <= hi ? '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + Y(opts.ref) + '" y2="' + Y(opts.ref) + '" class="cref"/>' : '';
+  const lines = series.map((s, si) => { const pts = s.pts.map((p, i) => p.y == null || isNaN(p.y) ? null : [X(i), Y(p.y), p]).filter(Boolean);
+    return '<polyline class="cl c' + si + '" points="' + pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '"/>' +
+      pts.map(p => '<circle class="cd c' + si + '" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3"><title>' + esc((p[2].label ? p[2].label + ' · ' : '') + s.name + ' ' + fmt(p[2].y)) + '</title></circle>').join(''); }).join('');
+  const labels = (series[0].pts || []).map((p, i) => (n <= 12 || i % Math.ceil(n / 10) === 0) && p.short ? '<text x="' + X(i) + '" y="' + (H - 6) + '" class="ct" text-anchor="middle">' + esc(p.short) + '</text>' : '').join('');
+  const legend = series.length > 1 ? '<div class="clegend">' + series.map((s, si) => '<span><i class="c' + si + '"></i>' + esc(s.name) + '</span>').join('') + '</div>' : '';
+  return '<div class="chart"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(opts.label || 'Trend') + '">' + grid + ref + lines + labels + '</svg>' + legend + '</div>';
+}
+
+// =============================================================== PLAYER PROFILE
+function playerLink(name) { const n = String(name || '').replace(/\s*\*\s*trial\s*$/i, ''); return '<a href="#/player/' + encodeURIComponent(n) + '">' + esc(n) + '</a>'; }
+PAGES.player = async function (el) {
+  const name = decodeURIComponent(location.hash.split('/').slice(2).join('/') || '');
+  const me = S.me, mine = me && [me.ign, me.display_name].filter(Boolean).some(n => normName(n) === normName(name));
+  if (!can('team_stats') && !mine && !isStaff()) { el.innerHTML = empty('You can only see your own profile.', '<a class="btn small" href="#/home">Home</a>'); return; }
+  const [team, ps, work, matches] = await Promise.all([teamPlayers(), cached('player_stats'), cached('work_on'), can('team_stats') || isStaff() ? cached('matches') : []]);
+  await loadTrackCtx().catch(() => null);
+  const p = team.players.find(x => [x.name, x.ign].filter(Boolean).some(n => normName(n) === normName(name))) || { name: name };
+  const rows = ps.filter(r => normName(r.player) === normName(name) || (p.ign && normName(r.player) === normName(p.ign))).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || a.id - b.id);
+  const pa = playerAnalytics(rows)[0];
+  const resultOf = r => { const m = matches.find(x => (r.match_id && x.id === r.match_id) || (x.date === r.date && String(x.map || '').toLowerCase() === String(r.map || '').toLowerCase())); return m ? isWin(m) : null; };
+  const pts = rows.map(r => ({ label: fmtDate(r.date) + ' ' + (r.map || ''), short: r.date ? String(r.date).slice(5).replace('-', '/') : '', grade: perfScore(r), kd: Number(r.deaths) ? r.kills / r.deaths : Number(r.kills) || null }));
+  const roll = (arr, k, n) => arr.map((x, i) => { const w = arr.slice(Math.max(0, i - n + 1), i + 1).map(y => y[k]).filter(v => v != null); return w.length ? w.reduce((a, b) => a + b, 0) / w.length : null; });
+  const gR = roll(pts, 'grade', 3);
+  const byKey = (k) => groupBy(rows.filter(r => r[k]), k).map(([v, list]) => { const a = playerAnalytics(list)[0]; const res = list.map(resultOf).filter(x => x != null);
+    return { v: v, maps: list.length, kd: a.kd, score: a.score, open: a.open, w: res.filter(Boolean).length, n: res.length }; }).sort((a, b) => b.maps - a.maps);
+  const agents = byKey('agent'), maps = byKey('map');
+  const items = work.filter(w => w.approved !== false && normName(w.player) === normName(name));
+  const recent = rows.slice(-5), before = rows.slice(-10, -5);
+  const avgG = l => { const g = l.map(perfScore).filter(x => x != null); return g.length ? g.reduce((a, b) => a + b, 0) / g.length : null; };
+  const form = avgG(recent), prevForm = avgG(before);
+  el.innerHTML = '<div class="page-h"><div class="row" style="gap:14px">' + avatar(p, 56) + '<div><h1 style="margin:0">' + esc(p.name || name) + '</h1><div class="row small" style="gap:6px;margin-top:4px">' + rolePill(p.role) +
+      (p.is_igl ? '<span class="pill yellow">IGL</span>' : '') + (p.is_trial ? '<span class="pill yellow">Trial</span>' : '') + (p.rank ? rankPill(p.rank, true) : '') + (p.discord ? '<span class="muted">@' + esc(p.discord) + '</span>' : '') + '</div></div></div>' +
+      '<a class="small" href="#/team">← Team</a></div>' +
+    (p.rs ? panel('Ranked & recent games (Riot)', '', riotLine(p.rs, true)) : '') +
+    (!rows.length ? empty('No scrim stats for ' + esc(name) + ' yet.') :
+    '<div class="kpis">' + kpi(pa.maps, 'Maps') + kpi(num(pa.kd, 2), 'K/D') + kpi(pa.score != null ? gradePill({}, pa.score) : '–', 'Avg grade') + kpi(pct(pa.open), 'Opening duels won') + kpi(pct(pa.tradedPct), 'Deaths traded') + kpi(pct(pa.hs), 'HS %') + '</div>' +
+    (form != null && prevForm != null ? '<p class="small" style="margin-top:-6px">Last 5 maps: <b>' + gradePill({}, form) + '</b> vs ' + gradePill({}, prevForm) + ' the 5 before — ' + (form > prevForm + 2 ? '<span class="pill green">trending up</span>' : form < prevForm - 2 ? '<span class="pill red">trending down</span>' : '<span class="pill">steady</span>') + '</p>' : '') +
+    panel('Performance over time', '<span class="small muted">grade per map (line: 3-map average)</span>', lineChart([{ name: 'Grade', pts: pts.map(x => ({ y: x.grade, label: x.label, short: x.short })) }, { name: '3-map avg', pts: gR.map((y, i) => ({ y: y, label: pts[i].label, short: pts[i].short })) }], { min: 40, max: 100, ref: 72, fmt: v => Math.round(v), label: 'Grade over time' })) +
+    panel('K/D over time', '', lineChart([{ name: 'K/D', pts: pts.map(x => ({ y: x.kd, label: x.label, short: x.short })) }], { min: 0, ref: 1, label: 'K/D over time' })) +
+    '<div class="an-grid">' +
+    panel('Agents', '', '<div class="tablewrap"><table><thead><tr><th>Agent</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">Grade</th><th class="num">Won</th></tr></thead><tbody>' +
+      agents.map(a => '<tr><td><b>' + esc(a.v) + '</b></td><td class="num">' + a.maps + '</td><td class="num">' + num(a.kd, 2) + '</td><td class="num">' + (a.score != null ? gradePill({}, a.score) : '–') + '</td><td class="num">' + (a.n ? a.w + '/' + a.n : '–') + '</td></tr>').join('') + '</tbody></table></div>') +
+    panel('Maps', '', '<div class="tablewrap"><table><thead><tr><th>Map</th><th class="num">Played</th><th class="num">K/D</th><th class="num">Grade</th><th class="num">Won</th></tr></thead><tbody>' +
+      maps.map(a => '<tr><td><b>' + esc(a.v) + '</b></td><td class="num">' + a.maps + '</td><td class="num">' + num(a.kd, 2) + '</td><td class="num">' + (a.score != null ? gradePill({}, a.score) : '–') + '</td><td class="num">' + (a.n ? a.w + '/' + a.n : '–') + '</td></tr>').join('') + '</tbody></table></div>') +
+    '</div>' +
+    panel('Recent maps', '', '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Map</th><th>Agent</th><th class="num">K / D / A</th><th class="num">First K / D</th><th class="num">Grade</th></tr></thead><tbody>' +
+      rows.slice().reverse().slice(0, 12).map(r => '<tr><td>' + fmtDate(r.date) + '</td><td>' + esc(r.map || '–') + '</td><td>' + esc(r.agent || '–') + '</td><td class="num">' + (r.kills ?? '–') + ' / ' + (r.deaths ?? '–') + ' / ' + (r.assists ?? '–') + '</td><td class="num">' + (r.first_kills ?? '–') + ' / ' + (r.first_deaths ?? '–') + '</td><td class="num">' + gradePill(r) + '</td></tr>').join('') + '</tbody></table></div>')) +
+    (items.length ? panel('Work on', '<a class="small" href="#/workon/' + encodeURIComponent(name) + '">All →</a>', '<div class="wgrid">' + items.filter(w => w.status !== 'Fixed').slice(0, 6).map(w => workCard(w, { coachView: isStaff() })).join('') + '</div>' +
+      (items.filter(w => w.status === 'Fixed').length ? '<p class="small muted">' + items.filter(w => w.status === 'Fixed').length + ' item(s) fixed.</p>' : '')) : '');
+  wireWork(el, items, () => render());
+};
+
+// =============================================================== COMPS THAT WIN (from player stats agents)
+function compStats(matches, ps) {
+  const out = [];
+  matches.forEach(m => {
+    const lines = ps.filter(r => (r.match_id && r.match_id === m.id) || (!r.match_id && r.date === m.date && String(r.map || '').toLowerCase() === String(m.map || '').toLowerCase()));
+    const agents = Array.from(new Set(lines.map(r => r.agent).filter(Boolean))).sort();
+    if (agents.length === 5) out.push({ map: m.map, comp: agents.join(', '), win: isWin(m), rw: Number(m.rounds_won) || 0, rl: Number(m.rounds_lost) || 0 });
+  });
+  return groupBy(out, 'map').map(([map, list]) => ({ map: map, comps: groupBy(list, 'comp').map(([comp, l]) => ({ comp: comp, n: l.length, w: l.filter(x => x.win).length, rw: sum(l, 'rw'), rl: sum(l, 'rl') }))
+    .sort((a, b) => b.n - a.n || b.w - a.w) }));
+}
+function compsPanel(matches, ps) {
+  const cs = compStats(matches, ps);
+  if (!cs.length) return panel('Comps we ran', '', '<p class="small muted" style="margin:0">Shows once games have all five players\' agents logged (Riot imports do this automatically).</p>');
+  return panel('Comps we ran', '<span class="small muted">from games with all five agents logged</span>', cs.map(m => '<div class="comprow"><b>' + esc(m.map) + '</b><div>' +
+    m.comps.map(c => '<div class="small"><span class="pill ' + (c.w / c.n >= 0.5 ? 'green' : 'red') + '">' + c.w + '–' + (c.n - c.w) + '</span> ' + esc(c.comp) + ' <span class="muted">· rounds ' + c.rw + '–' + c.rl + '</span></div>').join('') + '</div></div>').join(''));
+}
+
+// =============================================================== WEEKLY REPORT (staff)
+PAGES.report = async function (el) {
+  if (!isStaff()) { el.innerHTML = '<p>Coaches only.</p>'; return; }
+  const off = Number(location.hash.split('/')[2]) || 0;
+  const mon = weekMonday(off), sun = new Date(mon); sun.setDate(sun.getDate() + 6);
+  const from = isoOf(mon), to = isoOf(sun), pFrom = addDays(from, -7), pTo = addDays(from, -1);
+  const [matches, ps, work, team, checkins, plans] = await Promise.all([cached('matches'), cached('player_stats'), db.list('work_on', { order: 'date', limit: 2000 }), teamPlayers(),
+    db.list('checkins', { gte: { day: pFrom }, order: 'day', limit: 3000 }).catch(() => []), db.list('practice_plans', { eq: { week_start: from }, limit: 3 }).catch(() => [])]);
+  const inW = (d, a, b) => d && String(d).slice(0, 10) >= a && String(d).slice(0, 10) <= b;
+  const wk = matches.filter(m => inW(m.date, from, to)), prev = matches.filter(m => inW(m.date, pFrom, pTo));
+  const anW = teamAnalytics(wk), anP = teamAnalytics(prev);
+  const rec = l => { const w = l.filter(isWin).length; return w + '–' + (l.length - w); };
+  const rp = l => { const a = sum(l, 'rounds_won'), b = sum(l, 'rounds_lost'); return a + b ? a / (a + b) : null; };
+  const delta = (a, b) => a == null || b == null ? '' : ' <span class="' + (a >= b ? 'up' : 'down') + ' small">' + (a >= b ? '▲' : '▼') + ' ' + Math.abs(Math.round((a - b) * 100)) + '</span>';
+  const psW = ps.filter(r => inW(r.date, from, to)), psP = ps.filter(r => inW(r.date, pFrom, pTo));
+  const plW = playerAnalytics(psW).filter(p => p.maps >= 1), plP = new Map(playerAnalytics(psP).map(p => [normName(p.name), p]));
+  const top = plW.filter(p => p.score != null)[0];
+  const improved = plW.map(p => { const b = plP.get(normName(p.name)); return b && b.score != null && p.score != null ? Object.assign({ d: p.score - b.score }, p) : null; }).filter(Boolean).sort((a, b) => b.d - a.d)[0];
+  const active = team.players.filter(p => p.user_id && !p.bench);
+  const ciRows = active.map(p => { const mine = checkins.filter(c => c.user_id === p.user_id && inW(c.day, from, to)); return { p: p, n: mine.length, mins: sum(mine, 'minutes') }; });
+  const daysSoFar = Math.max(1, Math.min(7, Math.floor((Math.min(Date.now(), sun.getTime() + 86400000) - mon.getTime()) / 86400000)));
+  const opened = work.filter(w => inW(w.date, from, to)), fixed = work.filter(w => w.status === 'Fixed' && inW(w.fixed_at, from, to)), back = work.filter(w => w.came_back && (w.seen || []).some(s => inW(s.date, from, to)));
+  const plan = plans.find(x => x.published) || plans[0];
+  const label = 'Week of ' + mon.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const text = [teamName() + ' — ' + label,
+    'Results: ' + (wk.length ? rec(wk) + ' in maps, ' + pct(rp(wk)) + ' of rounds' + (prev.length ? ' (last week ' + rec(prev) + ', ' + pct(rp(prev)) + ')' : '') : 'no games logged'),
+    anW.rounds ? 'Attack ' + pct(anW.atk.p) + ' · Defense ' + pct(anW.def.p) + ' · Pistols ' + anW.pistols.w + '/' + anW.pistols.n : '',
+    top ? 'Top performer: ' + top.name + ' (' + letterOf(top.score) + ', ' + num(top.kd, 2) + ' K/D)' : '',
+    improved && improved.d > 0 ? 'Most improved: ' + improved.name + ' (+' + Math.round(improved.d) + ' score)' : '',
+    'Check-ins: ' + ciRows.map(x => x.p.name + ' ' + x.n + '/' + daysSoFar).join(', '),
+    'Work on: ' + opened.length + ' new, ' + fixed.length + ' fixed' + (back.length ? ', ' + back.length + ' came back' : ''),
+    plan ? 'Practice plan: ' + (plan.title || 'set') : ''].filter(Boolean).join('\n');
+  el.innerHTML = '<div class="page-h"><div><h1>Weekly report</h1><p class="muted">' + esc(label) + ' — results, form, check-ins and progress in one place.</p></div>' +
+    '<div class="row"><a class="btn small ghost" href="#/report/' + (off - 1) + '">← Previous</a>' + (off < 0 ? '<a class="btn small ghost" href="#/report/' + (off + 1) + '">Next →</a>' : '') + '<button class="btn small" id="rcopy">Copy for Discord</button></div></div>' +
+    '<div class="kpis">' + kpi(wk.length ? rec(wk) : '–', 'Maps this week') + kpi(pct(rp(wk)) + delta(rp(wk), rp(prev)), 'Round win %') + kpi(anW.rounds ? pct(anW.atk.p) + delta(anW.atk.p, anP.atk.p) : '–', 'Attack') +
+      kpi(anW.rounds ? pct(anW.def.p) + delta(anW.def.p, anP.def.p) : '–', 'Defense') + kpi(anW.pistols.n ? anW.pistols.w + '/' + anW.pistols.n : '–', 'Pistols') + kpi(opened.length + ' / ' + fixed.length, 'Work on new / fixed') + '</div>' +
+    '<div class="an-grid">' +
+    panel('Standouts', '', (top ? '<div class="small"><span class="muted">Top performer</span><br><b>' + playerLink(top.name) + '</b> ' + gradePill({}, top.score) + ' · ' + num(top.kd, 2) + ' K/D over ' + top.maps + ' map(s)</div>' : '<p class="small muted">No stat lines this week.</p>') +
+      (improved && improved.d > 0 ? '<div class="small" style="margin-top:10px"><span class="muted">Most improved vs last week</span><br><b>' + playerLink(improved.name) + '</b> +' + Math.round(improved.d) + ' score</div>' : '')) +
+    panel('Check-ins', '<a class="small" href="#/coach/checkins">Details →</a>', ciRows.length ? ciRows.map(x => '<div class="row spread small"><span>' + playerLink(x.p.name) + '</span><span>' + x.n + '/' + daysSoFar + ' days' + (x.mins ? ' · ' + x.mins + ' min' : '') + ' ' + (x.n >= daysSoFar - 1 ? '<span class="pill green">✓</span>' : x.n === 0 ? '<span class="pill red">none</span>' : '') + '</span></div>').join('') : '<p class="small muted">No linked players yet.</p>') +
+    '</div>' +
+    (wk.length ? panel('Games', '', '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Opponent</th><th>Map</th><th class="num">Score</th><th>Rounds</th></tr></thead><tbody>' +
+      wk.slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).map(m => '<tr><td>' + fmtDate(m.date) + '</td><td>' + esc(m.opponent || '–') + '</td><td><b>' + esc(m.map) + '</b></td><td class="num"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span> ' + (Number(m.rounds_won) || 0) + '–' + (Number(m.rounds_lost) || 0) + '</td><td>' + (roundStrip(m.rounds) || '–') + '</td></tr>').join('') + '</tbody></table></div>') : '') +
+    (plW.length ? panel('Players this week', '', '<div class="tablewrap"><table><thead><tr><th>Player</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">Opening win %</th><th class="num">Grade</th><th class="num">vs last week</th></tr></thead><tbody>' +
+      plW.map(p => { const b = plP.get(normName(p.name)); return '<tr><td><b>' + playerLink(p.name) + '</b></td><td class="num">' + p.maps + '</td><td class="num">' + num(p.kd, 2) + '</td><td class="num">' + pct(p.open) + '</td><td class="num">' + (p.score != null ? gradePill({}, p.score) : '–') + '</td><td class="num">' + (b && b.score != null && p.score != null ? (p.score >= b.score ? '<span class="up">▲ ' : '<span class="down">▼ ') + Math.abs(Math.round(p.score - b.score)) + '</span>' : '–') + '</td></tr>'; }).join('') + '</tbody></table></div>') : '') +
+    panel('Work on this week', '<a class="small" href="#/workon">Board →</a>', '<div class="small">' + (opened.length ? '<b>New:</b> ' + opened.slice(0, 8).map(w => esc((isTeamWide(w) ? 'Team' : w.player) + ': ' + String(w.issue || '').slice(0, 60))).join(' · ') : 'Nothing new.') + '</div>' +
+      (fixed.length ? '<div class="small" style="margin-top:6px"><b>Fixed:</b> ' + fixed.map(w => esc((isTeamWide(w) ? 'Team' : w.player) + ': ' + String(w.issue || '').slice(0, 60))).join(' · ') + '</div>' : '') +
+      (back.length ? '<div class="small" style="margin-top:6px"><b>Came back:</b> ' + back.map(w => esc(String(w.issue || '').slice(0, 60))).join(' · ') + '</div>' : '')) +
+    '<details class="item"><summary><span class="t">Text version</span></summary><div class="body"><pre class="rtext">' + esc(text) + '</pre></div></details>';
+  $('#rcopy', el).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('Copied — paste it in Discord'); } catch (e) { toast('Couldn\'t copy — open "Text version" below'); } };
+};
+
 // expose pure helpers for tests
-window.__TEAMHUB__ = { md: md, planImport: planImport, mergeWork: mergeWork, coerce: coerce, compAnalysis: compAnalysis, calcStreak: calcStreak, parseCSV: parseCSV, TABLES: TABLES, normName: normName };
+window.__TEAMHUB__ = { compStats: compStats, lineChart: lineChart, teamAnalytics: teamAnalytics, playerAnalytics: playerAnalytics, buildInsights: buildInsights, makePracticePlan: makePracticePlan, metricValue: metricValue, md: md, planImport: planImport, mergeWork: mergeWork, coerce: coerce, compAnalysis: compAnalysis, calcStreak: calcStreak, parseCSV: parseCSV, TABLES: TABLES, normName: normName };
 
 if (!window.__TEAMHUB_NO_BOOT__) boot();
 })();
