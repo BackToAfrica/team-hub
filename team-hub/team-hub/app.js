@@ -399,15 +399,15 @@ const NAV = [
   { r: 'live', label: 'Live match', sec: 'scouting', i: 'bolt', g: 'Prepare' },
   { r: 'prep', label: 'Match prep center', sec: 'scouting', i: 'target', g: 'Prepare' },
   { r: 'plans', label: 'Game plans', sec: 'scouting', i: 'flag', g: 'Prepare' },
-  { r: 'veto', label: 'Veto simulator', sec: 'team_stats', i: 'swap', g: 'Prepare' },
+  { r: 'veto', label: 'Veto simulator', sec: 'team_stats', i: 'swap', g: 'Prepare', staff: true },
   { r: 'maps', label: 'Map pool', sec: 'team_stats', i: 'map', g: 'Prepare' },
-  { r: 'analytics', label: 'Scrim analytics', sec: 'team_stats', i: 'chart', g: 'Prepare' },
+  { r: 'analytics', label: 'Scrim analytics', sec: 'team_stats', i: 'chart', g: 'Prepare', staff: true },
   { r: 'playbook', label: 'Playbook', sec: ['playbook', 'comms'], i: 'book', g: 'Prepare' },
   { r: 'lineups', label: 'Lineups', sec: 'playbook', i: 'pin', g: 'Prepare' },
   { r: 'comms', label: 'Comms', sec: 'comms', i: 'mic', g: 'Prepare' },
   { r: 'scouting', label: 'Scouting', sec: 'scouting', i: 'eye', g: 'Prepare' },
   { r: 'comps', label: 'Comp Checker', sec: 'comp_checker', i: 'shield', g: 'Prepare' },
-  { r: 'reviews', label: 'VOD reviews', sec: 'reviews', i: 'play', g: 'Prepare' },
+  { r: 'reviews', label: 'VOD reviews', sec: 'reviews', i: 'play', g: 'Prepare', staff: true },
   { r: 'patches', label: 'Patch notes', sec: 'patch_notes', i: 'doc', g: 'Prepare' },
   { r: 'games', label: 'My games', sec: null, i: 'chart', g: 'Improve' },
   { r: 'aim', label: 'Aim tracker', sec: null, i: 'cross', g: 'Improve' },
@@ -415,6 +415,7 @@ const NAV = [
   { r: 'notes', label: '1-on-1', sec: null, i: 'chat', g: 'Improve' }
 ];
 function navAllowed(n) {
+  if (n.staff && !isStaff()) return false; // coach tools: veto, analytics, VOD reviews
   if (!n.sec) return true;
   if (isStaff() && !S.me.ign && (n.r === 'checkin' || n.r === 'stats')) return false; // coach without an IGN doesn't need these
   return Array.isArray(n.sec) ? n.sec.some(can) : can(n.sec);
@@ -696,11 +697,11 @@ function scrimStatsPanel(rows, title) {
   const list = rows.slice().sort((a, b) => (perfScore(b) || 0) - (perfScore(a) || 0));
   const hsOf = r => r.hs_kill_pct != null && r.hs_kill_pct !== '' ? Number(r.hs_kill_pct) : (Number(r.kills) && r.hs_kills != null ? Number(r.hs_kills) / Number(r.kills) : null);
   return panel(title || 'Player stats', '<span class="small muted">' + esc([rows[0].map, rows[0].rounds ? rows[0].rounds + ' rounds' : ''].filter(Boolean).join(' · ')) + '</span>',
-    '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Agent</th><th class="num">K / D / A</th><th class="num">K/D</th><th class="num">HS %</th><th class="num">First K / D</th><th class="num">Trade kills</th><th class="num">Deaths traded</th><th class="num">Grade</th></tr></thead><tbody>' +
+    '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Agent</th><th class="num">K / D / A</th><th class="num">K/D</th><th class="num">HS %</th><th class="num">First K / D</th><th class="num">Trade kills</th><th class="num">Deaths traded</th><th class="num">Grade</th>' + (canEdit('player_stats') ? '<th></th>' : '') + '</tr></thead><tbody>' +
     list.map(r => '<tr><td><b>' + esc(String(r.player).replace(/\s*\*\s*trial\s*$/i, '')) + '</b>' + (isTrialName(r.player) ? ' <span class="pill yellow">Trial</span>' : '') + '</td><td>' + esc(r.agent || '–') + '</td>' +
       '<td class="num">' + (r.kills ?? '–') + ' / ' + (r.deaths ?? '–') + ' / ' + (r.assists ?? '–') + '</td><td class="num"><b>' + num(Number(r.deaths) ? r.kills / r.deaths : r.kills, 2) + '</b></td>' +
       '<td class="num">' + pct(hsOf(r)) + '</td><td class="num">' + (r.first_kills ?? '–') + ' / ' + (r.first_deaths ?? '–') + '</td><td class="num">' + (r.trades ?? '–') + '</td>' +
-      '<td class="num">' + (r.traded_deaths == null ? '–' : r.traded_deaths + (r.deaths ? ' <span class="muted small">of ' + r.deaths + '</span>' : '')) + '</td><td class="num">' + gradePill(r) + '</td></tr>').join('') +
+      '<td class="num">' + (r.traded_deaths == null ? '–' : r.traded_deaths + (r.deaths ? ' <span class="muted small">of ' + r.deaths + '</span>' : '')) + '</td><td class="num">' + gradePill(r) + '</td>' + (canEdit('player_stats') ? '<td class="num" style="white-space:nowrap">' + rowActions('player_stats', r) + '</td>' : '') + '</tr>').join('') +
     '</tbody></table></div>' + (list.some(r => r.notes) ? '<div class="small" style="margin-top:8px">' + list.filter(r => r.notes).map(r => '<div><b>' + esc(String(r.player).replace(/\s*\*\s*trial\s*$/i, '')) + ':</b> ' + esc(r.notes) + '</div>').join('') + '</div>' : '') +
     '<p class="small muted" style="margin:8px 0 0">Grade = performance score out of 100 from kills, deaths, assists, opening duels, trade kills and headshot rate per round (an even game is about a C/C+). Hover a grade for the score.</p>');
 }
@@ -715,7 +716,7 @@ function pcard(p, ps) {
     (ps ? '<div class="pstats">' + (s ? '<div><b>' + num(s.kd, 2) + '</b><span>K/D</span></div><div><b>' + pct(s.hs) + '</b><span>HS%</span></div><div><b>' + s.maps + '</b><span>Maps</span></div>' : '<div class="muted small" style="grid-column:1/-1">No stats yet</div>') + '</div>' : '') +
     (S.me.is_coach ? '<div class="pact">' + (p.coachSlot ? '<button class="btn small ghost" data-slot="' + key + '|Active">Make player</button>'
       : '<button class="btn small ghost" data-bench="' + key + '">' + (p.bench ? 'Make active' : 'Bench') + '</button><button class="btn small ghost" data-slot="' + key + '|Coach">Coach</button>') +
-      '<button class="btn small ghost danger-t" data-kick="' + key + '">Kick</button></div>' : '') + '</div>';
+      (p.rid ? '<button class="btn small ghost" data-redit="roster:' + p.rid + '">Edit</button>' : '') + '<button class="btn small ghost danger-t" data-kick="' + key + '">Kick</button></div>' : '') + '</div>';
 }
 
 // ---- Daily check-in form (used on Home and the Check-ins page)
@@ -854,7 +855,7 @@ PAGES.home = async function (el) {
     (team.coaches.length ? '<div class="small muted" style="margin-bottom:6px">Coaching staff: ' + team.coaches.map(c => esc(nameOf(c)) + ' <span class="muted">(' + esc(staffLabel(c)) + ')</span>').join(', ') + '</div>' : '') +
     (players.length ? '<div class="plist compact">' + players.slice().sort((a, b) => (a.bench ? 1 : 0) - (b.bench ? 1 : 0)).map(p => '<div class="prow' + (p.bench ? ' benched' : '') + '">' + avatar(p, 28) + '<div class="grow t">' + esc(p.name) + (p.is_igl ? ' <span class="pill yellow">IGL</span>' : '') + (p.is_trial ? ' <span class="pill yellow">Trial</span>' : '') + (p.bench ? ' <span class="pill">Bench</span>' : '') + riotLine(p.rs, true).replace('class="rsline"', 'class="rsline" style="margin-top:2px"') + '</div>' + rolePill(p.role) + '</div>').join('') + '</div>' : '<p class="muted small">No players yet.</p>'));
   const annHtml = panel('From the coach', coach ? '<a class="small" href="#/coach/announce">Post →</a>' : '',
-    anns.length ? anns.slice(0, 5).map(a => '<div class="ann">' + (a.pinned ? '<span class="pill red">Pinned</span> ' : '') + '<b>' + esc(a.title) + '</b> <span class="muted small">' + fmtDate(a.created_at) + '</span><div class="md">' + md(a.body) + '</div></div>').join('') : '<p class="muted small">Nothing posted yet.</p>');
+    anns.length ? anns.slice(0, 5).map(a => '<div class="ann">' + (a.pinned ? '<span class="pill red">Pinned</span> ' : '') + '<b>' + esc(a.title) + '</b> <span class="muted small">' + fmtDate(a.created_at) + '</span>' + rowActions('announcements', a, { cls: 'inline' }) + '<div class="md">' + md(a.body) + '</div></div>').join('') : '<p class="muted small">Nothing posted yet.</p>');
 
   const order = { High: 0, Medium: 1, Low: 2 };
   let focusHtml = '';
@@ -1046,13 +1047,15 @@ PAGES.playbook = async function (el) {
   const box = $('#pb');
   if (sub === 'comms') {
     const g = (await cached('guides')).filter(x => (x.section || 'comms') === 'comms');
-    box.innerHTML = g.length ? g.map(x => '<div class="card" style="margin-bottom:12px"><h2>' + esc(x.title) + '</h2>' + md(x.body) + '</div>').join('') : '<p class="muted">No comms guide yet.</p>';
+    box.innerHTML = (canEdit('guides') ? '<div class="row" style="margin-bottom:10px">' + addButton('guides', 'Add a comms guide section', { section: 'comms' }) + '</div>' : '') +
+      (g.length ? g.map(x => '<div class="card" style="margin-bottom:12px"><div class="row spread"><h2>' + esc(x.title) + '</h2>' + rowActions('guides', x) + '</div>' + md(x.body) + '</div>').join('') : '<p class="muted">No comms guide yet.</p>');
     return;
   }
   const table = sub === 'pistols' ? 'pistol_rounds' : 'set_plays';
   const cfg = TABLES[table];
   const rows = await cached(table);
-  if (!rows.length) { box.innerHTML = '<p class="muted">Nothing here yet. The coach adds ' + (sub === 'pistols' ? 'pistol breakdowns' : 'set plays') + ' from VOD reviews.</p>'; return; }
+  if (canEdit(table)) box.insertAdjacentHTML('beforeend', '<div class="row" style="margin-bottom:10px">' + addButton(table, sub === 'pistols' ? 'Add a pistol round' : 'Add a set play') + '</div>');
+  if (!rows.length) { box.insertAdjacentHTML('beforeend', '<p class="muted">Nothing here yet. The coach adds ' + (sub === 'pistols' ? 'pistol breakdowns' : 'set plays') + ' from VOD reviews.</p>'); return; }
   const fb = filterBar(rows, sub === 'pistols' ? ['map', 'side'] : ['map', 'side', 'type'], () => draw());
   box.appendChild(fb.el);
   const list = document.createElement('div'); box.appendChild(list);
@@ -1062,7 +1065,7 @@ PAGES.playbook = async function (el) {
       const meta = [r.map && sub !== 'pistols' ? '<span class="pill">' + esc(r.map) + '</span>' : '', sidePill(r.side), r.type ? '<span class="pill purple">' + esc(r.type) + '</span>' : '',
         r.result ? '<span class="pill ' + (r.result === 'Won' ? 'green' : 'red') + '">' + esc(r.result) + '</span>' : '', r.valoplant ? linkHtml(r.valoplant, 'Open in ValoPlant') : ''].join(' ');
       return '<details class="item"><summary><div class="t">' + title + '</div><div class="row small" style="margin-top:4px">' + meta + '</div></summary><div class="body">' +
-        detailFields(cfg, r, sub === 'pistols' ? ['team', 'map', 'side', 'round', 'result'] : ['play_name', 'map', 'side', 'type']) + '</div></details>';
+        detailFields(cfg, r, sub === 'pistols' ? ['team', 'map', 'side', 'round', 'result'] : ['play_name', 'map', 'side', 'type']) + rowActions(table, r, { cls: 'end' }) + '</div></details>';
     }).join('') || '<p class="muted">No matches for that filter.</p>';
   }
   draw();
@@ -1079,7 +1082,8 @@ PAGES.scouting = async function (el) {
   const table = sub === 'comps' ? 'comp_notes' : 'opponent_scouting';
   const cfg = TABLES[table];
   const rows = await cached(table);
-  if (!rows.length) { box.innerHTML = '<p class="muted">Nothing here yet.</p>'; return; }
+  if (canEdit(table)) box.insertAdjacentHTML('beforeend', '<div class="row" style="margin-bottom:10px">' + addButton(table, sub === 'comps' ? 'Add comp notes' : 'Add a scouting report', { date: todayISO() }) + '</div>');
+  if (!rows.length) { box.insertAdjacentHTML('beforeend', '<p class="muted">Nothing here yet.</p>'); return; }
   const fb = filterBar(rows, sub === 'comps' ? ['map', 'team'] : ['opponent', 'map'], () => draw());
   box.appendChild(fb.el);
   const list = document.createElement('div'); box.appendChild(list);
@@ -1088,7 +1092,7 @@ PAGES.scouting = async function (el) {
       const title = sub === 'comps' ? esc(r.team || '') + ' — ' + [r.a1, r.a2, r.a3, r.a4, r.a5].filter(Boolean).map(esc).join(', ') : esc(r.opponent || '') + (r.opponent ? ' <a class="small" href="#/scouting/team/' + encodeURIComponent(r.opponent) + '">profile →</a>' : '');
       const meta = [r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '', r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '', r.result ? '<span class="pill">' + esc(r.result) + '</span>' : ''].join(' ');
       return '<details class="item"><summary><div class="t">' + title + '</div><div class="row small" style="margin-top:4px">' + meta + '</div></summary><div class="body">' +
-        detailFields(cfg, r, sub === 'comps' ? ['a1', 'a2', 'a3', 'a4', 'a5', 'team', 'map', 'date', 'result'] : ['opponent', 'map', 'date']) + '</div></details>';
+        detailFields(cfg, r, sub === 'comps' ? ['a1', 'a2', 'a3', 'a4', 'a5', 'team', 'map', 'date', 'result'] : ['opponent', 'map', 'date']) + rowActions(table, r, { cls: 'end' }) + '</div></details>';
     }).join('') || '<p class="muted">No matches for that filter.</p>';
   }
   draw();
@@ -1196,7 +1200,7 @@ function workCard(w, opts) {
     '<div class="wi"><span class="lbl">Mistake</span>' + inlineMd(w.issue || '') + '</div>' +
     (w.tip ? '<div class="wt"><span class="lbl">How to avoid it</span>' + inlineMd(w.tip) + '</div>' : '') +
     (w.drill ? '<div class="small muted" style="margin-top:6px">Drill: ' + inlineMd(w.drill) + '</div>' : '') + workProgressHtml(w) + workMetricHtml(w, S.trackCtx) +
-    '<div class="small muted row" style="margin-top:8px;gap:10px">' + (w.date ? '<span>' + fmtDate(w.date) + '</span>' : '') + (w.source ? (w.review_id && !opts.onSeek ? '<a href="#/reviews/' + w.review_id + '">' + esc(w.source) + '</a>' : '<span>' + esc(w.source) + '</span>') : (w.review_id && !opts.onSeek ? '<a href="#/reviews/' + w.review_id + '">From VOD review</a>' : '')) +
+    '<div class="small muted row" style="margin-top:8px;gap:10px">' + (w.date ? '<span>' + fmtDate(w.date) + '</span>' : '') + (w.source ? (w.review_id && !opts.onSeek && isStaff() ? '<a href="#/reviews/' + w.review_id + '">' + esc(w.source) + '</a>' : '<span>' + esc(w.source) + '</span>') : (w.review_id && !opts.onSeek ? '<a href="#/reviews/' + w.review_id + '">From VOD review</a>' : '')) +
       (vi ? (opts.onSeek && vi.id ? '<button type="button" class="linkbtn" data-seek="' + (vi.t || 0) + '">▶ Watch ' + fmtTs(vi.t || 0) + '</button>' : '<a href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch the moment</a>') : '') + '</div>' +
     (opts.coachView ? '<div class="row" style="margin-top:10px;gap:6px">' + (!w.approved ? '<button class="btn small" data-wapprove="' + w.id + '">Approve for ' + esc(isTeamWide(w) ? 'team' : w.player) + '</button>' : '<button class="btn small ghost" data-wunapprove="' + w.id + '">Hide from player</button>') +
       (w.approved ? '<button class="btn small ghost" data-wseen="' + w.id + '" title="This mistake showed up again">Seen again</button>' : '') + '<button class="btn small ghost" data-wedit="' + w.id + '">Edit</button><button class="btn small ghost" data-wdel="' + w.id + '">' + (w.approved ? 'Delete' : 'Dismiss') + '</button></div>' : '') + '</div>';
@@ -1298,7 +1302,7 @@ async function reviewDetail(el, r, work) {
     '<div class="row small" style="gap:6px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.type ? '<span class="pill">' + esc(r.type) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') +
     (r.pov ? '<span class="pill">POV: ' + esc(r.pov) + '</span>' : '') + (r.whose ? '<span class="pill ' + (isOurs(r) ? 'green' : '') + '">' + esc(r.whose) + '</span>' : '') + '</div></div>' +
     '<div class="row">' + (vi ? '<a class="btn small ghost" href="' + esc(vi.url) + '" target="_blank" rel="noopener">Open on ' + (vi.kind === 'tw' ? 'Twitch' : vi.kind === 'yt' ? 'YouTube' : 'site') + '</a>' : '') +
-    (isStaff() && r.link ? linkHtml(r.link, 'Full review (coach)').replace('<a ', '<a class="btn small ghost" ') : '') + (isStaff() ? '<button class="btn small ghost" id="editrev">Edit</button>' : '') + '</div></div>' +
+    (isStaff() && r.link ? linkHtml(r.link, 'Full review (coach)').replace('<a ', '<a class="btn small ghost" ') : '') + (isStaff() ? '<button class="btn small ghost" id="editrev">Edit</button>' : '') + (canEdit('reviews') ? '<button class="btn small ghost danger-t" id="delrev">Delete</button>' : '') + '</div></div>' +
     (vodJob ? panel('Video analysis status', '<span class="pill">' + esc(vodJob.status.replace(/_/g, ' ')) + '</span>', '<div class="vod-job-progress"><div class="vod-job-track"><i style="width:' + Math.max(0, Math.min(100, Number(vodJob.progress) || 0)) + '%"></i></div><div class="row small" style="justify-content:space-between"><span>' + esc(String(vodJob.stage || 'Queued').replace(/_/g, ' ')) + '</span><b>' + Math.max(0, Math.min(100, Number(vodJob.progress) || 0)) + '%</b></div>' + (vodJob.status === 'awaiting_media' ? '<p class="small muted">The YouTube link is registered. Connect an authorized video-analysis asset to begin frame and round analysis.</p>' : '') + (vodJob.error_message ? '<p class="small" style="color:#ff858f">' + esc(vodJob.error_message) + '</p>' : '') + '</div>') : '') +
     '<div class="review-grid"><div class="vcol"><div class="player">' + (canEmbed ? '<iframe id="vplayer" src="' + esc(embedSrc(vi, start)) + '" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>' : '<div class="noembed">' + (vi ? '<a class="btn" href="' + esc(vi.url) + '" target="_blank" rel="noopener">Watch the VOD</a>' : 'No video link on this review.') + '</div>') + '</div>' +
       (start ? '<div class="small muted" style="margin-top:6px">Game starts at <button class="linkbtn" data-seek="' + start + '">' + fmtTs(start) + '</button></div>' : '') + '</div>' +
@@ -1341,6 +1345,8 @@ async function reviewDetail(el, r, work) {
     });
   }
   if ($('#editrev')) $('#editrev').onclick = () => editRow('reviews', r, () => { S.cache = {}; render(); });
+  if ($('#delrev')) $('#delrev').onclick = async () => { if (!confirm('Delete the review "' + (r.title || 'VOD review') + '"? Work on items made from it stay on the board.')) return;
+    try { await db.remove('reviews', r.id); S.cache = {}; toast('Review deleted'); location.hash = '#/reviews'; } catch (err) { toast('Couldn\'t delete: ' + err.message); } };
 }
 
 // ---- Work on: mistakes from VODs and how to avoid them
@@ -1388,11 +1394,11 @@ async function coachWork(box) {
 // ---- Patch notes
 PAGES.patches = async function (el) {
   const rows = await cached('patch_notes');
-  el.innerHTML = '<div class="page-h"><h1>Patch notes</h1></div>' + (rows.length ? '' : '<p class="muted">No patch notes yet.</p>');
+  el.innerHTML = '<div class="page-h"><h1>Patch notes</h1>' + addButton('patch_notes', 'Add a change', { date: todayISO() }) + '</div>' + (rows.length ? '' : '<p class="muted">No patch notes yet.</p>');
   groupBy(rows, 'patch').forEach(([p, list]) => {
     el.insertAdjacentHTML('beforeend', '<div class="card" style="margin-bottom:12px"><h2>Patch ' + esc(p) + ' <span class="muted small">' + fmtDate(list[0].date) + '</span></h2>' +
       list.map(r => '<div style="margin:8px 0"><span class="pill ' + ({ Buff: 'green', Nerf: 'red', New: 'purple', Mixed: 'yellow' }[r.effect] || '') + '">' + esc(r.effect || r.category || '') + '</span> <b>' + esc(r.item || '') + '</b> — ' + esc(r.changed || '') +
-        (r.coach_notes ? '<div class="small muted">Coach: ' + esc(r.coach_notes) + '</div>' : '') + '</div>').join('') + '</div>');
+        (r.coach_notes ? '<div class="small muted">Coach: ' + esc(r.coach_notes) + '</div>' : '') + rowActions('patch_notes', r, { cls: 'inline' }) + '</div>').join('') + '</div>');
   });
 };
 
@@ -1669,7 +1675,7 @@ COACH.announce = async function (box) {
     (S.me.is_admin ? '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="everyone"> Show to every team (owner)</label>' : '') +
     (dOn ? '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="discord" checked> Also post in Discord</label>' : '') + '<button class="btn">Post</button></form></div>' +
     '<h2 style="margin-top:18px">Posted</h2>' + (rows.length ? rows.map(a => '<div class="card row spread" style="margin-bottom:8px"><div><b>' + esc(a.title) + '</b> ' + (a.pinned ? '<span class="pill red">Pinned</span>' : '') + (a.team_id == null ? ' <span class="pill">All teams</span>' : '') + (a.discord_sent_at ? ' <span class="pill blue" title="Posted to Discord ' + esc(new Date(a.discord_sent_at).toLocaleString()) + '">In Discord</span>' : '') + '<div class="small muted">' + fmtDate(a.created_at) + '</div></div>' +
-      '<div class="row" style="gap:6px">' + (dOn ? '<button class="btn small ghost" data-dc="' + a.id + '">' + (a.discord_sent_at ? 'Send again' : 'Send to Discord') + '</button>' : '') + (a.team_id == null && !S.me.is_admin ? '' : '<button class="btn small danger" data-del="' + a.id + '">Delete</button>') + '</div></div>').join('') : '<p class="muted">Nothing yet.</p>');
+      '<div class="row" style="gap:6px">' + (dOn ? '<button class="btn small ghost" data-dc="' + a.id + '">' + (a.discord_sent_at ? 'Send again' : 'Send to Discord') + '</button>' : '') + (a.team_id == null && !S.me.is_admin ? '' : '<button class="btn small danger" data-del="' + a.id + '">Delete</button><button class="btn small ghost" data-redit="announcements:' + a.id + '">Edit</button>') + '</div></div>').join('') : '<p class="muted">Nothing yet.</p>');
   discordPanel($('#dcbox', box), () => COACH.announce(box));
   $$('[data-dc]', box).forEach(b => b.onclick = async () => { b.disabled = true; b.textContent = 'Sending…'; try { await discordPost(Number(b.dataset.dc)); toast('Posted to Discord'); S.cache = {}; COACH.announce(box); } catch (err) { toast(err.message); b.disabled = false; b.textContent = 'Send to Discord'; } });
   $('#an').onsubmit = async e => {
@@ -1723,6 +1729,36 @@ async function tableManager(table, box, refresh) {
   $$('[data-del]', box).forEach(b => b.onclick = async () => { if (!confirm('Delete this row?')) return; await db.remove(table, Number(b.dataset.del)); S.cache = {}; refresh(); });
 }
 
+// Edit / Delete buttons for any row a coach can change. Clicks are handled once, for the whole app (below).
+function canEditRow(table, row) { const cfg = TABLES[table] || {}; return !!(row && row.id && canEdit(table) && !(cfg.builtin && row.team_id == null && !S.me.is_admin)); }
+function rowActions(table, row, opts) {
+  if (!canEditRow(table, row)) return '';
+  S.rowReg = S.rowReg || {}; S.rowReg[table + ':' + row.id] = row;
+  return '<span class="ract' + (opts && opts.cls ? ' ' + opts.cls : '') + '"><button type="button" class="btn small ghost" data-redit="' + table + ':' + row.id + '">Edit</button>' +
+    (opts && opts.noDelete ? '' : '<button type="button" class="btn small ghost danger-t" data-rdel="' + table + ':' + row.id + '">Delete</button>') + '</span>';
+}
+function addButton(table, label, preset) {
+  if (!canEdit(table)) return '';
+  S.rowPreset = S.rowPreset || {}; S.rowPreset[table] = preset || {};
+  return '<button type="button" class="btn small" data-radd="' + table + '">＋ ' + esc(label || 'Add') + '</button>';
+}
+async function rowFor(key) {
+  if (S.rowReg && S.rowReg[key]) return S.rowReg[key];
+  const [t, id] = key.split(':'); const rows = await db.list(t, { eq: { id: id }, limit: 1 }); return rows[0] || null;
+}
+document.addEventListener('click', async e => {
+  const ed = e.target.closest('[data-redit]'), del = e.target.closest('[data-rdel]'), add = e.target.closest('[data-radd]');
+  if (!ed && !del && !add) return;
+  e.preventDefault(); e.stopPropagation();
+  const done = () => { S.cache = {}; render(); };
+  if (add) { const t = add.dataset.radd; editRow(t, Object.assign({}, (S.rowPreset || {})[t] || {}), done); return; }
+  const key = (ed || del).dataset[ed ? 'redit' : 'rdel'], table = key.split(':')[0];
+  const row = await rowFor(key); if (!row) { toast('That item is gone — refreshing'); done(); return; }
+  if (ed) { editRow(table, row, done); return; }
+  const what = row.title || row.play_name || row.opponent || row.player || row.name || row.agent || row.item || (TABLES[table] || {}).label || 'this item';
+  if (!confirm('Delete "' + String(what).slice(0, 60) + '"? This can\'t be undone.')) return;
+  try { await db.remove(table, row.id); toast('Deleted'); done(); } catch (err) { toast('Couldn\'t delete: ' + err.message); }
+}, true);
 function editRow(table, row, refresh) {
   const cfg = TABLES[table];
   row = row || {};
@@ -2370,11 +2406,12 @@ PAGES.prep = async function (el) {
   const ready = [
     { label: 'Opponent scouting', done: scoutRows.length > 0, href: '#/scouting', detail: scoutRows.length ? scoutRows.length + ' report(s) saved' : 'No opponent report linked yet' },
     { label: 'Game plan', done: !!plan, href: '#/plans', detail: plan ? 'Plan ' + (plan.published ? 'published' : 'draft') : 'No plan linked to this match' },
-    { label: 'Map veto', done: vetoMatches && (vetoState.steps || []).length > 0, href: '#/veto', detail: vetoMatches && (vetoState.steps || []).length ? 'Veto progress saved for this opponent on this device' : 'No veto progress for this opponent on this device' },
+    isStaff() && { label: 'Map veto', done: vetoMatches && (vetoState.steps || []).length > 0, href: '#/veto', detail: vetoMatches && (vetoState.steps || []).length ? 'Veto progress saved for this opponent on this device' : 'No veto progress for this opponent on this device' },
     { label: 'Agent compositions', done: maps.length > 0 && !!plan && maps.every(m => ((plan.agent_comps || {})[m] || []).length === 5), href: '#/plans' + (plan ? '/' + plan.id : ''), detail: plan && Object.keys(plan.agent_comps || {}).length ? Object.keys(plan.agent_comps).length + ' map composition(s) saved' : 'No five-agent compositions saved' },
     { label: 'Starting five', done: maps.length > 0 && !!plan && maps.every(m => ((plan.starting_lineup || {})[m] || []).length === 5), href: '#/plans' + (plan ? '/' + plan.id : ''), detail: plan && Object.keys(plan.starting_lineup || {}).length ? Object.keys(plan.starting_lineup).length + ' map lineup(s) saved' : 'No starting five saved' },
     { label: 'Utility lineups', done: maps.length > 0 && maps.every(m => lineupRows.some(x => String(x.map || '').toLowerCase() === m.toLowerCase())), href: '#/lineups', detail: lineupRows.length ? lineupRows.length + ' lineup(s) in library' : 'No lineups saved' }
   ];
+  ready.splice(0, ready.length, ...ready.filter(Boolean));
   const done = ready.filter(x => x.done).length;
   const linkCard = (href, title, desc, action) => '<a class="prep-link" href="' + href + '"><div><b>' + title + '</b><p class="small muted">' + desc + '</p></div><span>' + action + ' →</span></a>';
   const opponentLabel = opponent ? 'vs ' + esc(opponent) : 'No upcoming opponent';
@@ -2393,7 +2430,7 @@ PAGES.prep = async function (el) {
     '<div class="prep-grid"><section class="card panel"><div class="card-h"><h2>Preparation checklist</h2><span class="small muted">' + done + ' of ' + ready.length + ' complete</span></div>' +
       '<div class="prep-checks">' + ready.map(x => '<a class="prep-check" href="' + x.href + '"><span class="prep-check-icon ' + (x.done ? 'done' : '') + '">' + (x.done ? '✓' : '•') + '</span><span class="grow"><b>' + x.label + '</b><small>' + x.detail + '</small></span><span class="muted">→</span></a>').join('') + '</div></section>' +
       '<section class="card panel"><div class="card-h"><h2>Match-day tools</h2></div><div class="prep-tools">' +
-        linkCard('#/veto', 'Map veto simulator', 'Build a BO1 or BO3 veto using map results and opponent intel.', 'Open') +
+        (isStaff() ? linkCard('#/veto', 'Map veto simulator', 'Build a BO1 or BO3 veto using map results and opponent intel.', 'Open') : '') +
         linkCard('#/comps', 'Agent comp checker', 'Review saved compositions and counter notes.', 'Open') +
         linkCard('#/lineups', 'Utility lineup library', 'Find map, agent, side, and site-specific utility.', 'Open') +
         linkCard('#/live', 'Live match mode', 'Round score, timeout cards, and the active game plan.', 'Open') +
@@ -2895,11 +2932,12 @@ PAGES.comms = async function (el) {
   const [rows, guides] = await Promise.all([db.list('comms_recordings', { order: 'date', asc: false, limit: 500 }), cached('guides')]);
   const guide = guides.find(g => /clean comms/i.test(g.title || ''));
   if (id) return commsDetail(el, rows.find(r => r.id === id), guide);
+  if (!isStaff()) return commsPlayer(el, rows, guide);
   const avgR = k => { const v = rows.map(r => Number((r.ratings || {})[k])).filter(x => x > 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
   el.innerHTML = '<div class="page-h"><div><h1>Comms</h1><p class="muted">Recordings of our voice comms with notes on what to clean up, plus how we want our comms to sound.</p></div>' + (isStaff() ? '<button class="btn small" id="addcm">Add a recording</button>' : '') + '</div>' +
     (rows.length ? '<div class="kpis">' + COMMS_RATINGS.map(([k, l]) => kpi(avgR(k) ? num(avgR(k), 1) + '/5' : '–', l)).join('') + '</div>' : '') +
     '<div class="home-grid"><div class="col">' + panel('Recordings', '', rows.length ? '<div class="slist">' + rows.map(r => { const sc = COMMS_RATINGS.map(([k]) => Number((r.ratings || {})[k])).filter(x => x > 0);
-      return '<a class="srow" href="#/comms/' + r.id + '" style="color:inherit;text-decoration:none"><div class="grow"><div class="t">' + esc(r.title) + (!r.published ? ' <span class="pill purple">Draft</span>' : '') + '</div><div class="row small" style="gap:6px;margin-top:4px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + (r.opponent ? '<span class="muted">vs ' + esc(r.opponent) + '</span>' : '') + '</div></div>' +
+      return '<a class="srow" href="#/comms/' + r.id + '" style="color:inherit;text-decoration:none"><div class="grow"><div class="t">' + esc(r.title) + (!r.published ? ' <span class="pill purple">Draft</span>' : '') + (r.for_player ? ' <span class="pill blue">For ' + esc(r.for_player) + '</span>' : '') + '</div><div class="row small" style="gap:6px;margin-top:4px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + (r.opponent ? '<span class="muted">vs ' + esc(r.opponent) + '</span>' : '') + '</div></div>' +
         (sc.length ? '<span class="pill ' + (sc.reduce((a, b) => a + b, 0) / sc.length >= 4 ? 'green' : sc.reduce((a, b) => a + b, 0) / sc.length >= 3 ? 'yellow' : 'red') + '">' + num(sc.reduce((a, b) => a + b, 0) / sc.length, 1) + '/5</span>' : '') + '</a>'; }).join('') + '</div>'
       : empty('No recordings yet. Record comms in Discord (e.g. with Craig bot or OBS), upload to YouTube (unlisted) or Google Drive, and add the link here.')) + '</div>' +
     '<div class="col">' + (guide ? panel('How we want our comms', '', '<div class="md small">' + md(guide.body) + '</div>') : '') + '</div></div>';
@@ -2912,7 +2950,7 @@ async function commsDetail(el, r, guide) {
   el.innerHTML = '<div class="page-h"><div><a href="#/comms" class="small">← Comms</a><h1 style="margin-top:6px">' + esc(r.title) + '</h1><div class="row small" style="gap:6px">' + (r.date ? '<span class="muted">' + fmtDate(r.date) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + (r.opponent ? '<span class="muted">vs ' + esc(r.opponent) + '</span>' : '') + (r.vod ? linkHtml(r.vod, 'Gameplay VOD') : '') + '</div></div>' +
     (isStaff() ? '<button class="btn small ghost" id="edcm">Edit</button>' : '') + '</div>' +
     '<div class="review-grid"><div class="vcol"><div class="player' + (audio ? ' audio' : '') + '">' + (audio ? '<audio id="cplayer" controls src="' + esc(r.link) + '"></audio>' : canEmbed ? '<iframe id="vplayer" src="' + esc(embedSrc(vi, vi.t || 0)) + '" allow="autoplay; fullscreen" allowfullscreen></iframe>' : '<div class="noembed">' + (r.link ? '<a class="btn" href="' + esc(r.link) + '" target="_blank" rel="noopener">Open the recording</a>' : 'No recording link.') + '</div>') + '</div>' +
-      '<div class="ratings">' + COMMS_RATINGS.map(([k, l]) => { const v = Number((r.ratings || {})[k]) || 0; return '<div><span>' + l + '</span><b>' + (v ? '★'.repeat(v) + '<i>' + '★'.repeat(5 - v) + '</i>' : '<i>not rated</i>') + '</b></div>'; }).join('') + '</div></div>' +
+      (!isStaff() ? '' : '<div class="ratings">') + (!isStaff() ? [] : COMMS_RATINGS).map(([k, l]) => { const v = Number((r.ratings || {})[k]) || 0; return '<div><span>' + l + '</span><b>' + (v ? '★'.repeat(v) + '<i>' + '★'.repeat(5 - v) + '</i>' : '<i>not rated</i>') + '</b></div>'; }).join('') + (isStaff() ? '</div>' : '') + '</div>' +
     '<div class="ncol">' + panel('How to clean up our comms', '', r.notes ? '<div class="md notes">' + md(r.notes) + '</div>' : '<p class="muted small">No notes yet.</p>') + '</div></div>';
   // timestamps jump the recording
   $$('.notes', el).forEach(box => { const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT); const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
@@ -2922,17 +2960,30 @@ async function commsDetail(el, r, guide) {
     if ($('#cplayer')) { $('#cplayer').currentTime = sec; $('#cplayer').play(); } else if ($('#vplayer')) $('#vplayer').src = embedSrc(vi, sec); });
   if ($('#edcm')) $('#edcm').onclick = () => commsForm(r);
 }
-function commsForm(r) {
+// Players: only the notes the coach wrote for the team or for them (the database filters the rest)
+function commsPlayer(el, rows, guide) {
+  const me = S.me, mine = n => [me.ign, me.display_name].filter(Boolean).some(x => normName(x) === normName(n));
+  const list = rows.filter(r => r.published !== false && (!r.for_player || mine(r.for_player)));
+  el.innerHTML = '<div class="page-h"><div><h1>Comms</h1><p class="muted">Notes from your coach on our voice comms' + (list.some(r => r.for_player) ? ', including ones just for you' : '') + '.</p></div></div>' +
+    '<div class="home-grid"><div class="col">' + panel('Coach notes', '', list.length ? '<div class="slist">' + list.map(r => '<a class="srow" href="#/comms/' + r.id + '" style="color:inherit;text-decoration:none"><div class="grow"><div class="t">' + esc(r.title) +
+      (r.for_player ? ' <span class="pill blue">For you</span>' : '') + '</div><div class="row small muted" style="gap:6px;margin-top:4px">' + (r.date ? fmtDate(r.date) : '') + (r.map ? ' · ' + esc(r.map) : '') + (r.opponent ? ' · vs ' + esc(r.opponent) : '') + '</div></div></a>').join('') + '</div>'
+      : empty('No comms notes from your coach yet.')) + '</div>' +
+    '<div class="col">' + (guide ? panel('How we want our comms', '', '<div class="md small">' + md(guide.body) + '</div>') : '') + '</div></div>';
+}
+async function commsForm(r) {
+  try { const t = await teamPlayers(); S._commsPeople = t.players.map(p => p.ign || p.name).filter(Boolean); } catch (e) { S._commsPeople = []; }
+  if (r.for_player && !S._commsPeople.includes(r.for_player)) S._commsPeople.push(r.for_player);
   const tpl = '## What went well\n- \n\n## Where comms broke down\n- 0:00 — \n\n## Fix for next time\n- ';
   openModal('<h2>' + (r.id ? 'Edit' : 'Add') + ' comms recording</h2><form id="cmf"><div class="row"><label class="f grow"><span>Title</span><input name="title" required value="' + esc(r.title || '') + '" placeholder="Scrim vs Night Owls — Lotus"></label><label class="f"><span>Date</span><input type="date" name="date" value="' + esc(r.date ? String(r.date).slice(0, 10) : '') + '"></label></div>' +
     '<div class="row"><label class="f grow"><span>Opponent</span><input name="opponent" value="' + esc(r.opponent || '') + '"></label><label class="f grow"><span>Map</span><select name="map"><option value=""></option>' + MAPS.map(m => '<option' + (m === r.map ? ' selected' : '') + '>' + m + '</option>').join('') + '</select></label></div>' +
     '<label class="f"><span>Recording link (YouTube / Twitch / Drive / .mp3)</span><input name="link" value="' + esc(r.link || '') + '"></label><label class="f"><span>Gameplay VOD link (optional)</span><input name="vod" value="' + esc(r.vod || '') + '"></label>' +
     '<div class="f"><span>Ratings (1–5)</span><div class="row">' + COMMS_RATINGS.map(([k, l]) => '<label class="small">' + l + ' <select name="r_' + k + '"><option value=""></option>' + [1, 2, 3, 4, 5].map(n => '<option' + (Number((r.ratings || {})[k]) === n ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></label>').join('') + '</div></div>' +
     '<label class="f"><span>Notes on how to improve (timestamps like 12:34 become buttons)</span><textarea name="notes" rows="10">' + esc(r.notes || tpl) + '</textarea></label>' +
+    '<label class="f"><span>Who sees these notes</span><select name="for_player"><option value="">Whole team</option>' + (S._commsPeople || []).map(n => '<option' + (n === r.for_player ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select></label>' +
     '<label class="row small"><input type="checkbox" name="published"' + (r.published !== false ? ' checked' : '') + '> Players can see it</label>' +
     '<div class="row" style="margin-top:10px"><button class="btn">Save</button><button type="button" class="btn ghost" data-close>Cancel</button>' + (r.id ? '<span class="grow"></span><button type="button" class="btn small danger" id="cmdel">Delete</button>' : '') + '</div></form>', m => {
     $('#cmf', m).onsubmit = async e => { e.preventDefault(); const f = e.target; const ratings = {}; COMMS_RATINGS.forEach(([k]) => { if (f['r_' + k].value) ratings[k] = Number(f['r_' + k].value); });
-      const rec = { title: f.title.value.trim(), date: f.date.value || null, opponent: f.opponent.value.trim() || null, map: f.map.value || null, link: f.link.value.trim() || null, vod: f.vod.value.trim() || null, ratings: ratings, notes: f.notes.value.trim() || null, published: f.published.checked };
+      const rec = { for_player: f.for_player ? (f.for_player.value || null) : r.for_player || null, title: f.title.value.trim(), date: f.date.value || null, opponent: f.opponent.value.trim() || null, map: f.map.value || null, link: f.link.value.trim() || null, vod: f.vod.value.trim() || null, ratings: ratings, notes: f.notes.value.trim() || null, published: f.published.checked };
       try { if (r.id) await db.update('comms_recordings', r.id, rec); else await db.insert('comms_recordings', [rec]); closeModal(); toast('Saved'); render(); } catch (err) { toast('Error: ' + err.message); } };
     if ($('#cmdel', m)) $('#cmdel', m).onclick = async () => { if (!confirm('Delete this recording?')) return; await db.remove('comms_recordings', r.id); closeModal(); location.hash = '#/comms'; };
   });
@@ -3340,7 +3391,7 @@ async function loadTrackCtx() {
 function oppKey(n) { return normName(n).replace(/[^a-z0-9]+/g, ' ').trim(); }
 function isPlaceholderOpp(n) { return !n || /^scrim \(from riot\)$/i.test(String(n).trim()) || /^(tbd|unknown|-|–)$/i.test(String(n).trim()); }
 async function opponentList() {
-  const [matches, scouting, plans, scrims, reviews] = await Promise.all([can('team_stats') ? cached('matches') : [], cached('opponent_scouting'), db.list('game_plans', { limit: 500 }).catch(() => []), listScrims().catch(() => []), cached('reviews')]);
+  const [matches, scouting, plans, scrims, reviews] = await Promise.all([can('team_stats') ? cached('matches') : [], cached('opponent_scouting'), db.list('game_plans', { limit: 500 }).catch(() => []), listScrims().catch(() => []), isStaff() ? cached('reviews') : []]);
   const by = new Map();
   const touch = (name, f) => { if (isPlaceholderOpp(name)) return; const k = oppKey(name); if (!k) return; let o = Array.from(by.values()).find(x => sameOpp(x.name, name));
     if (!o) { o = { name: String(name).trim(), games: [], reports: [], plans: [], scrims: [], reviews: [] }; by.set(k, o); } f(o); };
@@ -3348,7 +3399,7 @@ async function opponentList() {
   scouting.forEach(s => touch(s.opponent, o => o.reports.push(s)));
   plans.forEach(p => touch(p.opponent, o => o.plans.push(p)));
   scrims.forEach(s => touch(s.opponent, o => o.scrims.push(s)));
-  reviews.filter(isOurs).forEach(r => touch(r.opponent, o => o.reviews.push(r)));
+  if (isStaff()) reviews.filter(isOurs).forEach(r => touch(r.opponent, o => o.reviews.push(r)));
   return Array.from(by.values()).map(o => { const w = o.games.filter(isWin).length; const dates = o.games.map(g => g.date).filter(Boolean).sort();
     const next = o.scrims.filter(s => s.status === 'Planned' && new Date(s.starts_at).getTime() > Date.now() - 3 * 3600000).sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)))[0];
     return Object.assign(o, { w: w, l: o.games.length - w, last: dates[dates.length - 1] || null, next: next || null }); })
@@ -3380,14 +3431,14 @@ async function opponentProfile(el, name) {
       games.map(m => '<tr><td>' + (m.date ? fmtDate(m.date) : '–') + '</td><td><b>' + esc(m.map || '–') + '</b></td><td class="num"><span class="fdot ' + (isWin(m) ? 'w' : 'l') + '"></span> ' + (Number(m.rounds_won) || 0) + '–' + (Number(m.rounds_lost) || 0) + '</td><td>' + (roundStrip(m.rounds) || '<span class="muted small">–</span>') + '</td><td>' + esc(matchType(m)) + '</td><td>' + gameVodLink(m) + '</td></tr>').join('') +
       '</tbody></table></div>') : '') +
     panel('Scouting reports', '', o.reports.length ? o.reports.map(r => '<details class="item" open><summary><div class="t">' + esc([r.map, r.date ? fmtDate(r.date) : ''].filter(Boolean).join(' · ') || 'Report') + '</div></summary><div class="body">' + detailFields(cfg, r, ['opponent']) +
-      (isStaff() ? '<button class="btn small ghost" data-repedit="' + r.id + '">Edit</button>' : '') + '</div></details>').join('') : '<p class="small muted" style="margin:0">No scouting report yet.' + (isStaff() ? ' Add one with what you learn about how they play.' : '') + '</p>') +
+      rowActions('opponent_scouting', r, { cls: 'end' }) + '</div></details>').join('') : '<p class="small muted" style="margin:0">No scouting report yet.' + (isStaff() ? ' Add one with what you learn about how they play.' : '') + '</p>') +
     (comps.length ? panel('Comps they ran', '', comps.map(c => '<div class="small"><b>' + esc([c.a1, c.a2, c.a3, c.a4, c.a5].filter(Boolean).join(', ')) + '</b>' + (c.map ? ' <span class="pill">' + esc(c.map) + '</span>' : '') + (c.weaknesses ? '<div class="muted">' + inlineMd(c.weaknesses) + '</div>' : '') + '</div>').join('<hr>')) : '') +
     (o.plans.length || o.reviews.length ? panel('Plans & VODs', '', o.plans.map(p => '<div><a href="#/plans/' + p.id + '">Game plan' + (p.match_date ? ' · ' + fmtDate(p.match_date) : '') + '</a></div>').join('') + o.reviews.map(r => '<div><a href="#/reviews/' + r.id + '">▶ ' + esc(r.title || 'VOD review') + '</a> <span class="muted small">' + (r.date ? fmtDate(r.date) : '') + '</span></div>').join('')) : '');
   if ($('#oaddrep', el)) $('#oaddrep', el).onclick = () => editRow('opponent_scouting', { opponent: o.name, date: todayISO() }, () => { S.cache = {}; render(); });
   $$('[data-repedit]', el).forEach(b => b.onclick = () => editRow('opponent_scouting', o.reports.find(r => r.id === Number(b.dataset.repedit)), () => { S.cache = {}; render(); }));
 }
 function gameVodLink(m) {
-  if (m.review_id) return '<a class="small" href="#/reviews/' + m.review_id + '">▶ VOD</a>';
+  if (m.review_id && isStaff()) return '<a class="small" href="#/reviews/' + m.review_id + '">▶ VOD</a>';
   const vi = videoInfo(m.vod_link); return vi ? '<a class="small" href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ VOD</a>' : '';
 }
 
@@ -3552,8 +3603,8 @@ PAGES.player = async function (el) {
     panel('Maps', '', '<div class="tablewrap"><table><thead><tr><th>Map</th><th class="num">Played</th><th class="num">K/D</th><th class="num">Grade</th><th class="num">Won</th></tr></thead><tbody>' +
       maps.map(a => '<tr><td><b>' + esc(a.v) + '</b></td><td class="num">' + a.maps + '</td><td class="num">' + num(a.kd, 2) + '</td><td class="num">' + (a.score != null ? gradePill({}, a.score) : '–') + '</td><td class="num">' + (a.n ? a.w + '/' + a.n : '–') + '</td></tr>').join('') + '</tbody></table></div>') +
     '</div>' +
-    panel('Recent maps', '', '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Map</th><th>Agent</th><th class="num">K / D / A</th><th class="num">First K / D</th><th class="num">Grade</th></tr></thead><tbody>' +
-      rows.slice().reverse().slice(0, 12).map(r => '<tr><td>' + fmtDate(r.date) + '</td><td>' + esc(r.map || '–') + '</td><td>' + esc(r.agent || '–') + '</td><td class="num">' + (r.kills ?? '–') + ' / ' + (r.deaths ?? '–') + ' / ' + (r.assists ?? '–') + '</td><td class="num">' + (r.first_kills ?? '–') + ' / ' + (r.first_deaths ?? '–') + '</td><td class="num">' + gradePill(r) + '</td></tr>').join('') + '</tbody></table></div>')) +
+    panel('Recent maps', '', '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Map</th><th>Agent</th><th class="num">K / D / A</th><th class="num">First K / D</th><th class="num">Grade</th>' + (canEdit('player_stats') ? '<th></th>' : '') + '</tr></thead><tbody>' +
+      rows.slice().reverse().slice(0, 12).map(r => '<tr><td>' + fmtDate(r.date) + '</td><td>' + esc(r.map || '–') + '</td><td>' + esc(r.agent || '–') + '</td><td class="num">' + (r.kills ?? '–') + ' / ' + (r.deaths ?? '–') + ' / ' + (r.assists ?? '–') + '</td><td class="num">' + (r.first_kills ?? '–') + ' / ' + (r.first_deaths ?? '–') + '</td><td class="num">' + gradePill(r) + '</td>' + (canEdit('player_stats') ? '<td class="num" style="white-space:nowrap">' + rowActions('player_stats', r) + '</td>' : '') + '</tr>').join('') + '</tbody></table></div>')) +
     (items.length ? panel('Work on', '<a class="small" href="#/workon/' + encodeURIComponent(name) + '">All →</a>', '<div class="wgrid">' + items.filter(w => w.status !== 'Fixed').slice(0, 6).map(w => workCard(w, { coachView: isStaff() })).join('') + '</div>' +
       (items.filter(w => w.status === 'Fixed').length ? '<p class="small muted">' + items.filter(w => w.status === 'Fixed').length + ' item(s) fixed.</p>' : '')) : '');
   wireWork(el, items, () => render());
