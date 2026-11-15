@@ -1,0 +1,10 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/home","wait":2500},
+ {"js":"'home practice: '+(document.querySelector('#home-practice')||{}).innerText.replace(/\\s+/g,' ')","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/practice","wait":2000},
+ {"js":"'player practice days:'+document.querySelectorAll('.pday').length+' mine:'+document.querySelectorAll('.pitem.me').length+' edit:'+!!document.querySelector('a[href$=\"/edit\"]')","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-kai#/practice","wait":2000},
+ {"js":"'kairo mine:'+document.querySelectorAll('.pitem.me').length","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/practice/build","wait":2000},
+ {"js":"'week picked: '+document.querySelector('#pws').value","print":true}
+]

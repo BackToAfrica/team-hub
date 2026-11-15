@@ -1,0 +1,6 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/schedule","wait":1800},
+ {"js":"try { document.querySelector('[data-result=\"71\"]').click(); 'modal=' + !!document.querySelector('#rf') } catch(e) { e.stack }","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/workon/all","wait":1500},
+ {"js":"try { const b=document.querySelector('[data-wseen=\"604\"]'); b.click(); 'modal=' + !!document.querySelector('#sa') } catch(e) { e.stack }","print":true}
+]

@@ -1,0 +1,18 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/player/Fear","wait":2500},
+ {"js":"(()=>{ const m=document.querySelector('#main'); return m.querySelector('h1').innerText+' :: '+[...m.querySelectorAll('.kpi')].map(k=>k.innerText.replace(/\\s+/g,' ')).join(' | ')+' :: charts '+m.querySelectorAll('.chart svg').length+' dots '+m.querySelectorAll('.chart circle').length+' :: tables '+m.querySelectorAll('table').length+' wmetric '+m.querySelectorAll('.wmetric').length })()","print":true},
+ {"shot":"i1-player.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/team","wait":2500},
+ {"js":"'team links: '+document.querySelectorAll('.pcard a[href^=\"#/player/\"]').length","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/analytics/scrim/all","wait":2500},
+ {"js":"(()=>{ const c=[...document.querySelectorAll('.comprow')].map(x=>x.innerText.replace(/\\s+/g,' ')); return 'comps: '+c.join(' || ')+' playerlinks:'+document.querySelectorAll('#main a[href^=\"#/player/\"]').length })()","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/report","wait":2500},
+ {"js":"(()=>{ const m=document.querySelector('#main'); return [...m.querySelectorAll('.kpi')].map(k=>k.innerText.replace(/\\s+/g,' ')).join(' | ')+' :: nav:'+!!document.querySelector('a[href=\"#/report\"]')+' :: '+m.querySelector('pre.rtext').textContent.replace(/\\n/g,' / ') })()","print":true},
+ {"shot":"i2-report.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/report/-1","wait":2000},
+ {"js":"document.querySelector('#main .muted').innerText","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/report","wait":2000},
+ {"js":"'player report route -> '+location.hash+' nav:'+!!document.querySelector('a[href=\"#/report\"]')","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/player/Kairo","wait":2500},
+ {"js":"'fear sees kairo: '+(document.querySelector('#main h1')||{}).innerText","print":true}
+]

@@ -1,0 +1,4 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/home","wait":1500},
+ {"js":"(async()=>{ const w601=__MOCKDB__.work_on.find(w=>w.id===601), w604=__MOCKDB__.work_on.find(w=>w.id===604); const n0=__MOCKDB__.work_on.length; const added = await __TEAMHUB__.mergeWork([{date:'2026-11-13', player:'Fear', issue: w601.issue, source:'Scrim vs Z'}, {date:'2026-11-13', player:'fear', issue: w604.issue + ' ', source:'Scrim vs Z'}, {date:'2026-11-13', player:'Kairo', issue:'Brand new mistake', source:'Scrim vs Z'}, {date: w601.date, player:'Fear', issue: w601.issue}]); return 'added='+added+' total '+n0+'->'+__MOCKDB__.work_on.length+' | 601 seen='+w601.seen.length+' | 604 '+w604.status+' came_back='+w604.came_back+' seen='+w604.seen.length; })()","print":true}
+]

@@ -1,0 +1,7 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=none","wait":1000,"shot":"30-login.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-new","wait":1500,"shot":"31-claim.png"},
+ {"js":"window.confirm=()=>true;document.querySelector('[data-claim=\"3\"]').click();1","wait":1200,"shot":"32-claimed-pending.png"},
+ {"js":"JSON.stringify([__MOCKDB__.roster[2],__MOCKDB__.profiles.find(p=>p.id==='u-new')])","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html#/coach/members","wait":1200,"shot":"33-coach-roster.png","full":true}
+]

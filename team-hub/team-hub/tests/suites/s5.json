@@ -1,0 +1,13 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/home","wait":1800,"shot":"50-coach-home.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-kai#/home","wait":1800,"shot":"51-player-home.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-kai#/team","wait":1500,"shot":"52-team-roster.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-kai#/team/leaderboard","wait":1500,"shot":"53-team-lb.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-kai#/team/matches","wait":1500,"shot":"54-team-matches.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-kai#/checkin","wait":1500,"shot":"55-checkins.png","full":true},
+ {"size":[390,844]},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-kai#/home","wait":1800,"shot":"56-mobile-home.png","full":true},
+ {"size":[1280,900]},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-kai#/home","wait":1800},
+ {"js":"document.querySelector('.ciform input[name=d]').click();document.querySelector('.ciform [name=minutes]').value=40;document.querySelector('.ciform .btn').click();1","wait":1500,"shot":"57-after-submit.png"}
+]

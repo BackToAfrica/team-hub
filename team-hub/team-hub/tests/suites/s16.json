@@ -1,0 +1,21 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/maps","wait":2000},
+ {"js":"document.querySelector('#games') ? document.querySelectorAll('#games tbody tr').length + ' rows; first: ' + document.querySelector('#games tbody tr').innerText.replace(/\\s+/g,' ') : 'NO GAMES PANEL'","print":true},
+ {"shot":"c1-maps-games.png","full":true},
+ {"js":"(()=>{ document.querySelector('[data-gedit]').click(); return document.querySelector('.modal h2').innerText })()","print":true,"wait":800},
+ {"js":"(()=>{ const f=document.querySelector('#er'); const i=f.querySelector('[name=rounds_won]'); i.value='13'; const j=f.querySelector('[name=rounds_lost]'); j.value='2'; f.requestSubmit(); return 1 })()","wait":1500},
+ {"js":"document.querySelector('#games tbody tr').innerText.replace(/\\s+/g,' ')","print":true},
+ {"js":"(()=>{ const s=document.querySelector('#gmap'); s.value=s.options[1].value; s.dispatchEvent(new Event('change')); return s.value + ': ' + [...document.querySelectorAll('#games tbody tr')].filter(t=>t.style.display!=='none').length })()","print":true},
+ {"js":"(()=>{ window.confirm=()=>true; const n=document.querySelectorAll('#games tbody tr').length; document.querySelector('[data-gdel]').click(); window.__n=n; return n })()","print":true,"wait":1500},
+ {"js":"document.querySelectorAll('#games tbody tr').length","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/team","wait":2000},
+ {"js":"(()=>{ const b=document.querySelector('[data-slot$=\"|Coach\"]'); window.__nm=b.closest('.pcard').querySelector('.nm').innerText; b.click(); return window.__nm })()","print":true,"wait":1800},
+ {"js":"[...document.querySelectorAll('.sec-h h2')].map(h=>h.innerText.replace(/\\s+/g,' ')).join(' | ') + ' || coaches: ' + [...document.querySelectorAll('.sec-h + .pcards')][0].innerText.replace(/\\s+/g,' ').slice(0,80)","print":true},
+ {"shot":"c2-team-coach.png","full":true},
+ {"js":"(()=>{ document.querySelector('[data-slot$=\"|Active\"]').click(); return 1 })()","wait":1800},
+ {"js":"[...document.querySelectorAll('.sec-h h2')].map(h=>h.innerText.replace(/\\s+/g,' ')).join(' | ')","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/coach/members","wait":2000},
+ {"js":"[...document.querySelector('select[data-f=status]').options].map(o=>o.text).join(',')","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/maps","wait":2000},
+ {"js":"(document.querySelector('#games')?'games visible, edit buttons: '+document.querySelectorAll('[data-gedit]').length:'no panel')","print":true}
+]

@@ -1,0 +1,20 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fresh","wait":1500,"shot":"40-onboard.png","full":true},
+ {"js":"document.querySelector('[data-inv]').click();1","wait":1200,"shot":"41-joined-invite.png"},
+ {"js":"JSON.stringify(__MOCKDB__.profiles.find(p=>p.id==='u-fresh'))","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-new","wait":1500,"shot":"42-u-new-pending.png"},
+ {"js":"window.confirm=()=>true;document.querySelector('#leave').click();1","wait":1200,"shot":"43-after-leave.png"},
+ {"js":"document.querySelector('#joinf [name=code]').value='WRONG1';document.querySelector('#joinf button').click();1","wait":800,"js2":1},
+ {"js":"document.querySelector('#obmsg').textContent","print":true},
+ {"js":"document.querySelector('#createf [name=name]').value='Sunset Five';document.querySelector('#createf [name=tag]').value='ssf';document.querySelector('#createf button').click();1","wait":1500,"shot":"44-created-team-tab.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/owner","wait":1500,"shot":"45-owner.png","full":true},
+ {"js":"document.querySelector('[data-open=\"2\"]').click();1","wait":1500,"shot":"46-owner-view-two.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/coach/data/drills","wait":1500,"shot":"47-data.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach2#/coach/data","wait":1500,"shot":"48-coach2-data.png","full":true},
+ {"js":"[...document.querySelectorAll('#cp .cards a b')].map(b=>b.textContent).join('|')","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach2#/coach/data/drills","wait":1500},
+ {"js":"[document.querySelectorAll('[data-edit]').length, document.body.innerText.includes('Built-in')]","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach2#/coach/announce","wait":1200},
+ {"js":"!!document.querySelector('[name=everyone]')","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/account","wait":1200,"shot":"49-account.png"}
+]

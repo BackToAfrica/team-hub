@@ -1,0 +1,20 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/checkin","wait":1200},
+ {"js":"(()=>{const c=[...document.querySelectorAll('input[name=d]')];c[0].click();c[1].click();c[5].click();const f=document.getElementById('ci');f.minutes.value=50;f.games.value=3;document.querySelector('.rating button[data-r=\"4\"]').click();f.takeaway.value='Trade faster';f.requestSubmit();return c.length})()","print":true,"wait":1000},
+ {"js":"JSON.stringify(__MOCKDB__.checkins.slice(-1))","print":true},
+ {"shot":"20-after-save.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html#/coach/members","wait":1000},
+ {"js":"(()=>{const b=document.querySelector('[data-approve]');b.click();return 1})()","wait":800},
+ {"js":"JSON.stringify(__MOCKDB__.profiles.map(p=>[p.display_name,p.approved]))","print":true},
+ {"js":"(()=>{const f=document.querySelector('form.member[data-id=\"u-fear\"]');f.querySelector('[data-vis=\"scouting\"]').checked=false;f.ign.value='FearX';f.requestSubmit();return 1})()","wait":800},
+ {"js":"JSON.stringify(__MOCKDB__.profiles.find(p=>p.id==='u-fear'))","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html#/coach/announce","wait":900},
+ {"js":"(()=>{const f=document.getElementById('an');f.title.value='Scrim Friday';f.body.value='8pm vs **Night Owls**';f.requestSubmit();return 1})()","wait":800},
+ {"js":"__MOCKDB__.announcements.length","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html#/coach/data/drills","wait":1200},
+ {"js":"(()=>{document.getElementById('add').click();const f=document.getElementById('er');f.role.value='Duelist';f.drill.value='Jiggle drill';f.how.value='Test';f.requestSubmit();return 1})()","wait":800},
+ {"js":"JSON.stringify(__MOCKDB__.drills.slice(-1))","print":true},
+ {"shot":"21-data.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html#/coach/checkins","wait":1000,"shot":"22-coach-checkins.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html#/reviews","wait":900,"js":"document.querySelector('details.item').setAttribute('open','');1","shot":"23-reviews.png"}
+]

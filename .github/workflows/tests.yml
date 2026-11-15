@@ -1,0 +1,29 @@
+name: UI tests
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: team-hub/team-hub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check
+        run: node --check app.js && node --check sw.js
+      - name: Run UI suites (headless Chrome)
+        run: node tests/run.mjs
+        env:
+          CHROME: google-chrome
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: screenshots
+          path: team-hub/team-hub/tests/out/*.png
+          if-no-files-found: ignore

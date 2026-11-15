@@ -1,0 +1,8 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/schedule/1","size":[390,844],"wait":1500},
+ {"js":"(()=>{ window.__b=__MOCKDB__.availability.find(a=>a.user_id==='u-fear').slots.length; const c=[...document.querySelectorAll('td.cell:not(.past):not(.mine)')][0]; c.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'touch'})); c.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'touch'})); c.dispatchEvent(new MouseEvent('click',{bubbles:true})); return c.className })()","print":true,"wait":1500},
+ {"js":"'touch toggle: before '+window.__b+' after '+__MOCKDB__.availability.find(a=>a.user_id==='u-fear').slots.length","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/schedule/1","size":[1280,900],"wait":1000},
+ {"js":"(()=>{ window.__b=__MOCKDB__.availability.find(a=>a.user_id==='u-fear').slots.length; const c=[...document.querySelectorAll('td.cell:not(.past):not(.mine)')]; c[0].dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'mouse'})); c[1].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'})); document.dispatchEvent(new PointerEvent('pointerup',{pointerType:'mouse'})); c[0].dispatchEvent(new MouseEvent('click',{bubbles:true})); return 1 })()","wait":1500},
+ {"js":"'mouse drag: before '+window.__b+' after '+__MOCKDB__.availability.find(a=>a.user_id==='u-fear').slots.length","print":true}
+]
