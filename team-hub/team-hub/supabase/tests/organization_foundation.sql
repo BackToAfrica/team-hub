@@ -34,9 +34,9 @@ begin
 
   select count(*) into bad_owner_roles
   from public.teams t
-  join public.organization_members m
+  left join public.organization_members m
     on m.organization_id = t.organization_id and m.user_id = t.owner_id
-  where t.owner_id is not null and m.role <> 'owner';
+  where t.owner_id is not null and (m.id is null or m.role <> 'owner' or m.status <> 'active');
   if bad_owner_roles > 0 then
     raise exception '% team owners are not organization owners.', bad_owner_roles;
   end if;
