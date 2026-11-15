@@ -785,3 +785,9 @@ table.pedit td:nth-child(4) { min-width: 260px; }
 .comprow:first-child { border-top: 0; }
 .up { color: var(--good); } .down { color: var(--accent-2); }
 pre.rtext { white-space: pre-wrap; font-size: .85rem; background: var(--panel-2); padding: 10px; border-radius: 8px; margin: 0; }
+
+/* ---- inline edit / delete */
+.ract { display: inline-flex; gap: 6px; vertical-align: middle; }
+.ract.end { display: flex; justify-content: flex-end; margin-top: 10px; }
+.ract.inline { margin-left: 8px; }
+.ract .btn.small { padding: 2px 8px; font-size: .72rem; }
