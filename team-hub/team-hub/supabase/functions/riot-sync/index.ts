@@ -111,11 +111,36 @@ function roundEnd(r: any): string | null {
 function etDate(iso: string) {
   try { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date(iso)); } catch { return String(iso || "").slice(0, 10); }
 }
+// eco / semi (force or half buy) / full, from the average loadout value of each side
+export function buyTypes(round: any, i: number, teamById: Map<string, string>): Record<string, string> | null {
+  if (i === 0 || i === 12) return { red: "pistol", blue: "pistol" };
+  const st: any[] = round?.stats || round?.player_stats || [];
+  const tot: Record<string, number[]> = { red: [], blue: [] };
+  for (const s of st) {
+    const id = pidOf(s.player || s);
+    const team = String(s.player?.team || s.team || teamById.get(id) || "").toLowerCase();
+    const v = Number(s.economy?.loadout_value ?? s.economy?.loadoutValue);
+    if ((team === "red" || team === "blue") && !isNaN(v)) tot[team].push(v);
+  }
+  const kind = (vals: number[]) => { if (!vals.length) return null; const a = vals.reduce((x, y) => x + y, 0) / vals.length; return a < 1500 ? "eco" : a < 3300 ? "semi" : "full"; };
+  const red = kind(tot.red), blue = kind(tot.blue);
+  if (!red && !blue) return null;
+  return { red: red || "", blue: blue || "" };
+}
 export function scrimResult(match: any, ourTeam: string) {
   const rounds: any[] = match.rounds || [];
   const startAtk = ourTeam.toLowerCase() === "red"; // Red attacks first
   let a = 0, b = 0, decided = rounds.length;
   const out: any[] = [];
+  const teamById = new Map<string, string>((match.players || []).map((p: any) => [pidOf(p), teamOf(p).toLowerCase()]));
+  // earliest kill in each round (kill rounds can be 0- or 1-based depending on the API version)
+  const kills: any[] = (match.kills || []).filter((k: any) => k?.killer && k?.victim);
+  const base = kills.length && kills.every((k: any) => Number(k.round) >= 1) ? 1 : 0;
+  const firstKills = new Map<number, any>();
+  for (const k of kills) {
+    const ri = Number(k.round) - base; const cur = firstKills.get(ri);
+    if (!cur || (k.time_in_round_in_ms || 0) < (cur.time_in_round_in_ms || 0)) firstKills.set(ri, k);
+  }
   for (let i = 0; i < rounds.length; i++) {
     const r = rounds[i];
     const winner = String(r?.winning_team ?? r?.winningTeam ?? "");
@@ -123,7 +148,16 @@ export function scrimResult(match: any, ourTeam: string) {
     if (w) a++; else b++;
     const firstHalf = i < 12, ot = i >= 24;
     const atk = ot ? ((i - 24) % 2 === 0 ? startAtk : !startAtk) : (firstHalf ? startAtk : !startAtk);
-    out.push({ n: i + 1, w, side: atk ? "A" : "D", end: roundEnd(r) });
+    const row: any = { n: i + 1, w, side: atk ? "A" : "D", end: roundEnd(r) };
+    // first kill of the round (us / them) and who got it
+    const fk = firstKills.get(i);
+    if (fk) { row.fk = teamOf(fk.killer).toLowerCase() === ourTeam.toLowerCase() ? "us" : "them"; row.fkp = fk.killer?.name || null; row.fdp = fk.victim?.name || null; }
+    // what each side bought (average loadout value)
+    const bt = buyTypes(r, i, teamById);
+    if (bt) { row.buy = bt[ourTeam.toLowerCase()] || null; row.obuy = bt[ourTeam.toLowerCase() === "red" ? "blue" : "red"] || null; }
+    const site = r?.plant?.site || r?.plant_events?.plant_site || null;
+    if (site) row.site = String(site).toUpperCase();
+    out.push(row);
     if ((a >= 13 || b >= 13) && Math.abs(a - b) >= 2) { decided = i + 1; break; }
   }
   const R = out.length;
@@ -212,13 +246,16 @@ export async function importScrim(admin: SupabaseClient, teamId: number, match: 
     rounds: res.rounds, riot_match_id: matchId, source: "riot", notes,
   };
   // already imported? update it. A hand-logged game on the same day and map? attach to it. Otherwise insert.
-  let { data: existing } = await admin.from("matches").select("id, opponent, event").eq("riot_match_id", matchId).maybeSingle();
+  let { data: existing } = await admin.from("matches").select("id, opponent, event, rounds").eq("riot_match_id", matchId).maybeSingle();
   if (!existing) {
-    const { data: manual } = await admin.from("matches").select("id, opponent, event").eq("team_id", teamId).eq("date", date).eq("map", map).is("riot_match_id", null).limit(1);
+    const { data: manual } = await admin.from("matches").select("id, opponent, event, rounds").eq("team_id", teamId).eq("date", date).eq("map", map).is("riot_match_id", null).limit(1);
     existing = manual?.[0] || null;
   }
   let id: number;
   if (existing) {
+    // keep VOD timestamps the coach marked on each round
+    const old: any[] = Array.isArray(existing.rounds) ? existing.rounds : [];
+    (fields.rounds as any[]).forEach((r: any, i: number) => { if (old[i] && old[i].t != null) r.t = old[i].t; });
     if (opts.opponent) fields.opponent = opts.opponent;
     const { error } = await admin.from("matches").update(fields).eq("id", existing.id);
     if (error) throw new Error(error.message);
@@ -248,10 +285,15 @@ export async function importScrim(admin: SupabaseClient, teamId: number, match: 
 }
 async function autoImportScrims(admin: SupabaseClient, teamId: number | null, matches: any[]) {
   if (!teamId) return 0;
+  const customs = matches.filter((m) => String(m?.metadata?.queue?.id || m?.metadata?.queue?.name || "").toLowerCase() === "custom" && (m.rounds || []).length);
+  if (!customs.length) return 0;
+  // games already imported with the current round format are left alone (saves work on every sync)
+  const ids = customs.map((m) => m.metadata?.match_id).filter(Boolean);
+  const { data: done } = await admin.from("matches").select("riot_match_id, rounds").in("riot_match_id", ids);
+  const fresh = new Set((done || []).filter((d: any) => Array.isArray(d.rounds) && d.rounds.some((r: any) => "fk" in r || "buy" in r)).map((d: any) => d.riot_match_id));
   let n = 0;
-  for (const m of matches) {
-    if (String(m?.metadata?.queue?.id || m?.metadata?.queue?.name || "").toLowerCase() !== "custom") continue;
-    if (!(m.rounds || []).length) continue;
+  for (const m of customs) {
+    if (fresh.has(m.metadata?.match_id)) continue;
     try { const r = await importScrim(admin, teamId, m); if ((r as any).imported) n++; } catch (_) { /* one bad game shouldn't stop the sync */ }
   }
   return n;
@@ -302,14 +344,35 @@ async function syncUser(admin: SupabaseClient, userId: string, force = false) {
   return { linked: true, new_games: rows.length, scrims, rank: rank?.rank || null };
 }
 
+// Scheduled sync (pg_cron every 20 min): refresh the linked players who haven't synced in the last 50 minutes.
+// A few per run keeps us well inside the HenrikDev rate limit.
+const CRON_BATCH = 6;
+async function cronSync(admin: SupabaseClient) {
+  const { data: links } = await admin.from("riot_links").select("user_id, synced_at").order("synced_at", { ascending: true, nullsFirst: true }).limit(60);
+  const due = (links || []).filter((l: any) => !l.synced_at || Date.now() - new Date(l.synced_at).getTime() > 50 * 60 * 1000).slice(0, CRON_BATCH);
+  let synced = 0, failed = 0, scrims = 0;
+  for (const l of due) {
+    try { const r: any = await syncUser(admin, l.user_id, true); synced++; scrims += r.scrims || 0; }
+    catch (e) { failed++; if (/rate limit/i.test(String((e as Error)?.message))) break; }
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+  return { ok: true, due: due.length, synced, failed, scrims };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const url = Deno.env.get("SUPABASE_URL")!, anon = Deno.env.get("SUPABASE_ANON_KEY")!, service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const admin = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
+  const cronToken = req.headers.get("x-cron-token");
+  if (cronToken) {
+    const { data: ok } = await admin.rpc("cron_token_ok", { t: cronToken });
+    if (ok !== true) return json({ error: "Not allowed." }, 401);
+    try { return json(await cronSync(admin)); } catch (e) { return json({ error: e instanceof Error ? e.message : String(e) }, 500); }
+  }
   const auth = req.headers.get("Authorization");
   if (!auth?.startsWith("Bearer ")) return json({ error: "Sign in first." }, 401);
-  const url = Deno.env.get("SUPABASE_URL")!, anon = Deno.env.get("SUPABASE_ANON_KEY")!, service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const userClient = createClient(url, anon, { global: { headers: { Authorization: auth } }, auth: { persistSession: false, autoRefreshToken: false } });
-  const admin = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
   try {
     const { data: u, error: ue } = await userClient.auth.getUser(auth.slice(7));
     if (ue || !u.user) return json({ error: "Your session expired. Sign in again." }, 401);
@@ -345,7 +408,7 @@ Deno.serve(async (req: Request) => {
       for (const l of (links || []).slice(0, 15)) { try { await syncUser(admin, l.user_id, true); done++; } catch { failed++; } }
       return json({ ok: true, synced: done, failed });
     }
-    if (action === "scrim_candidates" || action === "import_scrim") {
+    if (action === "scrim_candidates" || action === "import_scrim" || action === "reimport_scrims") {
       const { data: staff } = await userClient.rpc("is_staff");
       if (staff !== true) return json({ error: "Only team staff can import scrims." }, 403);
       const { data: team } = await userClient.rpc("my_team");
@@ -359,6 +422,22 @@ Deno.serve(async (req: Request) => {
         const { data: done } = ids.length ? await admin.from("matches").select("riot_match_id").in("riot_match_id", ids) : { data: [] as any[] };
         const imported = new Set((done || []).map((d: any) => d.riot_match_id));
         return json({ ok: true, games: [...by.values()].slice(0, 30).map((g) => ({ ...g, imported: imported.has(g.match_id) })) });
+      }
+      if (action === "reimport_scrims") {
+        // refresh every Riot-imported scrim (new round details like first kills and buys)
+        const { data: list } = await admin.from("matches").select("riot_match_id").eq("team_id", team).eq("source", "riot").not("riot_match_id", "is", null).limit(40);
+        let ok = 0, failed = 0;
+        for (const x of list || []) {
+          try {
+            const { data: who } = await admin.from("riot_matches").select("user_id").eq("team_id", team).eq("match_id", x.riot_match_id).limit(1);
+            const { data: link } = who?.length ? await admin.from("riot_links").select("region").eq("user_id", who[0].user_id).maybeSingle() : { data: null as any };
+            const r = await henrik(`/valorant/v4/match/${link?.region || "na"}/${x.riot_match_id}`);
+            if (r.notFound || !r.body?.data) { failed++; continue; }
+            const res: any = await importScrim(admin, team, r.body.data, { minLinked: 1 });
+            if (res.imported) ok++; else failed++;
+          } catch (_) { failed++; }
+        }
+        return json({ ok: true, refreshed: ok, failed });
       }
       const matchId = String(body.match_id || "");
       if (!/^[0-9a-f-]{20,}$/i.test(matchId)) return json({ error: "Missing match." }, 400);
