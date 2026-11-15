@@ -1,0 +1,22 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/killmap","wait":3000},
+ {"js":"(()=>{ const t=document.querySelector('main')||document.body; return [!!document.querySelector('.kmap'), document.querySelectorAll('.kmap circle').length, [...document.querySelectorAll('[data-km]')].length, (t.innerText.match(/Kills\\n?(\\d+)/)||[])[0] ] })()","print":true},
+ {"js":"(()=>{ const s=document.querySelector('[data-km=side]'); s.value='A'; s.dispatchEvent(new Event('change')); return 1 })()","wait":800},
+ {"js":"(()=>{ const s=document.querySelector('[data-km=view]'); s.value='them'; s.dispatchEvent(new Event('change')); const l=document.querySelector('[data-km=lines]'); l.checked=true; l.dispatchEvent(new Event('change')); return 1 })()","wait":900},
+ {"js":"'after filters: circles '+document.querySelectorAll('.kmap circle').length+' lines '+document.querySelectorAll('.kmap line').length","print":true},
+ {"shot":"l1-killmap.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/scouting/team/Night%20Owls","wait":3500},
+ {"js":"(()=>{ const b=document.querySelector('#scoutbox'); return b ? b.innerText.replace(/\\s+/g,' ').slice(0,400)+' | rows '+b.querySelectorAll('tbody tr').length+' | kmap '+!!b.querySelector('.kmap') : 'no scout box' })()","print":true},
+ {"shot":"l2-scout.png","full":true},
+ {"js":"(()=>{ const f=document.querySelector('#scf'); f.ids.value='New1#NA1\\nbad id'; f.requestSubmit(); return document.querySelector('#scgo').textContent })()","wait":600,"print":true},
+ {"js":"(()=>{ const f=document.querySelector('#scf'); f.ids.value='New1#NA1\\nNew2#EUW'; f.requestSubmit(); return 1 })()","wait":2000},
+ {"js":"(()=>{ const c=(window.__fnCalls||[]).filter(x=>x[1]&&x[1].action==='scout'); return 'scout calls '+c.length+' '+JSON.stringify(c.at(-1)&&c.at(-1)[1].riot_ids)+' | '+document.querySelector('#scoutbox').innerText.includes('New2#EUW') })()","print":true},
+ {"js":"(()=>{ window.__MOCKDB__.team_discord=[{team_id:1,webhook_url:'https://discord.com/api/webhooks/123456/abcdefghijklmnopqrstuvwxyz',mention:'',remind_day:true,remind_hour:true,remind_avail:false}]; location.hash='#/coach/announce'; return 1 })()","wait":2500},
+ {"js":"(()=>{ const r=document.querySelector('.remind'); if(!r) return 'no reminders block: '+(document.querySelector('main')||document.body).innerText.slice(0,200); const a=r.querySelector('[data-rm=avail]'); a.checked=true; a.dispatchEvent(new Event('change')); return r.innerText.replace(/\\s+/g,' ') })()","wait":800,"print":true},
+ {"js":"'saved avail='+window.__MOCKDB__.team_discord[0].remind_avail","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/scouting/team/Night%20Owls","wait":3000},
+ {"js":"'player sees scout box: '+!!document.querySelector('#scoutbox')+' | killmap in nav: '+!!document.querySelector('a[href=\"#/killmap\"]')","print":true},
+ {"size":[390,844]},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/killmap","wait":2500},
+ {"shot":"l3-killmap-mobile.png","full":true}
+]

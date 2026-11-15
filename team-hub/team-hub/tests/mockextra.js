@@ -120,4 +120,15 @@
     { id: 2, team_id: 1, title: 'Pistols over 50%', metric: 'Pistol win %', target: 50, since: t(30), deadline: t(-10), created_at: t(30) },
     { id: 3, team_id: 1, title: 'Qualify for open qualifiers', deadline: t(-60), notes: 'Sign-ups open in December', created_at: t(30) }];
   DB.app_errors = [{ id: 1, created_at: new Date().toISOString(), message: 'TypeError: x is undefined', stack: 'at foo (app.js:1)', url: '#/maps', ua: 'Chrome' }];
+  // kill positions on the Riot-imported game (id 7, Haven): [round, ms, us, killer, victim, kx, ky, vx, vy, weapon, first]
+  const m7 = DB.matches.find(m => m.id === 7);
+  if (m7) { const ks = []; for (let r = 0; r < 23; r++) { const us = (r * 7) % 3 !== 0; ks.push([r, 8000, us ? 1 : 0, us ? ['Kairo', 'Nova', 'Zeph'][r % 3] : 'OwlA', us ? 'OwlB' : ['Kairo', 'Nova', 'Zeph'][r % 3], 1000 + r * 180, -2000 + r * 150, 1500 + r * 160, -1500 + r * 120, 'Vandal', 1]);
+      ks.push([r, 21000, us ? 0 : 1, us ? 'OwlC' : 'Nova', us ? 'Zeph' : 'OwlC', -3000 + r * 200, 2500 - r * 90, -2600 + r * 170, 2900 - r * 110, 'Phantom', 0]); } m7.kills = ks; }
+  DB.opponent_scouts = [{ id: 1, team_id: 1, opponent: 'Night Owls', riot_ids: ['OwlA#NA1', 'OwlB#1234', 'Ghost#NA1'], created_at: t(1),
+    data: { scouted_at: new Date(Date.now() - 86400000).toISOString(), players: [
+      { riot_id: 'OwlA#NA1', rank: 'Diamond 2', peak: 'Ascendant 1', games: 10, wins: 6, kd: 1.21, acs: 241, hs: 0.27, fk: 14, fd: 8, main_role: 'Duelist', agents: [{ name: 'Jett', games: 6, wins: 4 }, { name: 'Raze', games: 4, wins: 2 }], maps: [{ name: 'Haven', games: 4, wins: 3 }, { name: 'Lotus', games: 3, wins: 1 }],
+        events: [['Haven', 'A', 'k', 1200, -1800, 1500, -1400, 1, 'Jett'], ['Haven', 'D', 'd', -2500, 2300, -2100, 2600, 0, 'Jett'], ['Lotus', 'A', 'k', 300, 400, 600, 800, 0, 'Raze']] },
+      { riot_id: 'OwlB#1234', rank: 'Diamond 1', games: 9, wins: 4, kd: 0.92, acs: 188, hs: 0.21, fk: 4, fd: 6, main_role: 'Controller', agents: [{ name: 'Omen', games: 7, wins: 3 }], maps: [{ name: 'Haven', games: 2, wins: 1 }], events: [['Haven', 'D', 'k', 800, -900, 1100, -500, 0, 'Omen']] },
+      { riot_id: 'Ghost#NA1', error: "Riot couldn't find this player" }],
+      together: [{ map: 'Haven', score: '13-9', won: true, queue: 'premier', at: new Date().toISOString(), comp: [{ agent: 'Jett', name: 'OwlA#NA1' }, { agent: 'Omen', name: 'OwlB#1234' }, { agent: 'Sova' }, { agent: 'Killjoy' }, { agent: 'Breach' }] }] } }];
 })();
