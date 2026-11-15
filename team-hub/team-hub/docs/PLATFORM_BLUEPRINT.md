@@ -1,6 +1,6 @@
 # Team Hub Platform — Product & Architecture Blueprint
 
-Status: Approved product direction; implementation plan
+Status: Approved product direction; organization foundation implemented on the development branch; broader rollout remains in progress
 Branch: platform/organization-foundation
 Scope: Multi-tenant esports management platform
 Audience: Players, coaches, analysts, managers, and organization owners
@@ -183,6 +183,23 @@ Do not apply schema changes to the connected production database until the targe
 - Audit events exist for sensitive changes
 - No secrets or private player data appear in logs or public responses
 - Documentation and migration/rollback notes are included
+
+## Implementation status (2026-11-15)
+
+Completed on `platform/organization-foundation`:
+- Additive organization and organization-membership schema migration.
+- One-to-one legacy team-to-organization backfill that preserves existing team IDs and gameplay records.
+- Automatic organization creation for teams created through the existing team-creation flow.
+- Organization membership synchronization for profile approval, team assignment, and team-scoped staff-role changes.
+- Organization RLS policies and least-privilege table grants; platform-wide administrator status is not treated as organization ownership.
+- Initial Organization workspace for organization profile, role distribution, and member directory.
+- Read-only SQL verification script.
+
+Not yet completed or activated:
+- Migration has not been applied to production or a disposable Supabase test project.
+- Organization invitations, multi-team membership/switching, team_staff assignments, audit events, and full role-permission administration remain future phases.
+- Existing cross-team read policies still require a product decision and regression tests before broader multi-tenant onboarding.
+- The Organization workspace is only available to users with an active organization membership after the migration is applied.
 
 ## First implementation sequence
 
