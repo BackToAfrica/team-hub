@@ -451,7 +451,8 @@ function render() {
   $$('#sidebar a').forEach(a => a.addEventListener('click', () => $('#sidebar').classList.remove('open')));
   window.scrollTo(0, 0);
   const page = PAGES[S.route] || PAGES.home;
-  Promise.resolve(page($('#main'))).catch(err => { $('#main').innerHTML = '<div class="card error">Something went wrong: ' + esc(err.message || err) + '</div>'; console.error(err); logError('[' + S.route + '] ' + (err.message || err), err && err.stack); });
+  const seq = S.renderSeq = (S.renderSeq || 0) + 1;
+  Promise.resolve(page($('#main'))).catch(err => { if (seq !== S.renderSeq) return; /* a newer render replaced this page */ $('#main').innerHTML = '<div class="card error">Something went wrong: ' + esc(err.message || err) + '</div>'; console.error(err); logError('[' + S.route + '] ' + (err.message || err), err && err.stack); });
 }
 
 async function renderOnboard() {
@@ -1499,7 +1500,8 @@ COACH.members = async function (box) {
     const { error } = await sb.rpc('remove_member', { uid: b.dataset.remove });
     toast(error ? error.message : 'Removed'); COACH.members(box);
   });
-  $('#applyall').onclick = async () => {
+  if (!box.isConnected) return; // page was re-rendered while loading
+  $('#applyall', box).onclick = async () => {
     const vis = {}; $$('[data-all]', box).forEach(c => vis[c.dataset.all] = c.checked);
     const { error } = await sb.from('profiles').update({ visibility: vis }).eq('is_coach', false);
     toast(error ? error.message : 'Updated everyone'); COACH.members(box);
