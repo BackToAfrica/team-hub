@@ -91,6 +91,172 @@ async function fetchRank(region: string, puuid: string) {
   return null;
 }
 
+
+// ---------------------------------------------------------------- scrims (custom games)
+// A custom game counts as a team scrim when at least SCRIM_MIN linked players from the same Team Hub team
+// were on the same side. Scrims are often played with "play out all rounds" on, so the real result stops
+// at the round where a team reached 13 (win by 2 in overtime); later rounds don't count.
+const SCRIM_MIN = 3;
+const pidOf = (p: any) => String(p?.puuid || "");
+const teamOf = (p: any) => String(p?.team_id ?? p?.team ?? "");
+function roundEnd(r: any): string | null {
+  const t = String(r?.result || r?.end_type || "").toLowerCase();
+  if (t.includes("elim")) return "elim";
+  if (t.includes("deton") || t.includes("exploded")) return "det";
+  if (t.includes("defus")) return "defuse";
+  if (t.includes("time") || t.includes("expir")) return "time";
+  if (t.includes("surrender")) return "ff";
+  return t ? t.slice(0, 12) : null;
+}
+function etDate(iso: string) {
+  try { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date(iso)); } catch { return String(iso || "").slice(0, 10); }
+}
+export function scrimResult(match: any, ourTeam: string) {
+  const rounds: any[] = match.rounds || [];
+  const startAtk = ourTeam.toLowerCase() === "red"; // Red attacks first
+  let a = 0, b = 0, decided = rounds.length;
+  const out: any[] = [];
+  for (let i = 0; i < rounds.length; i++) {
+    const r = rounds[i];
+    const winner = String(r?.winning_team ?? r?.winningTeam ?? "");
+    const w = winner.toLowerCase() === ourTeam.toLowerCase();
+    if (w) a++; else b++;
+    const firstHalf = i < 12, ot = i >= 24;
+    const atk = ot ? ((i - 24) % 2 === 0 ? startAtk : !startAtk) : (firstHalf ? startAtk : !startAtk);
+    out.push({ n: i + 1, w, side: atk ? "A" : "D", end: roundEnd(r) });
+    if ((a >= 13 || b >= 13) && Math.abs(a - b) >= 2) { decided = i + 1; break; }
+  }
+  const R = out.length;
+  const cnt = (f: (x: any) => boolean) => out.filter(f).length;
+  return {
+    rounds: out, R, decided: R > 0 && (a >= 13 || b >= 13), won: a, lost: b, start_side: startAtk ? "Offense" : "Defense",
+    atk_won: cnt((x) => x.side === "A" && x.w), atk_lost: cnt((x) => x.side === "A" && !x.w),
+    def_won: cnt((x) => x.side === "D" && x.w), def_lost: cnt((x) => x.side === "D" && !x.w),
+    pistols_won: (out[0]?.w ? 1 : 0) + (out[12]?.w ? 1 : 0),
+  };
+}
+// per-player stats over the first R rounds only
+export function scrimPlayerStats(match: any, ourTeam: string, R: number) {
+  const players: any[] = (match.players || []).filter((p: any) => teamOf(p).toLowerCase() === ourTeam.toLowerCase());
+  const kills: any[] = (match.kills || []).filter((k: any) => k?.killer && k?.victim);
+  const base = kills.length && kills.every((k: any) => Number(k.round) >= 1) ? 1 : 0; // 0- or 1-based rounds
+  const inR = (k: any) => Number(k.round) - base < R;
+  const K = kills.filter(inR);
+  const byRound = new Map<number, any[]>();
+  for (const k of K) { const r = Number(k.round); if (!byRound.has(r)) byRound.set(r, []); byRound.get(r)!.push(k); }
+  for (const l of byRound.values()) l.sort((x, y) => (x.time_in_round_in_ms || 0) - (y.time_in_round_in_ms || 0));
+  const total = (match.rounds || []).length;
+  return players.map((p) => {
+    const id = pidOf(p);
+    let k = 0, d = 0, a = 0, fk = 0, fd = 0, tr = 0, trd = 0;
+    for (const x of K) {
+      if (pidOf(x.killer) === id) k++;
+      if (pidOf(x.victim) === id) d++;
+      if ((x.assistants || []).some((s: any) => pidOf(s) === id)) a++;
+    }
+    for (const l of byRound.values()) {
+      if (pidOf(l[0].killer) === id) fk++;
+      if (pidOf(l[0].victim) === id) fd++;
+      for (const x of l) {
+        const t = x.time_in_round_in_ms || 0;
+        if (pidOf(x.killer) === id && l.some((j) => pidOf(j.killer) === pidOf(x.victim) && teamOf(j.victim).toLowerCase() === ourTeam.toLowerCase() && pidOf(j.victim) !== id && t - (j.time_in_round_in_ms || 0) >= 0 && t - (j.time_in_round_in_ms || 0) <= TRADE_MS)) tr++;
+        if (pidOf(x.victim) === id && l.some((j) => pidOf(j.victim) === pidOf(x.killer) && teamOf(j.killer).toLowerCase() === ourTeam.toLowerCase() && pidOf(j.killer) !== id && (j.time_in_round_in_ms || 0) - t >= 0 && (j.time_in_round_in_ms || 0) - t <= TRADE_MS)) trd++;
+      }
+    }
+    // shots and score: per-round stats when available, otherwise whole-match totals (only if nothing was cut)
+    let hs = 0, bs = 0, ls = 0, score = 0, perRound = false;
+    (match.rounds || []).slice(0, R).forEach((r: any) => {
+      const st = (r?.stats || r?.player_stats || []).find((s: any) => pidOf(s.player || s) === id);
+      if (!st) return; perRound = true;
+      const v = st.stats || st;
+      hs += Number(v.headshots) || 0; bs += Number(v.bodyshots) || 0; ls += Number(v.legshots) || 0; score += Number(v.score) || 0;
+    });
+    if (!perRound && R >= total) { const v = p.stats || {}; hs = Number(v.headshots) || 0; bs = Number(v.bodyshots) || 0; ls = Number(v.legshots) || 0; score = Number(v.score) || 0; }
+    const shots = hs + bs + ls;
+    return { puuid: id, name: p.name, tag: p.tag, agent: p.agent?.name || null, rounds: R, kills: k, deaths: d, assists: a,
+      first_kills: fk, first_deaths: fd, trades: tr, traded_deaths: trd, true_hs_pct: shots ? +(hs / shots).toFixed(3) : null, acs: score && R ? Math.round(score / R) : null };
+  });
+}
+async function teamPuuids(admin: SupabaseClient, teamId: number) {
+  const { data: members } = await admin.from("profiles").select("id, ign").eq("team_id", teamId);
+  const ids = (members || []).map((m: any) => m.id);
+  if (!ids.length) return new Map<string, any>();
+  const { data: links } = await admin.from("riot_links").select("user_id, puuid, riot_name, riot_tag, region").in("user_id", ids);
+  const ign = new Map((members || []).map((m: any) => [m.id, m.ign]));
+  return new Map((links || []).map((l: any) => [l.puuid, { ...l, ign: ign.get(l.user_id) || null }]));
+}
+// our side = the side with the most linked team members
+function ourSide(match: any, linked: Map<string, any>) {
+  const c = new Map<string, number>();
+  for (const p of match.players || []) if (linked.has(pidOf(p))) c.set(teamOf(p), (c.get(teamOf(p)) || 0) + 1);
+  const best = [...c.entries()].sort((x, y) => y[1] - x[1])[0];
+  return best ? { team: best[0], n: best[1] } : null;
+}
+export async function importScrim(admin: SupabaseClient, teamId: number, match: any, opts: { opponent?: string; minLinked?: number } = {}) {
+  const md = match.metadata || {};
+  const matchId = md.match_id || md.matchid;
+  if (!matchId) return { skipped: "no match id" };
+  const linked = await teamPuuids(admin, teamId);
+  const side = ourSide(match, linked);
+  if (!side || side.n < (opts.minLinked ?? SCRIM_MIN)) return { skipped: "not enough team members in this game" };
+  const res = scrimResult(match, side.team);
+  if (res.R < 1) return { skipped: "no rounds" };
+  const date = etDate(md.started_at || new Date().toISOString());
+  const map = md.map?.name || md.map || null;
+  const roundsTxt = res.rounds.map((r: any) => (r.w ? "W" : "L")).join("");
+  const notes = `Imported from Riot. Real result ${res.won}–${res.lost}` + (res.decided ? ` (decided R${res.R})` : " (not finished)") +
+    `. Rounds: ${roundsTxt.slice(0, 12)}${roundsTxt.length > 12 ? " | " + roundsTxt.slice(12) : ""}.` + ((match.rounds || []).length > res.R ? ` ${(match.rounds || []).length - res.R} more round(s) were played out and don't count.` : "");
+  const fields: Record<string, unknown> = {
+    team_id: teamId, date, map, type: "Scrim", rounds_won: res.won, rounds_lost: res.lost, start_side: res.start_side,
+    atk_won: res.atk_won, atk_lost: res.atk_lost, def_won: res.def_won, def_lost: res.def_lost, pistols_won: res.pistols_won,
+    rounds: res.rounds, riot_match_id: matchId, source: "riot", notes,
+  };
+  // already imported? update it. A hand-logged game on the same day and map? attach to it. Otherwise insert.
+  let { data: existing } = await admin.from("matches").select("id, opponent, event").eq("riot_match_id", matchId).maybeSingle();
+  if (!existing) {
+    const { data: manual } = await admin.from("matches").select("id, opponent, event").eq("team_id", teamId).eq("date", date).eq("map", map).is("riot_match_id", null).limit(1);
+    existing = manual?.[0] || null;
+  }
+  let id: number;
+  if (existing) {
+    if (opts.opponent) fields.opponent = opts.opponent;
+    const { error } = await admin.from("matches").update(fields).eq("id", existing.id);
+    if (error) throw new Error(error.message);
+    id = existing.id;
+  } else {
+    fields.opponent = opts.opponent || "Scrim (from Riot)";
+    fields.event = "Scrim (from Riot)";
+    const { data, error } = await admin.from("matches").insert(fields).select("id").single();
+    if (error) throw new Error(error.message);
+    id = data.id;
+  }
+  // player stats: our five, over the counted rounds only
+  const { data: roster } = await admin.from("roster").select("ign").eq("team_id", teamId);
+  const rosterIgn = new Map((roster || []).filter((r: any) => r.ign).map((r: any) => [String(r.ign).toLowerCase(), r.ign]));
+  const stats = scrimPlayerStats(match, side.team, res.R).map((p: any) => {
+    const riotId = `${p.name}#${p.tag}`;
+    const l = linked.get(p.puuid);
+    const player = (l?.ign && rosterIgn.get(String(l.ign).toLowerCase())) || rosterIgn.get(riotId.toLowerCase()) || l?.ign || riotId;
+    return { team_id: teamId, date, map, player, agent: p.agent, rounds: p.rounds, kills: p.kills, deaths: p.deaths, assists: p.assists,
+      kd: p.deaths ? +(p.kills / p.deaths).toFixed(2) : p.kills, true_hs_pct: p.true_hs_pct, first_kills: p.first_kills, first_deaths: p.first_deaths,
+      trades: p.trades, traded_deaths: p.traded_deaths, source: "Riot API (custom game)", riot_match_id: matchId, match_id: id,
+      notes: p.acs != null ? `ACS ${p.acs}` : null };
+  });
+  await admin.from("player_stats").delete().eq("riot_match_id", matchId);
+  if (stats.length) { const { error } = await admin.from("player_stats").insert(stats); if (error) throw new Error(error.message); }
+  return { imported: true, match_id: id, result: `${res.won}-${res.lost}`, map, date };
+}
+async function autoImportScrims(admin: SupabaseClient, teamId: number | null, matches: any[]) {
+  if (!teamId) return 0;
+  let n = 0;
+  for (const m of matches) {
+    if (String(m?.metadata?.queue?.id || m?.metadata?.queue?.name || "").toLowerCase() !== "custom") continue;
+    if (!(m.rounds || []).length) continue;
+    try { const r = await importScrim(admin, teamId, m); if ((r as any).imported) n++; } catch (_) { /* one bad game shouldn't stop the sync */ }
+  }
+  return n;
+}
+
 async function syncUser(admin: SupabaseClient, userId: string, force = false) {
   const { data: link } = await admin.from("riot_links").select("*").eq("user_id", userId).maybeSingle();
   if (!link) return { linked: false };
@@ -107,6 +273,7 @@ async function syncUser(admin: SupabaseClient, userId: string, force = false) {
     const { error } = await admin.from("riot_matches").upsert(rows, { onConflict: "user_id,match_id" });
     if (error) throw new Error(error.message);
   }
+  const scrims = await autoImportScrims(admin, prof?.team_id ?? null, matches);
   const rank = await fetchRank(link.region, link.puuid);
   // summary over the last 20 real 5v5 games
   const { data: last } = await admin.from("riot_matches").select("*").eq("user_id", userId).order("started_at", { ascending: false }).limit(80);
@@ -132,7 +299,7 @@ async function syncUser(admin: SupabaseClient, userId: string, force = false) {
   if (rank) Object.assign(row, rank, { rank_at: new Date().toISOString() });
   await admin.from("riot_summary").upsert(row, { onConflict: "user_id" });
   await admin.from("riot_links").update({ synced_at: new Date().toISOString() }).eq("user_id", userId);
-  return { linked: true, new_games: rows.length, rank: rank?.rank || null };
+  return { linked: true, new_games: rows.length, scrims, rank: rank?.rank || null };
 }
 
 Deno.serve(async (req: Request) => {
@@ -177,6 +344,32 @@ Deno.serve(async (req: Request) => {
       let done = 0, failed = 0;
       for (const l of (links || []).slice(0, 15)) { try { await syncUser(admin, l.user_id, true); done++; } catch { failed++; } }
       return json({ ok: true, synced: done, failed });
+    }
+    if (action === "scrim_candidates" || action === "import_scrim") {
+      const { data: staff } = await userClient.rpc("is_staff");
+      if (staff !== true) return json({ error: "Only team staff can import scrims." }, 403);
+      const { data: team } = await userClient.rpc("my_team");
+      if (!team) return json({ error: "You're not on a team." }, 400);
+      if (action === "scrim_candidates") {
+        // custom games that linked team members played recently (from their synced history)
+        const { data: rows } = await admin.from("riot_matches").select("match_id, started_at, map, rounds_won, rounds_lost, user_id").eq("team_id", team).eq("queue", "custom").order("started_at", { ascending: false }).limit(200);
+        const by = new Map<string, any>();
+        for (const r of rows || []) { const x = by.get(r.match_id) || { match_id: r.match_id, started_at: r.started_at, map: r.map, score: [r.rounds_won, r.rounds_lost], players: 0 }; x.players++; by.set(r.match_id, x); }
+        const ids = [...by.keys()];
+        const { data: done } = ids.length ? await admin.from("matches").select("riot_match_id").in("riot_match_id", ids) : { data: [] as any[] };
+        const imported = new Set((done || []).map((d: any) => d.riot_match_id));
+        return json({ ok: true, games: [...by.values()].slice(0, 30).map((g) => ({ ...g, imported: imported.has(g.match_id) })) });
+      }
+      const matchId = String(body.match_id || "");
+      if (!/^[0-9a-f-]{20,}$/i.test(matchId)) return json({ error: "Missing match." }, 400);
+      // region from a team member who played it
+      const { data: who } = await admin.from("riot_matches").select("user_id").eq("team_id", team).eq("match_id", matchId).limit(1);
+      if (!who?.length) return json({ error: "No one on your team has this game in their history." }, 404);
+      const { data: link } = await admin.from("riot_links").select("region").eq("user_id", who[0].user_id).maybeSingle();
+      const r = await henrik(`/valorant/v4/match/${link?.region || "na"}/${matchId}`);
+      if (r.notFound || !r.body?.data) return json({ error: "Riot couldn't find that game any more." }, 404);
+      const res = await importScrim(admin, team, r.body.data, { opponent: String(body.opponent || "").trim().slice(0, 80) || undefined, minLinked: 1 });
+      return json({ ok: true, ...res });
     }
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
