@@ -403,6 +403,7 @@ const NAV = [
   { r: 'veto', label: 'Veto simulator', sec: 'team_stats', i: 'swap', g: 'Prepare', staff: true },
   { r: 'maps', label: 'Map pool', sec: 'team_stats', i: 'map', g: 'Prepare' },
   { r: 'analytics', label: 'Scrim analytics', sec: 'team_stats', i: 'chart', g: 'Prepare', staff: true },
+  { r: 'killmap', label: 'Kill maps', sec: 'team_stats', i: 'pin', g: 'Prepare', staff: true },
   { r: 'playbook', label: 'Playbook', sec: ['playbook', 'comms'], i: 'book', g: 'Prepare' },
   { r: 'lineups', label: 'Lineups', sec: 'playbook', i: 'pin', g: 'Prepare' },
   { r: 'comms', label: 'Comms', sec: 'comms', i: 'mic', g: 'Prepare' },
@@ -1652,7 +1653,7 @@ async function discordPanel(box, after) {
   const s = st || { connected: false };
   const mentionSel = '<select id="dcm">' + [['', 'No ping'], ['@here', '@here'], ['@everyone', '@everyone']].map(([v, l]) => '<option value="' + v + '"' + ((s.mention || '') === v ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
   box.innerHTML = s.connected
-    ? '<div class="row spread"><div><b>Discord connected</b> <span class="pill green">On</span><div class="small muted">Webhook link ending …' + esc(s.hint || '') + '. New announcements post to that channel.</div></div>' +
+    ? '<div class="row spread"><div><b>Discord connected</b> <span class="pill green">On</span><div class="small muted">Webhook link ending …' + esc(s.hint || '') + '. Announcements and reminders post to that channel.</div></div>' +
       '<div class="row" style="gap:6px"><label class="small row" style="gap:6px">Ping ' + mentionSel + '</label><button class="btn small ghost" id="dctest">Send test</button><button class="btn small ghost" id="dcchange">Change channel</button><button class="btn small ghost danger-t" id="dcoff">Disconnect</button></div></div><div id="dcform"></div>'
     : '<b>Post announcements to Discord</b><p class="small muted" style="margin:4px 0 10px">In Discord: <b>Server Settings → Integrations → Webhooks → New Webhook</b>, pick the channel (e.g. #announcements), then <b>Copy Webhook URL</b> and paste it here. The link is stored so only the server can read it. Players never see it.</p><div id="dcform"></div>';
   const form = () => {
@@ -3892,6 +3893,164 @@ PAGES.health = async function (el) {
     panel('Recent sync results', '', http.length ? '<div class="tablewrap"><table><thead><tr><th>When</th><th>Status</th><th>Result</th></tr></thead><tbody>' + http.map(x => '<tr><td>' + esc(fmtWhen(x.at)) + '</td><td>' + (x.status >= 200 && x.status < 300 ? '<span class="pill green">' + x.status + '</span>' : '<span class="pill red">' + esc(x.status || x.err || '?') + '</span>') + '</td><td class="small"><code>' + esc(x.body || x.err || '') + '</code></td></tr>').join('') + '</tbody></table></div>' : '<p class="small muted" style="margin:0">No runs recorded yet.</p>') +
     panel('Errors people hit', '<span class="small muted">last ' + errs.length + '</span>', grouped.length ? grouped.map(g => '<details class="item"><summary><div class="t"><span class="pill red">' + g.n + '×</span> ' + esc(g.m) + '</div><div class="small muted">last ' + esc(fmtWhen(g.last.created_at)) + ' · ' + g.pages.map(esc).join(', ') + '</div></summary><div class="body"><pre class="rtext">' + esc(g.last.stack || '(no stack)') + '</pre><div class="small muted">' + esc(g.last.ua || '') + '</div></div></details>').join('') : '<p class="small muted" style="margin:0">No errors. 🎉</p>');
   if ($('#clrerr', el)) $('#clrerr', el).onclick = async () => { if (!confirm('Clear the error log?')) return; const { error: e2 } = await sb.from('app_errors').delete().gte('id', 0); if (e2) toast('Error: ' + e2.message); render(); };
+};
+
+// =============================================================== KILL MAPS
+// Kill positions come from Riot-imported games (matches.kills) and from opponent scouting.
+// Minimap images and the game → minimap transform come from valorant-api.com.
+const VMAPS = { p: null };
+function valMaps() {
+  if (VMAPS.p) return VMAPS.p;
+  VMAPS.p = fetch('https://valorant-api.com/v1/maps').then(r => r.json()).then(j => {
+    const m = {}; (j.data || []).forEach(x => { if (x.displayIcon && x.xMultiplier) m[String(x.displayName).toLowerCase()] = x; }); return m;
+  }).catch(() => { VMAPS.p = null; return {}; });
+  return VMAPS.p;
+}
+// pts: [{ x, y, ox, oy, k: true for a kill / false for a death, t: tooltip }] in game units
+function killMapHtml(cal, pts, opts) {
+  opts = opts || {};
+  const S0 = 1000; let tr;
+  if (cal) tr = (x, y) => [(y * cal.xMultiplier + cal.xScalarToAdd) * S0, (x * cal.yMultiplier + cal.yScalarToAdd) * S0];
+  else { // no minimap: fit the points into the square
+    const xs = [], ys = []; pts.forEach(p => { [[p.x, p.y], [p.ox, p.oy]].forEach(([a, b]) => { if (a != null && b != null) { xs.push(a); ys.push(b); } }); });
+    const mnx = Math.min(...xs), mxx = Math.max(...xs), mny = Math.min(...ys), mxy = Math.max(...ys), span = Math.max(1, mxx - mnx, mxy - mny);
+    tr = (x, y) => [60 + (y - mny) / span * 880, 60 + (x - mnx) / span * 880];
+  }
+  const ok = p => p.x != null && p.y != null;
+  let svg = '';
+  if (opts.heat) pts.filter(ok).forEach(p => { const [a, b] = tr(p.x, p.y); svg += '<circle cx="' + a.toFixed(0) + '" cy="' + b.toFixed(0) + '" r="34" fill="' + (p.k ? '#3ba55d' : '#ff4655') + '" opacity=".13"/>'; });
+  if (opts.lines) pts.filter(p => ok(p) && p.ox != null && p.oy != null).forEach(p => { const [a, b] = tr(p.x, p.y), [c, d] = tr(p.ox, p.oy); svg += '<line x1="' + a.toFixed(0) + '" y1="' + b.toFixed(0) + '" x2="' + c.toFixed(0) + '" y2="' + d.toFixed(0) + '" stroke="' + (p.k ? '#3ba55d' : '#ff4655') + '" stroke-width="2" opacity=".45"/>'; });
+  pts.filter(ok).forEach(p => { const [a, b] = tr(p.x, p.y); svg += '<circle cx="' + a.toFixed(0) + '" cy="' + b.toFixed(0) + '" r="' + (p.fb ? 11 : 8) + '" fill="' + (p.k ? '#3ba55d' : '#ff4655') + '" stroke="' + (p.fb ? '#fff' : '#0b0f14') + '" stroke-width="' + (p.fb ? 3 : 2) + '"><title>' + esc(p.t || '') + '</title></circle>'; });
+  return '<div class="kmap">' + (cal ? '<img src="' + esc(cal.displayIcon) + '" alt="" loading="lazy">' : '<div class="kmap-blank"></div>') + '<svg viewBox="0 0 1000 1000" preserveAspectRatio="none">' + svg + '</svg></div>' +
+    (cal ? '' : '<p class="small muted" style="margin:6px 0 0">Map image couldn\'t load, so positions are shown on a blank square.</p>');
+}
+function killLegend() { return '<div class="kleg small"><span><i style="background:#3ba55d"></i>Kill (where they stood)</span><span><i style="background:#ff4655"></i>Death</span><span><i class="fb"></i>First kill / death of the round</span></div>'; }
+// our Riot-imported games → events from our point of view
+function ourKillEvents(matches) {
+  const out = [];
+  matches.forEach(m => { const ks = Array.isArray(m.kills) ? m.kills : []; const rs = Array.isArray(m.rounds) ? m.rounds : [];
+    ks.forEach(k => { const [ri, ms, us, kn, vn, kx, ky, vx, vy, w, fb] = k; const side = rs[ri] && rs[ri].side;
+      out.push({ map: m.map || '?', side: side || '', k: !!us, player: us ? kn : vn, enemy: us ? vn : kn, x: us ? kx : vx, y: us ? ky : vy, ox: us ? vx : kx, oy: us ? vy : ky, w: w, fb: !!fb, r: ri + 1, ms: ms, date: m.date, opp: m.opponent }); }); });
+  return out;
+}
+const KM = { map: '', side: '', who: 'both', player: '', fb: false, lines: false, heat: true, view: 'us' };
+async function killMapView(box, events, cfg) {
+  cfg = cfg || {};
+  const maps = Array.from(new Set(events.map(e => e.map))).sort();
+  const st = cfg.state || KM;
+  if (!maps.includes(st.map)) st.map = maps.slice().sort((a, b) => events.filter(e => e.map === b).length - events.filter(e => e.map === a).length)[0] || '';
+  const players = Array.from(new Set(events.filter(e => e.map === st.map).map(e => e.player).filter(Boolean))).sort();
+  if (st.player && !players.includes(st.player)) st.player = '';
+  const f = events.filter(e => e.map === st.map && (!st.side || e.side === st.side) && (!st.player || e.player === st.player) && (!st.fb || e.fb) && (st.who === 'both' || (st.who === 'k') === e.k));
+  const pts = f.map(e => st.view === 'them' && e.ox != null ? { x: e.ox, y: e.oy, ox: e.x, oy: e.y, k: !e.k, fb: e.fb, t: (e.k ? e.enemy + ' killed by ' + e.player : e.enemy + ' killed ' + e.player) + ' · R' + e.r + (e.w ? ' · ' + e.w : '') }
+    : { x: e.x, y: e.y, ox: e.ox, oy: e.oy, k: e.k, fb: e.fb, t: (e.k ? e.player + ' killed ' + e.enemy : e.player + ' died to ' + e.enemy) + (e.r ? ' · R' + e.r : '') + (e.w ? ' · ' + e.w : '') });
+  const cal = (await valMaps())[String(st.map).toLowerCase()];
+  const sel = (id, opts, v) => '<select data-km="' + id + '">' + opts.map(([val, l]) => '<option value="' + esc(val) + '"' + (String(v) === String(val) ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>';
+  const k = f.filter(e => e.k).length, d = f.length - k, fbk = f.filter(e => e.fb && e.k).length, fbd = f.filter(e => e.fb && !e.k).length;
+  const weapons = groupBy(f.filter(e => e.k && e.w), 'w').sort((a, b) => b[1].length - a[1].length).slice(0, 4);
+  box.innerHTML = !maps.length ? empty(cfg.empty || 'No kill positions yet.') :
+    '<div class="row kmctl">' + sel('map', maps.map(m => [m, m + ' (' + events.filter(e => e.map === m).length + ')']), st.map) +
+      sel('side', [['', 'Both sides'], ['A', 'Attack'], ['D', 'Defense']], st.side) + sel('who', [['both', 'Kills + deaths'], ['k', 'Kills only'], ['d', 'Deaths only']], st.who) +
+      sel('player', [['', cfg.allLabel || 'All players']].concat(players.map(p => [p, p])), st.player) +
+      (cfg.noView ? '' : sel('view', [['us', cfg.usLabel || 'Where we stood'], ['them', cfg.themLabel || 'Where the enemy stood']], st.view)) +
+      '<label class="small row" style="gap:4px"><input type="checkbox" data-km="fb"' + (st.fb ? ' checked' : '') + '> First duels only</label>' +
+      '<label class="small row" style="gap:4px"><input type="checkbox" data-km="lines"' + (st.lines ? ' checked' : '') + '> Lines</label>' +
+      '<label class="small row" style="gap:4px"><input type="checkbox" data-km="heat"' + (st.heat ? ' checked' : '') + '> Heat</label></div>' +
+    '<div class="kgrid"><div>' + killMapHtml(cal, pts, st) + killLegend() + '</div><div>' +
+      '<div class="mini-kpis" style="grid-template-columns:repeat(2,1fr)">' + kpi(k, 'Kills') + kpi(d, 'Deaths') + kpi(fbk + '–' + fbd, 'First duels won–lost') + kpi(k + d ? pct(k / (k + d)) : '–', 'Kill share') + '</div>' +
+      (weapons.length ? '<div class="small" style="margin-top:10px"><span class="muted">Kills with:</span> ' + weapons.map(([w, l]) => esc(w) + ' ' + l.length).join(' · ') + '</div>' : '') +
+      (cfg.side ? cfg.side(f) : '') + '</div></div>';
+  $$('[data-km]', box).forEach(x => x.onchange = () => { const key = x.dataset.km; st[key] = x.type === 'checkbox' ? x.checked : x.value; killMapView(box, events, cfg); });
+}
+PAGES.killmap = async function (el) {
+  const matches = (await cached('matches')).filter(m => Array.isArray(m.kills) && m.kills.length);
+  const ev = ourKillEvents(matches);
+  el.innerHTML = '<div class="page-h"><div><h1>Kill maps</h1><p class="muted">Where we win and lose fights in Riot-imported scrims. Each dot is where our player stood when they got a kill (green) or died (red).</p></div></div>' +
+    '<div class="card" id="kmbox"></div>';
+  await killMapView($('#kmbox', el), ev, { empty: 'No kill positions yet. They come from Riot-imported scrims (custom games with 3+ linked players). Older imports fill in on the next sync.',
+    side: f => { const by = groupBy(f, 'player').map(([p, l]) => ({ p, k: l.filter(e => e.k).length, d: l.filter(e => !e.k).length, fk: l.filter(e => e.fb && e.k).length, fd: l.filter(e => e.fb && !e.k).length })).sort((a, b) => (b.k - b.d) - (a.k - a.d));
+      return by.length ? '<div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Player</th><th class="num">K</th><th class="num">D</th><th class="num">First K–D</th></tr></thead><tbody>' +
+        by.map(x => '<tr><td>' + esc(x.p) + '</td><td class="num">' + x.k + '</td><td class="num">' + x.d + '</td><td class="num">' + x.fk + '–' + x.fd + '</td></tr>').join('') + '</tbody></table></div>' : ''; } });
+};
+
+// =============================================================== OPPONENT SCOUTING FROM RIOT IDS
+const RIOT_ID_RE = /^.{3,16}#[A-Za-z0-9]{2,5}$/;
+function scoutEvents(data) {
+  const out = [];
+  ((data && data.players) || []).forEach(p => (p.events || []).forEach(e => { const [map, side, kd, x, y, ox, oy, fb, agent] = e;
+    out.push({ map, side, k: kd === 'k', player: String(p.riot_id || '').split('#')[0], enemy: 'enemy', x, y, ox, oy, fb: !!fb, w: '', agent }); }));
+  return out;
+}
+function scoutHtml(row) {
+  const d = row.data || {}; const ps = (d.players || []);
+  const good = ps.filter(p => !p.error);
+  const mapT = new Map(); good.forEach(p => (p.maps || []).forEach(m => { const x = mapT.get(m.name) || { n: 0, w: 0 }; x.n += m.games; x.w += m.wins; mapT.set(m.name, x); }));
+  const maps = Array.from(mapT.entries()).sort((a, b) => b[1].n - a[1].n);
+  const comp = good.map(p => p.agents && p.agents[0] ? p.agents[0].name : null).filter(Boolean);
+  return '<div class="small muted" style="margin-bottom:8px">Scouted ' + esc(fmtWhen(d.scouted_at || row.created_at)) + ' · last 10 games per player (ranked, unrated, Premier, customs)</div>' +
+    (comp.length ? '<div class="row" style="gap:6px;margin-bottom:10px;flex-wrap:wrap"><b class="small">Likely comp (each player\'s main):</b> ' + comp.map(a => '<span class="pill">' + esc(a) + '</span>').join('') + '</div>' : '') +
+    (maps.length ? '<div class="row" style="gap:6px;margin-bottom:10px;flex-wrap:wrap"><b class="small">Maps they play:</b> ' + maps.slice(0, 7).map(([m, x]) => '<span class="pill ' + (x.n >= 3 ? (x.w / x.n >= .55 ? 'green' : x.w / x.n < .45 ? 'red' : '') : '') + '">' + esc(m) + ' ' + x.n + ' <span class="muted">(' + x.w + 'W)</span></span>').join('') + '</div>' : '') +
+    '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Rank</th><th class="num">Games</th><th class="num">Win %</th><th class="num">K/D</th><th class="num">ACS</th><th class="num">HS %</th><th class="num">First K–D</th><th>Agents</th></tr></thead><tbody>' +
+    ps.map(p => p.error ? '<tr><td><b>' + esc(p.riot_id) + '</b></td><td colspan="8" class="muted small">' + esc(p.error) + '</td></tr>' :
+      '<tr><td><b>' + esc(p.riot_id) + '</b>' + (p.main_role ? '<div class="small muted">' + esc(p.main_role) + '</div>' : '') + '</td><td>' + esc(p.rank || '–') + (p.peak && p.peak !== p.rank ? '<div class="small muted">peak ' + esc(p.peak) + '</div>' : '') + '</td>' +
+      '<td class="num">' + p.games + '</td><td class="num">' + (p.games ? pct(p.wins / p.games) : '–') + '</td><td class="num">' + (p.games ? p.kd : '–') + '</td><td class="num">' + (p.acs || '–') + '</td><td class="num">' + pct(p.hs) + '</td>' +
+      '<td class="num">' + (p.fk || 0) + '–' + (p.fd || 0) + '</td><td class="small">' + (p.agents || []).slice(0, 3).map(a => esc(a.name) + ' <span class="muted">' + a.games + '</span>').join(', ') + '</td></tr>').join('') +
+    '</tbody></table></div>' +
+    ((d.together || []).length ? '<h3 style="margin:14px 0 6px">Games they played together</h3>' + d.together.slice(0, 8).map(g => '<div class="small" style="margin-bottom:6px"><span class="fdot ' + (g.won ? 'w' : 'l') + '"></span> <b>' + esc(g.map || '?') + '</b> ' + esc(g.score || '') +
+      ' <span class="muted">' + esc(g.queue || '') + (g.at ? ' · ' + fmtDate(String(g.at).slice(0, 10)) : '') + '</span> · ' + g.comp.map(c => (c.name ? '<b>' + esc(c.agent || '?') + '</b>' : esc(c.agent || '?'))).join(', ') + '</div>').join('') +
+      '<p class="small muted" style="margin:0">Bold agents are the scouted players.</p>' : '<p class="small muted" style="margin:12px 0 0">None of their recent games had 3+ of them on the same team.</p>') +
+    '<h3 style="margin:16px 0 6px">Where they fight</h3><div class="sckm"></div>';
+}
+async function scoutPanel(box, oppName) {
+  if (!isStaff()) { box.remove(); return; }
+  const { data: rows } = await sb.from('opponent_scouts').select('*').eq('opponent', oppName).order('created_at', { ascending: false }).limit(5);
+  const all = rows || []; const last = all[0];
+  const ids = last ? (last.riot_ids || []) : [];
+  box.innerHTML = panel('Scout their players', last ? '<button class="btn small ghost danger-t" id="scdel">Delete this scout</button>' : '',
+    '<p class="small muted" style="margin:0 0 8px">Paste their Riot IDs (Name#TAG), one per line. We look up each player\'s rank and last 10 games: agents, maps, K/D, opening duels, and where they get kills.</p>' +
+    '<form id="scf" class="row" style="gap:8px;align-items:flex-start"><textarea name="ids" rows="5" class="grow" placeholder="Player1#NA1&#10;Player2#1234">' + esc(ids.join('\n')) + '</textarea><button class="btn small" id="scgo">' + (last ? 'Scout again' : 'Scout players') + '</button></form>' +
+    '<div id="scres" style="margin-top:12px">' + (last ? scoutHtml(last) : '') + '</div>');
+  const drawMap = row => { const host = $('.sckm', box); if (!host) return; killMapView(host, scoutEvents(row.data), { state: { map: '', side: '', who: 'both', player: '', fb: false, lines: false, heat: true, view: 'us' }, noView: false, usLabel: 'Where they stood', themLabel: 'Where their opponent stood', allLabel: 'All their players', empty: 'No positions in their recent games.' }); };
+  if (last) drawMap(last);
+  $('#scf', box).onsubmit = async e => {
+    e.preventDefault();
+    const list = e.target.ids.value.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+    const bad = list.filter(x => !RIOT_ID_RE.test(x));
+    if (!list.length) { toast('Add at least one Riot ID'); return; }
+    if (bad.length) { toast('Not a Riot ID: ' + bad[0] + ' (use Name#TAG)'); return; }
+    const b = $('#scgo', box); b.disabled = true; b.textContent = 'Scouting ' + list.length + ' player' + (list.length > 1 ? 's' : '') + '…';
+    try { await riotCall({ action: 'scout', opponent: oppName, riot_ids: list.slice(0, 7) }); toast('Scouted'); scoutPanel(box, oppName); }
+    catch (err) { toast(err.message); b.disabled = false; b.textContent = 'Scout players'; }
+  };
+  if ($('#scdel', box)) $('#scdel', box).onclick = async () => { if (!confirm('Delete this scouting run?')) return; const { error } = await sb.from('opponent_scouts').delete().eq('id', last.id); toast(error ? error.message : 'Deleted'); scoutPanel(box, oppName); };
+}
+const _oppProfile = opponentProfile;
+opponentProfile = async function (el, name) {
+  await _oppProfile(el, name);
+  if (!isStaff()) return;
+  const box = document.createElement('div'); box.id = 'scoutbox';
+  const after = $('.kpis', el); if (after && after.parentNode) after.parentNode.insertBefore(box, after.nextSibling); else el.appendChild(box);
+  try { await scoutPanel(box, name); } catch (err) { box.innerHTML = ''; }
+};
+
+// =============================================================== DISCORD REMINDERS (settings in the Discord panel)
+const _discordPanel = discordPanel;
+discordPanel = async function (box, after) {
+  await _discordPanel(box, after);
+  const { data: st } = await sb.rpc('discord_status');
+  if (!st || !st.connected) return;
+  const on = v => v !== false;
+  const div = document.createElement('div'); div.className = 'remind'; div.innerHTML = '<b class="small">Reminders in this channel</b>' +
+    '<label class="small row" style="gap:6px"><input type="checkbox" data-rm="day"' + (on(st.remind_day) ? ' checked' : '') + '> Scrim reminder the day before</label>' +
+    '<label class="small row" style="gap:6px"><input type="checkbox" data-rm="hour"' + (on(st.remind_hour) ? ' checked' : '') + '> Scrim reminder 1 hour before</label>' +
+    '<label class="small row" style="gap:6px"><input type="checkbox" data-rm="avail"' + (st.remind_avail ? ' checked' : '') + '> Monday morning: "fill in your availability"</label>' +
+    '<span class="small muted">Times show in each player\'s own time zone in Discord.</span>';
+  box.appendChild(div);
+  $$('[data-rm]', div).forEach(x => x.onchange = async () => {
+    const v = k => $('[data-rm="' + k + '"]', div).checked;
+    const { error } = await sb.rpc('set_discord_reminders', { p_day: v('day'), p_hour: v('hour'), p_avail: v('avail') });
+    toast(error ? error.message : 'Saved');
+  });
 };
 
 // expose pure helpers for tests

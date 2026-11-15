@@ -211,6 +211,36 @@ export function scrimPlayerStats(match: any, ourTeam: string, R: number) {
       first_kills: fk, first_deaths: fd, trades: tr, traded_deaths: trd, true_hs_pct: shots ? +(hs / shots).toFixed(3) : null, acs: score && R ? Math.round(score / R) : null };
   });
 }
+// ---------------------------------------------------------------- kill positions (kill maps)
+// Compact rows: [round (0-based), ms into round, 1 = our kill / 0 = our death, killer, victim, killer x, killer y, victim x, victim y, weapon, 1 = first kill of the round]
+const roundBase = (kills: any[]) => (kills.length && kills.every((k: any) => Number(k.round) >= 1) ? 1 : 0);
+const locOf = (k: any, puuid: string) => {
+  const l = (k.player_locations || k.player_locations_on_kill || []).find((p: any) => pidOf(p.player || p) === puuid);
+  return l?.location || l?.player_location || null;
+};
+const rnd = (v: any) => (v == null || isNaN(Number(v)) ? null : Math.round(Number(v)));
+export function killEvents(match: any, ourTeam: string, R: number) {
+  const kills: any[] = (match.kills || []).filter((k: any) => k?.killer && k?.victim);
+  const base = roundBase(kills);
+  const first = new Map<number, any>();
+  for (const k of kills) { const ri = Number(k.round) - base; const c = first.get(ri); if (!c || (k.time_in_round_in_ms || 0) < (c.time_in_round_in_ms || 0)) first.set(ri, k); }
+  const out: any[] = [];
+  for (const k of kills) {
+    const ri = Number(k.round) - base; if (ri < 0 || ri >= R) continue;
+    const kl = locOf(k, pidOf(k.killer)); const vl = k.location || k.victim_death_location || locOf(k, pidOf(k.victim));
+    if (!kl && !vl) continue;
+    out.push([ri, k.time_in_round_in_ms || 0, teamOf(k.killer).toLowerCase() === ourTeam.toLowerCase() ? 1 : 0, k.killer.name || "", k.victim.name || "",
+      rnd(kl?.x), rnd(kl?.y), rnd(vl?.x), rnd(vl?.y), k.weapon?.name || k.damage_weapon_name || "", first.get(ri) === k ? 1 : 0]);
+  }
+  return out.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+}
+// which side a team was on in round i (Red attacks first; overtime swaps every round)
+function sideIn(team: string, i: number) {
+  const red = team.toLowerCase() === "red";
+  const atk = i >= 24 ? ((i - 24) % 2 === 0 ? red : !red) : (i < 12 ? red : !red);
+  return atk ? "A" : "D";
+}
+
 async function teamPuuids(admin: SupabaseClient, teamId: number) {
   const { data: members } = await admin.from("profiles").select("id, ign").eq("team_id", teamId);
   const ids = (members || []).map((m: any) => m.id);
@@ -243,7 +273,7 @@ export async function importScrim(admin: SupabaseClient, teamId: number, match: 
   const fields: Record<string, unknown> = {
     team_id: teamId, date, map, type: "Scrim", rounds_won: res.won, rounds_lost: res.lost, start_side: res.start_side,
     atk_won: res.atk_won, atk_lost: res.atk_lost, def_won: res.def_won, def_lost: res.def_lost, pistols_won: res.pistols_won,
-    rounds: res.rounds, riot_match_id: matchId, source: "riot", notes,
+    rounds: res.rounds, riot_match_id: matchId, source: "riot", notes, kills: killEvents(match, side.team, res.R),
   };
   // already imported? update it. A hand-logged game on the same day and map? attach to it. Otherwise insert.
   let { data: existing } = await admin.from("matches").select("id, opponent, event, rounds").eq("riot_match_id", matchId).maybeSingle();
@@ -289,8 +319,8 @@ async function autoImportScrims(admin: SupabaseClient, teamId: number | null, ma
   if (!customs.length) return 0;
   // games already imported with the current round format are left alone (saves work on every sync)
   const ids = customs.map((m) => m.metadata?.match_id).filter(Boolean);
-  const { data: done } = await admin.from("matches").select("riot_match_id, rounds").in("riot_match_id", ids);
-  const fresh = new Set((done || []).filter((d: any) => Array.isArray(d.rounds) && d.rounds.some((r: any) => "fk" in r || "buy" in r)).map((d: any) => d.riot_match_id));
+  const { data: done } = await admin.from("matches").select("riot_match_id, rounds, kills").in("riot_match_id", ids);
+  const fresh = new Set((done || []).filter((d: any) => Array.isArray(d.rounds) && d.rounds.some((r: any) => "fk" in r || "buy" in r) && Array.isArray(d.kills)).map((d: any) => d.riot_match_id));
   let n = 0;
   for (const m of customs) {
     if (fresh.has(m.metadata?.match_id)) continue;
@@ -348,6 +378,8 @@ async function syncUser(admin: SupabaseClient, userId: string, force = false) {
 // A few per run keeps us well inside the HenrikDev rate limit.
 const CRON_BATCH = 6;
 async function cronSync(admin: SupabaseClient) {
+  let reminders = 0;
+  try { reminders = await sendReminders(admin); } catch (_) { /* reminders never block the Riot sync */ }
   const { data: links } = await admin.from("riot_links").select("user_id, synced_at").order("synced_at", { ascending: true, nullsFirst: true }).limit(60);
   const due = (links || []).filter((l: any) => !l.synced_at || Date.now() - new Date(l.synced_at).getTime() > 50 * 60 * 1000).slice(0, CRON_BATCH);
   let synced = 0, failed = 0, scrims = 0;
@@ -356,7 +388,132 @@ async function cronSync(admin: SupabaseClient) {
     catch (e) { failed++; if (/rate limit/i.test(String((e as Error)?.message))) break; }
     await new Promise((r) => setTimeout(r, 1200));
   }
-  return { ok: true, due: due.length, synced, failed, scrims };
+  return { ok: true, due: due.length, synced, failed, scrims, reminders };
+}
+
+// ---------------------------------------------------------------- opponent scouting from Riot IDs
+// Looks at each player's last 10 games: rank, agents, maps, K/D, ACS, HS %, opening duels, where they get kills and die,
+// and games where 3+ of them queued together (Premier / 5-stacks).
+function scoutPlayer(riotId: string, puuid: string, matches: any[], rank: any) {
+  const games: any[] = [], events: any[] = [];
+  for (const m of matches) {
+    const md = m.metadata || {};
+    const queue = String(md.queue?.id || md.queue?.name || "").toLowerCase();
+    if (!STANDARD.has(queue)) continue;
+    const me = (m.players || []).find((p: any) => pidOf(p) === puuid); if (!me) continue;
+    const myTeam = teamOf(me); const team = (m.teams || []).find((t: any) => String(t.team_id) === myTeam) || {};
+    const rounds = (m.rounds || []).length || ((team?.rounds?.won ?? 0) + (team?.rounds?.lost ?? 0)) || 0;
+    const s = me.stats || {}; const map = md.map?.name || md.map || null;
+    const kills: any[] = (m.kills || []).filter((k: any) => k?.killer && k?.victim); const base = roundBase(kills);
+    const first = new Map<number, any>();
+    for (const k of kills) { const ri = Number(k.round) - base; const c = first.get(ri); if (!c || (k.time_in_round_in_ms || 0) < (c.time_in_round_in_ms || 0)) first.set(ri, k); }
+    let fk = 0, fd = 0;
+    for (const k of kills) {
+      const ri = Number(k.round) - base; const isK = pidOf(k.killer) === puuid, isD = pidOf(k.victim) === puuid; if (!isK && !isD) continue;
+      const fb = first.get(ri) === k; if (fb && isK) fk++; if (fb && isD) fd++;
+      const mine = isK ? locOf(k, puuid) : (k.location || k.victim_death_location || locOf(k, puuid));
+      const other = isK ? (k.location || k.victim_death_location || locOf(k, pidOf(k.victim))) : locOf(k, pidOf(k.killer));
+      if (mine && map) events.push([map, sideIn(myTeam, ri), isK ? "k" : "d", rnd(mine.x), rnd(mine.y), rnd(other?.x), rnd(other?.y), fb ? 1 : 0, me.agent?.name || ""]);
+    }
+    const hs = Number(s.headshots) || 0, shots = hs + (Number(s.bodyshots) || 0) + (Number(s.legshots) || 0);
+    games.push({ id: md.match_id, at: md.started_at || null, map, queue, agent: me.agent?.name || null, won: team?.won ?? null,
+      score: team?.rounds ? `${team.rounds.won ?? 0}-${team.rounds.lost ?? 0}` : null, rounds, k: s.kills ?? 0, d: s.deaths ?? 0, a: s.assists ?? 0,
+      acs: rounds ? Math.round((Number(s.score) || 0) / rounds) : null, hs: shots ? +(hs / shots).toFixed(3) : null, fk, fd });
+  }
+  const tally = (key: string) => { const t = new Map<string, { n: number; w: number }>(); for (const g of games) { const v = g[key]; if (!v) continue; const x = t.get(v) || { n: 0, w: 0 }; x.n++; if (g.won) x.w++; t.set(v, x); }
+    return [...t.entries()].sort((a, b) => b[1].n - a[1].n).map(([name, x]) => ({ name, games: x.n, wins: x.w })); };
+  const agents = tally("agent"); const roles = new Map<string, number>();
+  for (const a of agents) { const r = AGENT_ROLE[a.name]; if (r) roles.set(r, (roles.get(r) || 0) + a.games); }
+  const K = games.reduce((a, g) => a + g.k, 0), D = games.reduce((a, g) => a + g.d, 0), R = games.reduce((a, g) => a + g.rounds, 0);
+  const acsW = games.filter((g) => g.acs != null); const hsW = games.filter((g) => g.hs != null);
+  return { riot_id: riotId, puuid, rank: rank?.rank || null, rr: rank?.rank_rr ?? null, peak: rank?.peak_rank || null, games: games.length, wins: games.filter((g) => g.won).length,
+    kd: D ? +(K / D).toFixed(2) : K, kpr: R ? +(K / R).toFixed(2) : null, acs: acsW.length ? Math.round(acsW.reduce((a, g) => a + g.acs * g.rounds, 0) / Math.max(1, acsW.reduce((a, g) => a + g.rounds, 0))) : null,
+    hs: hsW.length ? +(hsW.reduce((a, g) => a + g.hs, 0) / hsW.length).toFixed(3) : null, fk: games.reduce((a, g) => a + g.fk, 0), fd: games.reduce((a, g) => a + g.fd, 0),
+    agents, maps: tally("map"), main_role: [...roles.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null, recent: games, events };
+}
+async function scoutTeam(riotIds: string[]) {
+  const players: any[] = []; const raw = new Map<string, any>(); const puuids = new Map<string, string>();
+  for (const id of riotIds) {
+    const m = id.match(/^(.{3,16})#([A-Za-z0-9]{2,5})$/);
+    if (!m) { players.push({ riot_id: id, error: "Not a Riot ID (Name#TAG)" }); continue; }
+    try {
+      const acc = await henrik(`/valorant/v2/account/${encodeURIComponent(m[1])}/${encodeURIComponent(m[2])}`);
+      if (acc.notFound || !acc.body?.data?.puuid) { players.push({ riot_id: id, error: "Riot couldn't find this player" }); continue; }
+      const puuid = acc.body.data.puuid; const region = REGIONS.includes(String(acc.body.data.region || "").toLowerCase()) ? String(acc.body.data.region).toLowerCase() : "na";
+      const name = `${acc.body.data.name || m[1]}#${acc.body.data.tag || m[2]}`;
+      const r = await henrik(`/valorant/v4/by-puuid/matches/${region}/pc/${puuid}?size=10`);
+      const list: any[] = r.notFound ? [] : (r.body?.data || []);
+      for (const x of list) if (x?.metadata?.match_id) raw.set(x.metadata.match_id, x);
+      puuids.set(puuid, name);
+      players.push(scoutPlayer(name, puuid, list, await fetchRank(region, puuid)));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      players.push({ riot_id: id, error: msg });
+      if (/rate limit/i.test(msg)) break;
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  // games where 3+ of them were on the same side
+  const together: any[] = [];
+  for (const m of raw.values()) {
+    const by = new Map<string, any[]>();
+    for (const p of m.players || []) if (puuids.has(pidOf(p))) { const t = teamOf(p); by.set(t, [...(by.get(t) || []), p]); }
+    for (const [t, ps] of by) {
+      if (ps.length < 3) continue;
+      const team = (m.teams || []).find((x: any) => String(x.team_id) === t) || {};
+      together.push({ id: m.metadata?.match_id, at: m.metadata?.started_at || null, map: m.metadata?.map?.name || null, queue: String(m.metadata?.queue?.id || m.metadata?.queue?.name || "").toLowerCase(),
+        won: team?.won ?? null, score: team?.rounds ? `${team.rounds.won ?? 0}-${team.rounds.lost ?? 0}` : null,
+        comp: (m.players || []).filter((p: any) => teamOf(p) === t).map((p: any) => ({ agent: p.agent?.name || null, name: puuids.get(pidOf(p)) || null })) });
+    }
+  }
+  together.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+  return { players, together, scouted_at: new Date().toISOString() };
+}
+
+// ---------------------------------------------------------------- Discord reminders (run with the 20-minute cron)
+const APP_URL = Deno.env.get("APP_URL") || "https://team-hub-xrg.vercel.app/";
+async function postDiscord(hook: any, text: string, embed: any) {
+  const content = [hook.mention || "", text].filter(Boolean).join(" ");
+  const res = await fetch(hook.webhook_url, { method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(10000),
+    body: JSON.stringify({ username: "Team Hub", content, embeds: [embed], allowed_mentions: { parse: hook.mention ? ["everyone"] : [] } }) });
+  return res.ok;
+}
+const etParts = (d: Date) => Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", hour12: false, year: "numeric", month: "2-digit", day: "2-digit" })
+  .formatToParts(d).map((p) => [p.type, p.value]));
+export async function sendReminders(admin: SupabaseClient) {
+  const { data: hooks } = await admin.from("team_discord").select("*");
+  let sent = 0;
+  const now = Date.now();
+  for (const h of hooks || []) {
+    if (!h.webhook_url) continue;
+    try {
+      if (h.remind_day !== false || h.remind_hour !== false) {
+        const { data: scrims } = await admin.from("scrims").select("id, starts_at, opponent, maps, format, notes, status, reminded_day_at, reminded_hour_at").eq("team_id", h.team_id)
+          .gte("starts_at", new Date(now).toISOString()).lte("starts_at", new Date(now + 25 * 3600000).toISOString()).order("starts_at").limit(20);
+        for (const s of scrims || []) {
+          if (String(s.status || "").toLowerCase() === "cancelled") continue;
+          const at = new Date(s.starts_at).getTime(), ms = at - now, unix = Math.floor(at / 1000);
+          let kind: "hour" | "day" | null = null;
+          if (h.remind_hour !== false && !s.reminded_hour_at && ms <= 75 * 60000) kind = "hour";
+          else if (h.remind_day !== false && !s.reminded_day_at && ms <= 24 * 3600000 && ms > 3 * 3600000) kind = "day";
+          if (!kind) continue;
+          const embed = { title: `Scrim vs ${s.opponent || "TBD"}`, url: APP_URL + "#/schedule", color: kind === "hour" ? 0xff4655 : 0x5865f2,
+            description: `<t:${unix}:F> (<t:${unix}:R>)`, fields: [s.maps ? { name: "Maps", value: String(s.maps).slice(0, 200), inline: true } : null, s.format ? { name: "Format", value: String(s.format).slice(0, 50), inline: true } : null,
+              s.notes ? { name: "Notes", value: String(s.notes).slice(0, 500) } : null].filter(Boolean) };
+          const ok = await postDiscord(h, kind === "hour" ? "⏰ Scrim starts soon. Get on and warm up." : "📅 Scrim tomorrow.", embed);
+          if (ok) { await admin.from("scrims").update(kind === "hour" ? { reminded_hour_at: new Date().toISOString(), reminded_day_at: s.reminded_day_at || new Date().toISOString() } : { reminded_day_at: new Date().toISOString() }).eq("id", s.id); sent++; }
+        }
+      }
+      if (h.remind_avail) {
+        const p = etParts(new Date(now)); const today = `${p.year}-${p.month}-${p.day}`;
+        if (p.weekday === "Mon" && Number(p.hour) >= 10 && h.avail_nudged_on !== today) {
+          const ok = await postDiscord(h, "🗓️ New week: fill in when you can play.", { title: "Update your availability", url: APP_URL + "#/schedule", color: 0x3ba55d, description: "Open Team Hub → Schedule and mark the times you can play this week so we can book scrims." });
+          if (ok) { await admin.from("team_discord").update({ avail_nudged_on: today }).eq("team_id", h.team_id); sent++; }
+        }
+      }
+    } catch (_) { /* one team's bad webhook shouldn't stop the others */ }
+  }
+  return sent;
 }
 
 // ---------------------------------------------------------------- calendar feed (GET ?calendar=<team token>)
@@ -497,6 +654,20 @@ Deno.serve(async (req: Request) => {
       if (r.notFound || !r.body?.data) return json({ error: "Riot couldn't find that game any more." }, 404);
       const res = await importScrim(admin, team, r.body.data, { opponent: String(body.opponent || "").trim().slice(0, 80) || undefined, minLinked: 1 });
       return json({ ok: true, ...res });
+    }
+    if (action === "scout") {
+      const { data: staff } = await userClient.rpc("is_staff");
+      if (staff !== true) return json({ error: "Only team staff can scout opponents." }, 403);
+      const { data: team } = await userClient.rpc("my_team");
+      if (!team) return json({ error: "You're not on a team." }, 400);
+      const opponent = String(body.opponent || "").trim().slice(0, 80);
+      if (!opponent) return json({ error: "Which team is this?" }, 400);
+      const ids = [...new Set((Array.isArray(body.riot_ids) ? body.riot_ids : []).map((x: unknown) => String(x).trim()).filter(Boolean))].slice(0, 7) as string[];
+      if (!ids.length) return json({ error: "Add at least one Riot ID (Name#TAG)." }, 400);
+      const data = await scoutTeam(ids);
+      const { data: row, error } = await admin.from("opponent_scouts").insert({ team_id: team, opponent, riot_ids: ids, data, created_by: uid }).select("id").single();
+      if (error) throw new Error(error.message);
+      return json({ ok: true, id: row.id, data });
     }
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
