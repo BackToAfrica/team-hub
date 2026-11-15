@@ -1,0 +1,8 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/home","wait":1800,"shot":"58-player-done.png"},
+ {"js":"document.querySelector('#ci-edit').click();1","wait":1000},
+ {"js":"!!document.querySelector('.ciform')","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/coach/members","wait":1500,"shot":"59-coach-members.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/playbook","wait":1500,"shot":"60-playbook.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/comps","wait":1500,"shot":"61-comps.png"}
+]

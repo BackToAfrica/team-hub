@@ -1,0 +1,20 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/home","wait":2500},
+ {"shot":"d1-home-coach.png","full":true},
+ {"js":"document.querySelector('.main').innerText.slice(0,500)","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/home","wait":2500},
+ {"shot":"d2-home-player.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/prep","wait":2500},
+ {"shot":"d3-prep.png","full":true},
+ {"js":"document.querySelector('.main').innerText.slice(0,400)","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/reviews","wait":2500},
+ {"shot":"d4-reviews.png","full":true},
+ {"js":"document.querySelector('.main').innerText.slice(0,400)","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/plans","wait":2500},
+ {"js":"(()=>{ const a=document.querySelector('.plancard'); if(a) a.click(); return !!a })()","wait":2500},
+ {"shot":"d5-plan.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/team","wait":2500},
+ {"shot":"d6-team.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/maps","wait":2500},
+ {"shot":"d7-maps.png","full":true}
+]

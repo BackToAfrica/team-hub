@@ -359,11 +359,59 @@ async function cronSync(admin: SupabaseClient) {
   return { ok: true, due: due.length, synced, failed, scrims };
 }
 
+// ---------------------------------------------------------------- calendar feed (GET ?calendar=<team token>)
+// Google / Apple / Outlook subscribe to this URL. The token is the team's secret calendar link.
+const icsEsc = (s: unknown) => String(s ?? "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+const icsTime = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+const icsDate = (iso: string) => iso.slice(0, 10).replace(/-/g, "");
+function icsFold(line: string) { const out: string[] = []; let l = line; while (l.length > 74) { out.push(l.slice(0, 74)); l = " " + l.slice(74); } out.push(l); return out.join("\r\n"); }
+export async function buildCalendar(admin: SupabaseClient, teamId: number) {
+  const { data: team } = await admin.from("teams").select("name").eq("id", teamId).maybeSingle();
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  const { data: scrims } = await admin.from("scrims").select("id, starts_at, opponent, maps, format, notes, status").eq("team_id", teamId).gte("starts_at", since).order("starts_at").limit(200);
+  const weekAgo = new Date(Date.now() - 8 * 86400000).toISOString().slice(0, 10);
+  const { data: plans } = await admin.from("practice_plans").select("id, week_start, title, items").eq("team_id", teamId).eq("published", true).gte("week_start", weekAgo).order("week_start").limit(6);
+  const name = team?.name || "Team Hub";
+  const now = icsTime(new Date());
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Team Hub//Schedule//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:" + icsEsc(name + " schedule"), "X-PUBLISHED-TTL:PT1H", "REFRESH-INTERVAL;VALUE=DURATION:PT1H"];
+  for (const s of scrims || []) {
+    if (!s.starts_at || String(s.status || "").toLowerCase() === "cancelled") continue;
+    const start = new Date(s.starts_at); const hours = /bo3/i.test(String(s.format || "")) ? 3 : /bo2/i.test(String(s.format || "")) ? 2.5 : 2;
+    lines.push("BEGIN:VEVENT", "UID:scrim-" + s.id + "@teamhub", "DTSTAMP:" + now, "DTSTART:" + icsTime(start), "DTEND:" + icsTime(new Date(start.getTime() + hours * 3600000)),
+      "SUMMARY:" + icsEsc("Scrim vs " + (s.opponent || "TBD") + (s.status && s.status !== "Planned" ? " (" + s.status + ")" : "")),
+      "DESCRIPTION:" + icsEsc([s.format, s.maps ? "Maps: " + s.maps : "", s.notes].filter(Boolean).join("\n")), "END:VEVENT");
+  }
+  const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  for (const p of plans || []) {
+    const items: any[] = Array.isArray(p.items) ? p.items : [];
+    DAYS.forEach((d, i) => {
+      const list = items.filter((it) => it && it.day === d && !it.player); if (!list.length) return;
+      const day = new Date(p.week_start + "T12:00:00Z"); day.setUTCDate(day.getUTCDate() + i);
+      const iso = day.toISOString().slice(0, 10), next = new Date(day.getTime() + 86400000).toISOString().slice(0, 10);
+      const mins = list.reduce((a, it) => a + (Number(it.minutes) || 0), 0);
+      lines.push("BEGIN:VEVENT", "UID:practice-" + p.id + "-" + d + "@teamhub", "DTSTAMP:" + now, "DTSTART;VALUE=DATE:" + icsDate(iso), "DTEND;VALUE=DATE:" + icsDate(next),
+        "SUMMARY:" + icsEsc("Practice: " + list.filter((it) => it.focus && it.focus !== "Warm-up").map((it) => it.focus).slice(0, 2).join(" + ") || "Practice"),
+        "DESCRIPTION:" + icsEsc((p.title ? p.title + "\n" : "") + list.map((it) => "• " + (it.minutes ? it.minutes + " min " : "") + (it.focus || "") + (it.detail ? " — " + it.detail : "")).join("\n") + (mins ? "\n(" + mins + " min total)" : "")),
+        "TRANSP:TRANSPARENT", "END:VEVENT");
+    });
+  }
+  lines.push("END:VCALENDAR");
+  return lines.map(icsFold).join("\r\n") + "\r\n";
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
-  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const url = Deno.env.get("SUPABASE_URL")!, anon = Deno.env.get("SUPABASE_ANON_KEY")!, service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const admin = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
+  if (req.method === "GET") {
+    const tok = new URL(req.url).searchParams.get("calendar") || "";
+    if (!/^[a-f0-9]{32,80}$/i.test(tok)) return new Response("Not found", { status: 404 });
+    const { data: teamId } = await admin.rpc("calendar_team", { t: tok });
+    if (!teamId) return new Response("This calendar link was reset. Ask your coach for the new one.", { status: 404 });
+    try { return new Response(await buildCalendar(admin, Number(teamId)), { headers: { "Content-Type": "text/calendar; charset=utf-8", "Cache-Control": "public, max-age=900", "Access-Control-Allow-Origin": "*" } }); }
+    catch (e) { return new Response("Calendar error: " + (e instanceof Error ? e.message : String(e)), { status: 500 }); }
+  }
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const cronToken = req.headers.get("x-cron-token");
   if (cronToken) {
     const { data: ok } = await admin.rpc("cron_token_ok", { t: cronToken });

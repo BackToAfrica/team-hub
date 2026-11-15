@@ -1,0 +1,4 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/reviews/501","wait":2500},
+ {"js":"document.querySelector('.takeaways').innerHTML.slice(0,600)","print":true}
+]

@@ -1,0 +1,17 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html#/home","wait":1200,"shot":"01-home.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html#/checkin","wait":1000,"shot":"02-checkin.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html#/team","wait":1000,"shot":"03-team.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html#/playbook","wait":1000,"js":"document.querySelector('details.item')&&document.querySelector('details.item').setAttribute('open','');1","shot":"04-playbook.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html#/playbook/comms","wait":1000,"shot":"05-comms.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html#/comps","wait":1000,"js":"(async()=>{const s=[...document.querySelectorAll('select[data-i]')];['Jett','Raze','Omen','Sova','Viper'].forEach((n,i)=>{s[i].value=n;s[i].dispatchEvent(new Event('change'))});return 1})()","shot":"06-comps.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html#/coach/members","wait":1000,"shot":"07-members.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html#/coach/checkins","wait":1000,"shot":"08-checkins.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html#/coach/data/set_plays","wait":1200,"shot":"09-data.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/home","wait":1200,"shot":"10-player-home.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/stats","wait":1000,"shot":"11-player-stats.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-new#/home","wait":1000,"shot":"12-pending.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=none","wait":1000,"shot":"13-login.png"},
+ {"size":[390,844]},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-kai#/checkin","wait":1000,"shot":"14-mobile-checkin.png"}
+]

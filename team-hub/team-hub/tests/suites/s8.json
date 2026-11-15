@@ -1,0 +1,232 @@
+[
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/home",
+"wait": 1800,
+"shot": "80-coach-home.png",
+"full": true
+},
+{
+"js": "[...document.querySelectorAll('.card-h h2')].map(h=>h.textContent).join(' | ') + ' || ' + (document.querySelector('.nextscrim')||{}).innerText",
+"print": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/schedule",
+"wait": 1500,
+"shot": "81-coach-schedule.png",
+"full": true
+},
+{
+"js": "document.querySelectorAll('.best').length + ' best; ' + document.querySelectorAll('td.cell').length + ' cells; missing: ' + ([...document.querySelectorAll('.card-h h2')].map(h=>h.textContent).includes(\"Haven't filled in this week\"))",
+"print": true
+},
+{
+"js": "(()=>{const td=[...document.querySelectorAll('td.cell:not(.past)')][0]; td.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true})); const td2=[...document.querySelectorAll('td.cell:not(.past)')][7]; td2.dispatchEvent(new PointerEvent('pointerenter')); document.dispatchEvent(new PointerEvent('pointerup')); return 1})()",
+"wait": 1500
+},
+{
+"js": "JSON.stringify(__MOCKDB__.availability.map(a=>a.user_id+':'+a.slots.length)) + ' ' + document.querySelector('#savest').textContent",
+"print": true
+},
+{
+"js": "(()=>{document.querySelector('[data-book]').click(); const f=document.querySelector('#sf'); f.opponent.value='Grey Wolves'; f.querySelector('[name=maps][value=Haven]').checked=true; f.querySelector('[name=maps][value=Lotus]').checked=true; f.requestSubmit(); return 1})()",
+"wait": 1500
+},
+{
+"js": "JSON.stringify(__MOCKDB__.scrims.map(s=>s.id+':'+s.opponent+':'+s.maps+':'+s.status))",
+"print": true
+},
+{
+"js": "(()=>{document.querySelector('[data-result=\"71\"]').click(); const f=document.querySelector('#rf'); f.rw0.value='13'; f.rl0.value='7'; f.aw0.value='8'; f.al0.value='4'; f.dw0.value='5'; f.dl0.value='3'; f.pw0.value='2'; f.rw1.value='10'; f.rl1.value='13'; return 1})()",
+"wait": 600,
+"shot": "82-result-modal.png"
+},
+{
+"js": "document.querySelector('#rf').requestSubmit(); 1",
+"wait": 1500
+},
+{
+"js": "JSON.stringify(__MOCKDB__.matches.filter(m=>m.scrim_id===71).map(m=>m.map+' '+m.rounds_won+'-'+m.rounds_lost+' atk'+m.atk_won+' p'+m.pistols_won)) + ' status=' + __MOCKDB__.scrims.find(s=>s.id===71).status",
+"print": true
+},
+{
+"js": "(()=>{const b=[...document.querySelectorAll('[data-plan]')][0]; return b ? (b.click(), 'clicked') : 'no plan button'})()",
+"print": true,
+"wait": 800
+},
+{
+"js": "(()=>{const f=document.querySelector('#er'); return f.opponent.value + ' | ' + f.maps.value + ' | ' + f.match_date.value})()",
+"print": true
+},
+{
+"js": "document.querySelector('#er').attack_plan.value='Hit A fast'; document.querySelector('#er').requestSubmit(); 1",
+"wait": 1200
+},
+{
+"js": "JSON.stringify(__MOCKDB__.game_plans.map(p=>p.id+':'+p.opponent+':scrim'+p.scrim_id+':'+p.published))",
+"print": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/maps",
+"wait": 1500,
+"shot": "83-coach-maps.png",
+"full": true
+},
+{
+"js": "(()=>{const s=[...document.querySelectorAll('.poolsel')].find(x=>x.dataset.map==='Ascent'); s.value='In pool'; s.dispatchEvent(new Event('change')); return 1})()",
+"wait": 1200
+},
+{
+"js": "(()=>{const i=[...document.querySelectorAll('.poolnote')].find(x=>x.dataset.map==='Haven'); i.value='Learn defaults'; i.dispatchEvent(new Event('change')); return 1})()",
+"wait": 1000
+},
+{
+"js": "JSON.stringify(__MOCKDB__.map_pool.map(p=>p.map+':'+p.status+':'+(p.notes||'')))",
+"print": true
+},
+{
+"js": "document.querySelector('.kpis').innerText.replace(/\\n/g,' ') + ' || ' + ([...document.querySelectorAll('.card-h h2')].find(h=>h.textContent==='Veto helper')||{}).textContent",
+"print": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/maps/scrim/30",
+"wait": 1200,
+"shot": "84-maps-filtered.png"
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/plans",
+"wait": 1200,
+"shot": "85-plans.png",
+"full": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/plans/81",
+"wait": 1500,
+"shot": "86-plan.png",
+"full": true
+},
+{
+"js": "[...document.querySelectorAll('.card-h h2')].map(h=>h.textContent).join(' | ')",
+"print": true
+},
+{
+"js": "document.querySelector('#pub').click(); 1",
+"wait": 1000
+},
+{
+"js": "'published=' + __MOCKDB__.game_plans.find(p=>p.id===81).published",
+"print": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/workon/all",
+"wait": 1500,
+"shot": "87-coach-workon.png",
+"full": true
+},
+{
+"js": "document.querySelector('.kpis').innerText.replace(/\\n/g,' ') + ' || ' + [...document.querySelectorAll('.card-h h2')].map(h=>h.textContent).join(',')",
+"print": true
+},
+{
+"js": "(()=>{document.querySelector('[data-wseen=\"604\"]').click(); const f=document.querySelector('#sa'); f.source.value='Scrim vs Night Owls'; f.requestSubmit(); return 1})()",
+"wait": 1200
+},
+{
+"js": "(()=>{const w=__MOCKDB__.work_on.find(x=>x.id===604); return w.status+' came_back='+w.came_back+' seen='+JSON.stringify(w.seen)})()",
+"print": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/coach/work",
+"wait": 1500,
+"shot": "88-coach-work.png",
+"full": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-fear#/home",
+"wait": 1800,
+"shot": "90-fear-home.png",
+"full": true
+},
+{
+"js": "(document.querySelector('.nextscrim')||{}).innerText + ' || nudge=' + !!document.querySelector('a.card.alert[href=\"#/schedule\"]')",
+"print": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-fear#/schedule/1",
+"wait": 1500,
+"shot": "91-fear-schedule.png",
+"full": true
+},
+{
+"js": "(()=>{const before=__MOCKDB__.availability.find(a=>a.user_id==='u-fear').slots.length; const c=[...document.querySelectorAll('td.cell:not(.past):not(.mine)')]; c[0].dispatchEvent(new PointerEvent('pointerdown',{bubbles:true})); c[1].dispatchEvent(new PointerEvent('pointerenter')); document.dispatchEvent(new PointerEvent('pointerup')); window.__b=before; return 1})()",
+"wait": 1500
+},
+{
+"js": "'before '+window.__b+' after '+__MOCKDB__.availability.find(a=>a.user_id==='u-fear').slots.length",
+"print": true
+},
+{
+"js": "document.querySelector('#clearwk').click(); 1",
+"wait": 1500
+},
+{
+"js": "'after clear '+__MOCKDB__.availability.find(a=>a.user_id==='u-fear').slots.length",
+"print": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-fear#/schedule/1",
+"wait": 1200
+},
+{
+"js": "document.querySelector('#copyprev').click(); 1",
+"wait": 1500
+},
+{
+"js": "'after copy '+__MOCKDB__.availability.find(a=>a.user_id==='u-fear').slots.length",
+"print": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-fear#/maps",
+"wait": 1500,
+"shot": "92-fear-maps.png"
+},
+{
+"js": "'selects=' + document.querySelectorAll('.poolsel').length",
+"print": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-fear#/plans/81",
+"wait": 1500,
+"shot": "93-fear-plan.png",
+"full": true
+},
+{
+"js": "'coach buttons=' + !!document.querySelector('#pedit')",
+"print": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-fear#/workon",
+"wait": 1500,
+"shot": "94-fear-workon.png",
+"full": true
+},
+{
+"js": "[...document.querySelectorAll('.wprog')].map(x=>x.innerText.replace(/\\n/g,' ')).join(' / ') + ' || seenbtn=' + !!document.querySelector('[data-wseen]')",
+"print": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-fear#/schedule",
+"size": [
+390,
+844
+],
+"wait": 1500,
+"shot": "95-mobile-schedule.png",
+"full": true
+},
+{
+"go": "file:///home/claude/teamapp-test/index.html?as=u-fear#/maps",
+"wait": 1200,
+"shot": "96-mobile-maps.png",
+"full": true
+}
+]

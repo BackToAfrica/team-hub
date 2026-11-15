@@ -396,6 +396,7 @@ const NAV = [
   { r: 'stats', label: 'My stats', sec: 'my_stats', i: 'chart', g: 'Team' },
   { r: 'workon', label: 'Work on', sec: 'reviews', i: 'target', g: 'Team' },
   { r: 'practice', label: 'Practice plan', sec: null, i: 'route', g: 'Team' },
+  { r: 'goals', label: 'Season goals', sec: null, i: 'flag', g: 'Team' },
   { r: 'live', label: 'Live match', sec: 'scouting', i: 'bolt', g: 'Prepare' },
   { r: 'prep', label: 'Match prep center', sec: 'scouting', i: 'target', g: 'Prepare' },
   { r: 'plans', label: 'Game plans', sec: 'scouting', i: 'flag', g: 'Prepare' },
@@ -426,14 +427,14 @@ function render() {
   if (me && !me.team_id) { renderOnboard(); return; }
   if (!me || !me.approved) { renderPending(); return; }
   const items = NAV.filter(navAllowed);
-  if (!items.some(n => n.r === S.route) && S.route !== 'player' && !((S.route === 'coach' || S.route === 'explore' || S.route === 'report') && isStaff()) && !(S.route === 'owner' && me.is_admin) && S.route !== 'account') S.route = 'home';
+  if (!items.some(n => n.r === S.route) && S.route !== 'player' && !((S.route === 'coach' || S.route === 'explore' || S.route === 'report' || S.route === 'tryouts') && isStaff()) && !((S.route === 'owner' || S.route === 'health') && me.is_admin) && S.route !== 'account') S.route = 'home';
   const ownerView = me.is_admin && S.team && S.team.owner_id !== me.id;
   const link = (r, label, i) => '<a href="#/' + r + '" class="' + (S.route === r ? 'active' : '') + '">' + icon(i) + '<span>' + esc(label) + '</span></a>';
   const groups = groupBy(items, 'g');
   const navHtml = groups.map(([g, list]) => '<div class="nav-g">' + esc(g) + '</div>' + list.map(n => link(n.r, n.label, n.i)).join('')).join('') +
     (isStaff() || me.is_admin ? '<div class="nav-g">Manage</div>' : '') +
-    (isStaff() ? link('coach', me.is_coach ? 'Coach panel' : 'Staff panel', 'gear') + link('report', 'Weekly report', 'doc') + link('explore', 'Other teams', 'eye') : '') +
-    (me.is_admin ? link('owner', 'All teams', 'globe') : '');
+    (isStaff() ? link('coach', me.is_coach ? 'Coach panel' : 'Staff panel', 'gear') + link('report', 'Weekly report', 'doc') + link('tryouts', 'Tryouts', 'users') + link('explore', 'Other teams', 'eye') : '') +
+    (me.is_admin ? link('owner', 'All teams', 'globe') + link('health', 'Health', 'bolt') : '') + installLinkHtml();
   $('#app').innerHTML =
     '<div class="topbar"><button id="menubtn" aria-label="Menu">☰</button><span class="dot"></span><b>' + esc(teamName()) + '</b></div>' +
     '<div class="layout"><aside class="sidebar" id="sidebar"><div class="brand"><span class="dot"></span><span class="bn">' + esc(teamName()) + '</span>' + (S.team && S.team.tag ? '<span class="tag">' + esc(S.team.tag) + '</span>' : '') + '</div>' +
@@ -446,7 +447,7 @@ function render() {
   $$('#sidebar a').forEach(a => a.addEventListener('click', () => $('#sidebar').classList.remove('open')));
   window.scrollTo(0, 0);
   const page = PAGES[S.route] || PAGES.home;
-  Promise.resolve(page($('#main'))).catch(err => { $('#main').innerHTML = '<div class="card error">Something went wrong: ' + esc(err.message || err) + '</div>'; console.error(err); });
+  Promise.resolve(page($('#main'))).catch(err => { $('#main').innerHTML = '<div class="card error">Something went wrong: ' + esc(err.message || err) + '</div>'; console.error(err); logError('[' + S.route + '] ' + (err.message || err), err && err.stack); });
 }
 
 async function renderOnboard() {
@@ -909,8 +910,10 @@ PAGES.home = async function (el) {
   el.innerHTML = '<div class="home-dashboard"><div class="home-topline"><div><div class="eyebrow">TEAM OPERATIONS / OVERVIEW</div><div class="home-date">' + new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }) + '</div></div><div class="home-live"><span></span> TEAM SPACE ACTIVE</div></div>' +
     hero.replace('class="hero"', 'class="hero home-hero"') + performanceHtml +
     '<div class="home-section-label"><span>YOUR TEAM WORKSPACE</span><i></i></div>' +
-    (coach ? coachOpsHtml : playerGrowthHtml) + '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + schedHtml + (coach ? '' : focusHtml) + '<div id="home-practice"></div>' + annHtml + statsHtml + rosterHtml + '</div></div></div>';
+    (coach ? coachOpsHtml : playerGrowthHtml) + '<div class="home-grid"><div class="col">' + (coach ? focusHtml : '') + coachHtml + ciHtml + '</div><div class="col">' + schedHtml + (coach ? '' : focusHtml) + '<div id="home-onboard"></div><div id="home-goals"></div><div id="home-practice"></div>' + annHtml + statsHtml + rosterHtml + '</div></div></div>';
   homePractice($('#home-practice', el)).catch(() => {});
+  homeGoals($('#home-goals', el)).catch(() => {});
+  homeOnboarding($('#home-onboard', el)).catch(() => {});
   if (doCheckin) {
     const mineToday = myHist.find(h => String(h.day).slice(0, 10) === today);
     const showForm = () => checkinForm($('#ci-box'), today, () => { S.cache = {}; render(); });
@@ -2053,7 +2056,7 @@ PAGES.schedule = async function (el) {
     return '<td class="cell l' + lvl + (mySlots.has(k) ? ' mine' : '') + (dt.getTime() < nowMs ? ' past' : '') + '" data-k="' + k + '" title="' + esc(names || 'Nobody yet') + '">' + (n ? '<span>' + n + '</span>' : '') + '</td>'; }).join('') + '</tr>').join('');
 
   el.innerHTML = '<div class="page-h"><div><h1>Schedule</h1><p class="muted">Mark when you can play, and see when the whole team is free. Times are in your time zone' + (myTZ() ? ' (' + esc(myTZ().replace(/_/g, ' ')) + ')' : '') + '.</p></div>' +
-    (coach ? '<button class="btn small" id="book">Book a scrim</button>' : '') + '</div>' +
+    '<div class="row"><button class="btn small ghost" id="calsync">📅 Add to my calendar</button>' + (coach ? '<button class="btn small" id="book">Book a scrim</button>' : '') + '</div></div>' +
     panel('Upcoming scrims', '', upcoming.length ? '<div class="slist">' + upcoming.map(scrimRow).join('') + '</div>' : empty(coach ? 'No scrims booked. Use “Best times” below to find when everyone is free.' : 'No scrims booked yet.')) +
     '<div class="sched-grid">' +
     '<section class="card panel"><div class="card-h"><h2>When are you free?</h2><div class="row" style="gap:6px"><a class="btn small ghost" href="#/schedule/' + (off - 1) + '">←</a><b class="small">' +
@@ -2097,6 +2100,8 @@ PAGES.schedule = async function (el) {
     if (!n) { toast('Nothing to copy from last week'); return; } save().then(() => render()); };
   $('#clearwk').onclick = () => { DAYS.forEach((_, d) => SCHED_HOURS.forEach(h => mySlots.delete(slotKey(slotDate(monday, d, h))))); save().then(() => render()); };
   if ($('#book')) $('#book').onclick = () => scrimForm(null, null);
+  $('#calsync').onclick = () => calendarModal();
+  if (location.hash.split('/')[2] === 'cal') { history.replaceState(null, '', '#/schedule'); calendarModal(); }
   $$('[data-book]', el).forEach(b => b.onclick = () => scrimForm(null, b.dataset.book));
   $$('[data-sedit]', el).forEach(b => b.onclick = () => scrimForm(scrims.find(s => s.id === Number(b.dataset.sedit))));
   $$('[data-result]', el).forEach(b => b.onclick = () => scrimResult(scrims.find(s => s.id === Number(b.dataset.result))));
@@ -3680,8 +3685,217 @@ PAGES.report = async function (el) {
   $('#rcopy', el).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('Copied — paste it in Discord'); } catch (e) { toast('Couldn\'t copy — open "Text version" below'); } };
 };
 
+
+// =============================================================== TABLE CONFIGS for new tables
+const TRY_STATUSES = ['Applied', 'Trial', 'Signed', 'Passed'];
+const TRY_SCORES = [['aim', 'Aim'], ['sense', 'Game sense'], ['comms', 'Comms'], ['util', 'Utility'], ['attitude', 'Attitude'], ['fit', 'Role fit']];
+TABLES.tryouts = { label: 'Tryouts', order: 'created_at', req: 'name', fields: [
+  F('name', 'Name / IGN'), F('riot_id', 'Riot ID (Name#TAG)'), F('discord', 'Discord username'), F('role', 'Role', 'select', ['Role'], { options: [''].concat(ROLES) }),
+  F('rank', 'Rank'), F('status', 'Stage', 'select', ['Stage'], { options: TRY_STATUSES }), F('trial_start', 'Trial starts', 'date'), F('trial_end', 'Trial ends', 'date'),
+  F('source', 'Where they came from (LFT post, referral…)'), F('notes', 'Notes', 'long')] };
+const GOAL_METRICS = ['', 'Map win %', 'Round win %', 'Scrim maps played', 'Attack round win %', 'Defense round win %', 'Pistol win %', 'Rounds 2–3 after a won pistol', 'First kill is ours %', 'Anti-eco win %', 'Team average grade', 'Check-in rate %'];
+TABLES.team_goals = { label: 'Season goals', order: 'deadline', asc: true, req: 'title', fields: [
+  F('title', 'Goal (e.g. Qualify for open qualifiers)'), F('metric', 'Track with a stat (optional)', 'select', ['Metric'], { options: GOAL_METRICS }),
+  F('target', 'Target (e.g. 60 for 60%, or 40 maps)', 'num'), F('since', 'Count from (date)', 'date'), F('deadline', 'Deadline', 'date'), F('notes', 'Notes for the team', 'long'), F('done', 'Achieved', 'bool')] };
+STAFF_TABLES.push('tryouts', 'team_goals');
+
+// =============================================================== ERROR LOG (owner sees it on the Health page)
+const ERR_SEEN = new Set(); let errCount = 0;
+function logError(message, stack) {
+  try {
+    if (!S.me || !sb || errCount >= 8) return;
+    const key = String(message).slice(0, 200); if (ERR_SEEN.has(key)) return; ERR_SEEN.add(key); errCount++;
+    Promise.resolve(sb.from('app_errors').insert([{ message: key, stack: String(stack || '').slice(0, 2000), url: location.hash.slice(0, 200), ua: navigator.userAgent.slice(0, 200) }])).then(() => {}, () => {});
+  } catch (e) { /* never let logging break the page */ }
+}
+window.addEventListener('error', e => { if (e && e.message && !/ResizeObserver|Script error/.test(e.message)) logError(e.message, e.error && e.error.stack); });
+window.addEventListener('unhandledrejection', e => { const r = e && e.reason; logError((r && r.message) || String(r), r && r.stack); });
+
+// =============================================================== INSTALL AS AN APP
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.installEvt = e; const b = document.getElementById('installapp'); if (b) b.hidden = false; });
+function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream; }
+function isStandalone() { return (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }
+function installLinkHtml() {
+  if (isStandalone()) return '';
+  return '<button type="button" class="navbtn" id="installapp"' + (S.installEvt || isIOS() ? '' : ' hidden') + '>' + icon('bolt') + '<span>Install app</span></button>';
+}
+document.addEventListener('click', async e => {
+  if (!e.target.closest('#installapp')) return;
+  if (S.installEvt) { S.installEvt.prompt(); try { await S.installEvt.userChoice; } catch (er) { /* dismissed */ } S.installEvt = null; const b = document.getElementById('installapp'); if (b) b.hidden = true; return; }
+  openModal('<h2>Install Team Hub</h2><p>On iPhone or iPad: tap the <b>Share</b> button in Safari, then <b>Add to Home Screen</b>. It opens full screen like an app.</p><div class="row"><button class="btn" data-close>Got it</button></div>');
+});
+
+// =============================================================== SEASON GOALS
+async function goalValue(g, ctx) {
+  const since = g.since || String(g.created_at || '').slice(0, 10) || null;
+  const ms = ctx.matches.filter(m => !since || String(m.date || '') >= since);
+  const an = teamAnalytics(ms);
+  const rd = { w: sum(ms, 'rounds_won'), l: sum(ms, 'rounds_lost') };
+  switch (g.metric) {
+    case 'Map win %': return ms.length ? { v: ms.filter(isWin).length / ms.length, pct: true, n: ms.length + ' maps' } : null;
+    case 'Round win %': return rd.w + rd.l ? { v: rd.w / (rd.w + rd.l), pct: true, n: ms.length + ' maps' } : null;
+    case 'Scrim maps played': { const n = ms.filter(m => matchType(m) === 'Scrim').length; return { v: n, n: 'scrim maps' }; }
+    case 'Attack round win %': return an.atk.n ? { v: an.atk.p, pct: true, n: an.atk.n + ' rounds' } : null;
+    case 'Defense round win %': return an.def.n ? { v: an.def.p, pct: true, n: an.def.n + ' rounds' } : null;
+    case 'Pistol win %': return an.pistols.n ? { v: an.pistols.p, pct: true, n: an.pistols.n + ' pistols' } : null;
+    case 'Rounds 2–3 after a won pistol': return an.conv.n ? { v: an.conv.p, pct: true, n: an.conv.n + ' rounds' } : null;
+    case 'First kill is ours %': return an.fkRounds ? { v: an.fkShare, pct: true, n: an.fkRounds + ' rounds' } : null;
+    case 'Anti-eco win %': return an.antiEco.n ? { v: an.antiEco.p, pct: true, n: an.antiEco.n + ' rounds' } : null;
+    case 'Team average grade': { const g2 = ctx.ps.filter(r => !since || String(r.date || '') >= since).map(perfScore).filter(x => x != null); return g2.length ? { v: g2.reduce((a, b) => a + b, 0) / g2.length, n: g2.length + ' stat lines', grade: true } : null; }
+    case 'Check-in rate %': {
+      if (!ctx.checkins) return null;
+      const days = Math.max(1, Math.round((Date.now() - new Date((since || todayISO()) + 'T00:00:00').getTime()) / 86400000) + 1);
+      const ppl = ctx.players || 1; const n = ctx.checkins.filter(c => !since || String(c.day || '') >= since).length;
+      return { v: Math.min(1, n / (ppl * days)), pct: true, n: n + ' check-ins' };
+    }
+  }
+  return null;
+}
+async function goalsCtx() {
+  const [matches, ps, team] = await Promise.all([can('team_stats') || isStaff() ? cached('matches') : [], can('team_stats') || isStaff() ? cached('player_stats') : [], teamPlayers()]);
+  const checkins = isStaff() ? await db.list('checkins', { gte: { day: addDays(todayISO(), -120) }, limit: 5000 }).catch(() => null) : null;
+  return { matches: matches, ps: ps, checkins: checkins, players: team.players.filter(p => p.user_id && !p.bench).length };
+}
+function goalCard(g, val) {
+  let target = g.target == null || g.target === '' ? null : Number(g.target);
+  if (val && val.pct && target != null && target > 1) target = target / 100;
+  const fmt = v => val && val.pct ? pct(v) : val && val.grade ? letterOf(v) + ' (' + Math.round(v) + ')' : num(v, 0);
+  const prog = val && target ? Math.max(0, Math.min(1, val.v / target)) : null;
+  const hit = g.done || (val && target != null && val.v >= target);
+  const days = g.deadline ? Math.round((new Date(g.deadline + 'T23:59:59').getTime() - Date.now()) / 86400000) : null;
+  return '<div class="goal' + (hit ? ' hit' : '') + '"><div class="row spread"><b>' + esc(g.title) + '</b><span class="row" style="gap:6px">' + (hit ? '<span class="pill green">' + (g.done ? 'Achieved' : 'On target') + '</span>' : '') +
+    (days != null ? '<span class="pill ' + (days < 0 ? 'red' : days <= 14 ? 'yellow' : '') + '">' + (days < 0 ? Math.abs(days) + 'd overdue' : days === 0 ? 'Due today' : days + 'd left') + '</span>' : '') + rowActions('team_goals', g) + '</span></div>' +
+    (g.metric ? '<div class="small" style="margin-top:6px">' + esc(g.metric) + ': <b>' + (val ? fmt(val.v) : '–') + '</b>' + (target != null ? ' / ' + (val ? fmt(target) : esc(g.target)) : '') + (val && val.n ? ' <span class="muted">(' + esc(val.n) + ')</span>' : '') + '</div>' +
+      (prog != null ? '<div class="bar" style="margin-top:6px"><div style="width:' + Math.round(prog * 100) + '%"></div></div>' : '') : '') +
+    (g.notes ? '<div class="small muted" style="margin-top:6px">' + inlineMd(g.notes) + '</div>' : '') + '</div>';
+}
+async function goalsHtml(goals, ctx) {
+  const vals = await Promise.all(goals.map(g => g.metric ? goalValue(g, ctx) : null));
+  return goals.map((g, i) => goalCard(g, vals[i])).join('');
+}
+PAGES.goals = async function (el) {
+  const [goals, ctx] = await Promise.all([db.list('team_goals', { order: 'deadline', asc: true, limit: 200 }), goalsCtx()]);
+  const open = goals.filter(g => !g.done), done = goals.filter(g => g.done);
+  el.innerHTML = '<div class="page-h"><div><h1>Season goals</h1><p class="muted">What we\'re working toward this season. Goals with a stat update on their own from logged games.</p></div>' +
+    addButton('team_goals', 'Add a goal', { since: todayISO() }) + '</div>' +
+    (goals.length ? '<div class="goals">' + await goalsHtml(open, ctx) + '</div>' + (done.length ? '<h2 style="margin-top:20px">Achieved</h2><div class="goals">' + await goalsHtml(done, ctx) + '</div>' : '')
+      : empty(isStaff() ? 'No goals yet. Add the big ones first — e.g. “Qualify for open qualifiers” with a deadline, or “Win 60% of scrim maps”.' : 'Your coach hasn\'t set season goals yet.'));
+};
+async function homeGoals(box) {
+  if (!box) return;
+  const goals = (await db.list('team_goals', { order: 'deadline', asc: true, limit: 50 })).filter(g => !g.done).slice(0, 3);
+  if (!goals.length) return;
+  box.innerHTML = panel('Season goals', '<a class="small" href="#/goals">All →</a>', '<div class="goals">' + await goalsHtml(goals, await goalsCtx()) + '</div>');
+}
+
+// =============================================================== TRYOUTS (staff)
+function tryAvg(t) { const v = TRY_SCORES.map(([k]) => Number((t.scores || {})[k])).filter(x => x > 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; }
+function tryStats(t, ps) {
+  const names = [t.name, t.riot_id && t.riot_id.split('#')[0], t.riot_id].filter(Boolean).map(normName);
+  const rows = ps.filter(r => names.includes(normName(r.player)));
+  return rows.length ? Object.assign({ rows: rows }, playerAnalytics(rows)[0]) : null;
+}
+PAGES.tryouts = async function (el) {
+  if (!isStaff()) { el.innerHTML = '<p>Coaches only.</p>'; return; }
+  const view = location.hash.split('/')[2] || 'board';
+  const [rows, ps] = await Promise.all([db.list('tryouts', { order: 'created_at', asc: false, limit: 500 }), cached('player_stats')]);
+  const tab = (v, l) => '<a href="#/tryouts/' + v + '" class="' + (view === v ? 'active' : '') + '">' + l + '</a>';
+  el.innerHTML = '<div class="page-h"><div><h1>Tryouts</h1><p class="muted">Track players from first contact to signed. Trial scrim stats fill in on their own when their name matches the stats.</p></div>' +
+    addButton('tryouts', 'Add a player', { status: 'Applied' }) + '</div><div class="tabs">' + tab('board', 'Pipeline') + tab('compare', 'Compare trials') + '</div><div id="trbox"></div>';
+  const box = $('#trbox', el);
+  if (!rows.length) { box.innerHTML = empty('No one in tryouts yet. Add players as they apply (LFT posts, referrals), move them to Trial, score them after scrims, then sign or pass.'); return; }
+  if (view === 'compare') {
+    const list = rows.filter(t => t.status === 'Trial' || t.status === 'Signed');
+    box.innerHTML = list.length ? '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Role</th><th>Rank</th><th>Stage</th>' + TRY_SCORES.map(([, l]) => '<th class="num">' + l + '</th>').join('') + '<th class="num">Avg</th><th class="num">Maps</th><th class="num">K/D</th><th class="num">Grade</th><th class="num">Opening win %</th></tr></thead><tbody>' +
+      list.map(t => { const st = tryStats(t, ps), a = tryAvg(t); return '<tr><td><b>' + esc(t.name) + '</b>' + (t.riot_id ? '<div class="small muted">' + esc(t.riot_id) + '</div>' : '') + '</td><td>' + rolePill(t.role) + '</td><td>' + (t.rank ? rankPill(t.rank) : '–') + '</td><td>' + esc(t.status) + '</td>' +
+        TRY_SCORES.map(([k]) => '<td class="num">' + ((t.scores || {})[k] || '–') + '</td>').join('') + '<td class="num"><b>' + (a ? num(a, 1) : '–') + '</b></td><td class="num">' + (st ? st.maps : 0) + '</td><td class="num">' + (st ? num(st.kd, 2) : '–') + '</td><td class="num">' + (st && st.score != null ? gradePill({}, st.score) : '–') + '</td><td class="num">' + (st ? pct(st.open) : '–') + '</td></tr>'; }).join('') +
+      '</tbody></table></div>' : empty('Move players to Trial to compare them here.');
+    return;
+  }
+  box.innerHTML = '<div class="kanban">' + TRY_STATUSES.map(s => { const list = rows.filter(t => (t.status || 'Applied') === s);
+    return '<section class="kcol"><div class="row spread"><h3>' + s + '</h3><span class="muted small">' + list.length + '</span></div>' + list.map(t => {
+      const st = tryStats(t, ps), a = tryAvg(t), i = TRY_STATUSES.indexOf(s);
+      return '<div class="card tcard"><div class="row spread"><b>' + esc(t.name) + '</b>' + (a ? '<span class="pill ' + (a >= 4 ? 'green' : a >= 3 ? 'yellow' : 'red') + '">' + num(a, 1) + '/5</span>' : '') + '</div>' +
+        '<div class="row small" style="gap:6px;margin-top:4px">' + rolePill(t.role) + (t.rank ? rankPill(t.rank) : '') + (t.riot_id ? '<span class="muted">' + esc(t.riot_id) + '</span>' : '') + '</div>' +
+        (t.trial_start || t.trial_end ? '<div class="small muted" style="margin-top:4px">Trial ' + (t.trial_start ? fmtDate(t.trial_start) : '?') + ' – ' + (t.trial_end ? fmtDate(t.trial_end) : '?') + '</div>' : '') +
+        (st ? '<div class="small" style="margin-top:6px">' + st.maps + ' map' + (st.maps > 1 ? 's' : '') + ' · ' + num(st.kd, 2) + ' K/D' + (st.score != null ? ' · ' + gradePill({}, st.score) : '') + '</div>' : '') +
+        '<div class="tscores">' + TRY_SCORES.map(([k, l]) => { const v = Number((t.scores || {})[k]) || 0; return '<div class="small"><span>' + l + '</span><span class="stars">' + [1, 2, 3, 4, 5].map(n => '<button type="button" data-tscore="' + t.id + ':' + k + ':' + n + '" class="' + (n <= v ? 'on' : '') + '" aria-label="' + l + ' ' + n + '">★</button>').join('') + '</span></div>'; }).join('') + '</div>' +
+        (t.notes ? '<div class="small muted" style="margin-top:6px">' + inlineMd(String(t.notes).slice(0, 220)) + '</div>' : '') +
+        '<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">' + (i > 0 && s !== 'Passed' ? '<button class="btn small ghost" data-tmove="' + t.id + ':' + TRY_STATUSES[i - 1] + '">←</button>' : '') +
+        (s === 'Applied' ? '<button class="btn small" data-tmove="' + t.id + ':Trial">Start trial</button>' : s === 'Trial' ? '<button class="btn small" data-tmove="' + t.id + ':Signed">Sign</button><button class="btn small ghost" data-tmove="' + t.id + ':Passed">Pass</button>' : s === 'Signed' ? '<button class="btn small ghost" data-troster="' + t.id + '">Add to roster</button>' : '<button class="btn small ghost" data-tmove="' + t.id + ':Applied">Reconsider</button>') +
+        rowActions('tryouts', t) + '</div></div>'; }).join('') + '</section>'; }).join('') + '</div>';
+  const byId = id => rows.find(t => t.id === Number(id));
+  $$('[data-tscore]', box).forEach(b => b.onclick = async () => { const [id, k, n] = b.dataset.tscore.split(':'); const t = byId(id); const sc = Object.assign({}, t.scores || {}); sc[k] = Number(sc[k]) === Number(n) ? null : Number(n);
+    try { await db.update('tryouts', t.id, { scores: sc }); t.scores = sc; render(); } catch (err) { toast('Error: ' + err.message); } });
+  $$('[data-tmove]', box).forEach(b => b.onclick = async () => { const [id, s] = b.dataset.tmove.split(':'); const t = byId(id); const patch = { status: s }; if (s === 'Trial' && !t.trial_start) patch.trial_start = todayISO();
+    try { await db.update('tryouts', t.id, patch); toast(t.name + ' → ' + s); render(); } catch (err) { toast('Error: ' + err.message); } });
+  $$('[data-troster]', box).forEach(b => b.onclick = async () => { const t = byId(b.dataset.troster);
+    if (!S.me.is_coach) { toast('Only the head coach can change the roster'); return; }
+    try { await db.insert('roster', [{ name: t.name, ign: (t.riot_id || '').split('#')[0] || t.name, discord: t.discord || null, role: t.role || null, is_trial: false, status: 'Active' }]); S.cache = {}; toast(t.name + ' added to the roster — send them the team code to link their account'); }
+    catch (err) { toast('Couldn\'t add: ' + err.message); } });
+};
+
+// =============================================================== GETTING STARTED (coach home)
+async function homeOnboarding(box) {
+  if (!box || !isStaff()) return;
+  let dismissed = false; try { dismissed = localStorage.getItem('th_onboard_done_' + S.me.team_id) === '1'; } catch (e) { /* private mode */ }
+  if (dismissed) return;
+  const [team, matches, scrims, avail, goals, plans, reviews] = await Promise.all([teamPlayers(), cached('matches').catch(() => []), listScrims().catch(() => []), db.list('availability', { limit: 50 }).catch(() => []),
+    db.list('team_goals', { limit: 5 }).catch(() => []), db.list('practice_plans', { limit: 5 }).catch(() => []), cached('reviews').catch(() => [])]);
+  let calDone = false; try { calDone = localStorage.getItem('th_cal_' + S.me.team_id) === '1'; } catch (e) { /* ignore */ }
+  const linked = team.players.filter(p => p.user_id).length, riot = team.players.filter(p => p.rs).length;
+  const steps = [
+    { t: 'Invite your players', d: linked + ' of ' + Math.max(5, team.players.length) + ' have joined', ok: linked >= 5, h: '#/coach/team' },
+    { t: 'Players link their Riot IDs', d: riot + ' linked — scrims and stats then import on their own', ok: riot >= 3, h: '#/team' },
+    { t: 'Fill in the week\'s availability', d: avail.length + ' player(s) have', ok: avail.length >= 3, h: '#/schedule' },
+    { t: 'Book or log your first scrim', d: (scrims.length + matches.length) ? 'Done' : 'Use Best times on the Schedule page', ok: scrims.length + matches.length > 0, h: '#/schedule' },
+    { t: 'Set a season goal', d: goals.length ? 'Done' : 'e.g. qualify for open qualifiers', ok: goals.length > 0, h: '#/goals' },
+    { t: 'Build this week\'s practice plan', d: plans.length ? 'Done' : 'One click from your scrim data', ok: plans.length > 0, h: '#/practice/build' },
+    { t: 'Review your first VOD', d: reviews.length ? 'Done' : 'Paste a YouTube link', ok: reviews.length > 0, h: '#/reviews' },
+    { t: 'Sync the schedule to your calendar', d: calDone ? 'Done' : 'Google / Apple calendar', ok: calDone, h: '#/schedule/cal' }];
+  const n = steps.filter(s => s.ok).length;
+  if (n === steps.length) return;
+  box.innerHTML = panel('Getting started — ' + n + '/' + steps.length, '<button class="btn small ghost" id="obhide">Hide</button>', '<div class="bar" style="margin-bottom:10px"><div style="width:' + Math.round(n / steps.length * 100) + '%"></div></div><div class="obsteps">' +
+    steps.map(s => '<a class="obstep' + (s.ok ? ' ok' : '') + '" href="' + s.h + '"><span class="obc">' + (s.ok ? '✓' : '') + '</span><span><b>' + esc(s.t) + '</b><br><span class="small muted">' + esc(s.d) + '</span></span></a>').join('') + '</div>');
+  $('#obhide', box).onclick = () => { try { localStorage.setItem('th_onboard_done_' + S.me.team_id, '1'); } catch (e) { /* ignore */ } box.innerHTML = ''; };
+}
+
+// =============================================================== CALENDAR SYNC
+async function calendarModal() {
+  const { data: tok, error } = await sb.rpc('my_calendar_token');
+  if (error || !tok) { toast('Couldn\'t get the calendar link' + (error ? ': ' + error.message : '')); return; }
+  const https = CFG.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/riot-sync?calendar=' + tok, webcal = https.replace(/^https?:/, 'webcal:');
+  try { localStorage.setItem('th_cal_' + S.me.team_id, '1'); } catch (e) { /* ignore */ }
+  const m = openModal('<h2>Add the team schedule to your calendar</h2><p class="muted small">Scrims and this week\'s practice plan show up in your calendar and update on their own. Keep the link to the team — anyone with it can see the schedule.</p>' +
+    '<div class="row" style="gap:8px;flex-wrap:wrap;margin:12px 0"><a class="btn" href="https://calendar.google.com/calendar/r?cid=' + encodeURIComponent(webcal) + '" target="_blank" rel="noopener">Google Calendar</a><a class="btn ghost" href="' + esc(webcal) + '">Apple / Outlook</a></div>' +
+    '<label class="f"><span>Or copy the link (calendar app → Add calendar → From URL)</span><div class="row"><input id="calurl" readonly value="' + esc(https) + '" class="grow"><button type="button" class="btn small ghost" id="calcopy">Copy</button></div></label>' +
+    '<p class="small muted">Google can take a few hours to pick up changes; Apple Calendar checks more often.</p>' +
+    '<div class="row" style="margin-top:10px">' + (S.me.is_coach ? '<button type="button" class="btn small ghost danger-t" id="calreset">Reset link</button>' : '') + '<span class="grow"></span><button type="button" class="btn" data-close>Done</button></div>');
+  const root = m || document;
+  $('#calcopy', root).onclick = async () => { try { await navigator.clipboard.writeText(https); toast('Copied'); } catch (e) { $('#calurl', root).select(); } };
+  if ($('#calreset', root)) $('#calreset', root).onclick = async () => { if (!confirm('Make a new link? Everyone who already subscribed will need the new one.')) return;
+    const r = await sb.rpc('rotate_calendar_token'); if (r.error) { toast('Error: ' + r.error.message); return; } closeModal(); calendarModal(); };
+}
+
+// =============================================================== HEALTH (owner)
+PAGES.health = async function (el) {
+  if (!S.me.is_admin) { el.innerHTML = '<p>Owner only.</p>'; return; }
+  const [{ data: h, error }, errs] = await Promise.all([sb.rpc('admin_health'), db.list('app_errors', { order: 'created_at', asc: false, limit: 200 }).catch(() => [])]);
+  if (error) { el.innerHTML = '<div class="card error">Couldn\'t load health: ' + esc(error.message) + '</div>'; return; }
+  const cron = (h && h.cron) || [], http = (h && h.http) || [];
+  const lastRun = cron[0], lastHttp = http[0];
+  const ok = lastRun && lastRun.status === 'succeeded' && (!lastHttp || (lastHttp.status >= 200 && lastHttp.status < 300));
+  const grouped = groupBy(errs, 'message').map(([m, l]) => ({ m: m, n: l.length, last: l[0], pages: Array.from(new Set(l.map(x => x.url))).slice(0, 4) })).sort((a, b) => String(b.last.created_at).localeCompare(String(a.last.created_at)));
+  el.innerHTML = '<div class="page-h"><div><h1>Health</h1><p class="muted">Is everything running? Background Riot sync, errors people hit, and usage.</p></div>' + (errs.length ? '<button class="btn small ghost" id="clrerr">Clear errors</button>' : '') + '</div>' +
+    '<div class="kpis">' + kpi(ok ? '✓ OK' : lastRun ? 'Check' : '–', 'Riot auto-sync') + kpi(lastRun ? fmtWhen(lastRun.start) : '–', 'Last sync run') + kpi((h.links || 0) + (h.stale_links ? ' (' + h.stale_links + ' stale)' : ''), 'Linked Riot IDs') +
+      kpi(h.errors_24h || 0, 'Errors (24h)') + kpi(h.teams || 0, 'Teams') + kpi(h.members || 0, 'Members') + '</div>' +
+    panel('Recent sync results', '', http.length ? '<div class="tablewrap"><table><thead><tr><th>When</th><th>Status</th><th>Result</th></tr></thead><tbody>' + http.map(x => '<tr><td>' + esc(fmtWhen(x.at)) + '</td><td>' + (x.status >= 200 && x.status < 300 ? '<span class="pill green">' + x.status + '</span>' : '<span class="pill red">' + esc(x.status || x.err || '?') + '</span>') + '</td><td class="small"><code>' + esc(x.body || x.err || '') + '</code></td></tr>').join('') + '</tbody></table></div>' : '<p class="small muted" style="margin:0">No runs recorded yet.</p>') +
+    panel('Errors people hit', '<span class="small muted">last ' + errs.length + '</span>', grouped.length ? grouped.map(g => '<details class="item"><summary><div class="t"><span class="pill red">' + g.n + '×</span> ' + esc(g.m) + '</div><div class="small muted">last ' + esc(fmtWhen(g.last.created_at)) + ' · ' + g.pages.map(esc).join(', ') + '</div></summary><div class="body"><pre class="rtext">' + esc(g.last.stack || '(no stack)') + '</pre><div class="small muted">' + esc(g.last.ua || '') + '</div></div></details>').join('') : '<p class="small muted" style="margin:0">No errors. 🎉</p>');
+  if ($('#clrerr', el)) $('#clrerr', el).onclick = async () => { if (!confirm('Clear the error log?')) return; const { error: e2 } = await sb.from('app_errors').delete().gte('id', 0); if (e2) toast('Error: ' + e2.message); render(); };
+};
+
 // expose pure helpers for tests
-window.__TEAMHUB__ = { compStats: compStats, lineChart: lineChart, teamAnalytics: teamAnalytics, playerAnalytics: playerAnalytics, buildInsights: buildInsights, makePracticePlan: makePracticePlan, metricValue: metricValue, md: md, planImport: planImport, mergeWork: mergeWork, coerce: coerce, compAnalysis: compAnalysis, calcStreak: calcStreak, parseCSV: parseCSV, TABLES: TABLES, normName: normName };
+window.__TEAMHUB__ = { goalValue: goalValue, tryAvg: tryAvg, compStats: compStats, lineChart: lineChart, teamAnalytics: teamAnalytics, playerAnalytics: playerAnalytics, buildInsights: buildInsights, makePracticePlan: makePracticePlan, metricValue: metricValue, md: md, planImport: planImport, mergeWork: mergeWork, coerce: coerce, compAnalysis: compAnalysis, calcStreak: calcStreak, parseCSV: parseCSV, TABLES: TABLES, normName: normName };
 
 if (!window.__TEAMHUB_NO_BOOT__) boot();
 })();

@@ -1,0 +1,5 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/schedule","size":[390,844],"wait":1500,"shot":"97-mobile-sched-vp.png"},
+ {"js":"window.scrollTo(0,600);1","wait":400,"shot":"98-mobile-sched-vp2.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/maps","size":[1280,900],"wait":1500,"shot":"99-maps2.png","full":true}
+]

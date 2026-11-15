@@ -1,0 +1,23 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/reviews/502","wait":2500},
+ {"js":"(()=>{ const p=[...document.querySelectorAll('.panel')].map(x=>x.querySelector('h2')?.innerText); return p.join('|') + ' || buttons:' + document.querySelectorAll('.tk2w').length + ' add:' + !!document.querySelector('#addwork') })()","print":true},
+ {"js":"(()=>{ document.querySelector('.tk2w').click(); return 1 })()","wait":800},
+ {"js":"(()=>{ const f=document.querySelector('#er'); return [f.issue.value, f.player.value, f.source.value, f.watch.value, f.date.value].join(' / ') })()","print":true},
+ {"js":"(()=>{ const f=document.querySelector('#er'); f.requestSubmit(); return 1 })()","wait":1500},
+ {"js":"(()=>{ const w=[...document.querySelectorAll('.panel')].find(x=>/Work on/.test(x.querySelector('h2')?.innerText||'')); return w ? w.innerText.replace(/\\s+/g,' ').slice(0,300) : 'NO PANEL' })()","print":true},
+ {"js":"JSON.stringify(window.__MOCKDB__.work_on.filter(w=>w.review_id).map(w=>[w.id,w.review_id,w.approved,w.status]))","print":true},
+ {"shot":"f1-review-work.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/workon/all","wait":2500},
+ {"js":"(()=>{ const c=[...document.querySelectorAll('.wcard')].find(x=>x.querySelector('a[href^=\"#/reviews/502\"]')); return c ? 'linked card: ' + c.innerText.replace(/\\s+/g,' ').slice(0,160) : 'NO LINKED CARD' })()","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/coach/announce","wait":2500},
+ {"js":"document.querySelector('#dcbox').innerText.replace(/\\s+/g,' ').slice(0,250)","print":true},
+ {"js":"(()=>{ const f=document.querySelector('#dcf'); f.url.value='https://example.com/x'; f.requestSubmit(); return 1 })()","wait":800},
+ {"js":"document.querySelector('#toast')?.innerText","print":true},
+ {"js":"(()=>{ const f=document.querySelector('#dcf'); f.url.value='https://discord.com/api/webhooks/123456789012/abcdefghijklmnopqrstuvwxyz_ABCD'; f.requestSubmit(); return 1 })()","wait":1500},
+ {"js":"document.querySelector('#dcbox').innerText.replace(/\\s+/g,' ').slice(0,250) + ' || discord checkbox:' + !!document.querySelector('#an [name=discord]')","print":true},
+ {"js":"(()=>{ const f=document.querySelector('#an'); f.title.value='Scrim tonight 8pm'; f.body.value='**Be on by 7:45**. Lotus + Haven.'; f.requestSubmit(); return 1 })()","wait":1500},
+ {"js":"document.querySelector('#toast')?.innerText + ' || ' + JSON.stringify(window.__MOCKDB__.announcements.filter(a=>a.title==='Scrim tonight 8pm').map(a=>[a.id,!!a.discord_sent_at])) + ' || calls:' + (window.__fnCalls||[]).map(c=>c[0]+':'+c[1].action).join(',')","print":true},
+ {"shot":"f2-announce.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/reviews/502","wait":2500},
+ {"js":"'player view buttons:' + document.querySelectorAll('.tk2w').length + ' add:' + !!document.querySelector('#addwork')","print":true}
+]

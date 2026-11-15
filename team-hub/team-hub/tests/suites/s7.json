@@ -1,0 +1,17 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/home","wait":1800,"shot":"70-fear-home.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/reviews","wait":1500,"shot":"71-reviews.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/reviews/501","wait":2500,"shot":"72-review.png","full":true},
+ {"js":"document.querySelector('.ts').click(); document.querySelector('#vplayer').src","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/workon","wait":1500,"shot":"73-workon-fear.png","full":true},
+ {"js":"const s=document.querySelector('.wstat'); s.value='Fixed'; s.dispatchEvent(new Event('change')); 1","wait":1200},
+ {"js":"JSON.stringify(__MOCKDB__.work_on.map(w=>w.id+':'+w.status))","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/home","wait":1800,"shot":"74-coach-home.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/coach/work","wait":1500,"shot":"75-coach-work.png","full":true},
+ {"js":"document.querySelector('[data-wapprove]').click();1","wait":1200},
+ {"js":"JSON.stringify(__MOCKDB__.work_on.map(w=>w.id+':'+w.approved))","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/team","wait":1500,"shot":"76-team-bench.png","full":true},
+ {"js":"window.confirm=()=>true; document.querySelector('[data-bench]').click();1","wait":1200},
+ {"js":"JSON.stringify(__MOCKDB__.roster.map(r=>r.name+':'+r.status))","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/coach/members","wait":1500,"shot":"77-members.png"}
+]

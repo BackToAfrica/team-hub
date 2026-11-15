@@ -1,0 +1,157 @@
+[
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/goals",
+  "wait": 2500
+ },
+ {
+  "js": "[...document.querySelectorAll('.goal')].map(g=>g.innerText.replace(/\\s+/g,' ').slice(0,110)).join(' || ')",
+  "print": true
+ },
+ {
+  "js": "(()=>{ document.querySelector('[data-radd=team_goals]').click(); const f=document.querySelector('#er'); return f ? 'goal form metric opts '+f.metric.options.length : 'no form' })()",
+  "wait": 600,
+  "print": true
+ },
+ {
+  "shot": "k1-goals.png",
+  "full": true
+ },
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/home",
+  "wait": 3000
+ },
+ {
+  "js": "'onboard: '+((document.querySelector('#home-onboard')||{}).innerText||'').replace(/\\s+/g,' ').slice(0,160)+' || goals: '+document.querySelectorAll('#home-goals .goal').length",
+  "print": true
+ },
+ {
+  "js": "(()=>{ document.querySelector('#obhide').click(); return document.querySelector('#home-onboard').innerHTML.length })()",
+  "print": true
+ },
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/tryouts",
+  "wait": 2500
+ },
+ {
+  "js": "'cols:'+document.querySelectorAll('.kcol').length+' cards:'+document.querySelectorAll('.tcard').length+' :: '+[...document.querySelectorAll('.tcard')].map(c=>c.innerText.replace(/\\s+/g,' ').slice(0,90)).join(' | ')",
+  "print": true
+ },
+ {
+  "js": "(()=>{ document.querySelector('[data-tscore=\"1:sense:5\"]').click(); return 1 })()",
+  "wait": 900
+ },
+ {
+  "js": "'score saved: '+JSON.stringify(window.__MOCKDB__.tryouts[0].scores)",
+  "print": true
+ },
+ {
+  "js": "(()=>{ document.querySelector('[data-tmove=\"2:Trial\"]').click(); return 1 })()",
+  "wait": 900
+ },
+ {
+  "js": "'moved: '+window.__MOCKDB__.tryouts[1].status+' start:'+window.__MOCKDB__.tryouts[1].trial_start",
+  "print": true
+ },
+ {
+  "js": "(()=>{ document.querySelector('[data-tmove=\"1:Signed\"]').click(); return 1 })()",
+  "wait": 900
+ },
+ {
+  "js": "(()=>{ const n=window.__MOCKDB__.roster.length; document.querySelector('[data-troster=\"1\"]').click(); return n })()",
+  "wait": 900,
+  "print": true
+ },
+ {
+  "js": "'roster after: '+window.__MOCKDB__.roster.length+' last='+window.__MOCKDB__.roster.slice(-1)[0].name",
+  "print": true
+ },
+ {
+  "shot": "k2-tryouts.png",
+  "full": true
+ },
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/tryouts/compare",
+  "wait": 2500
+ },
+ {
+  "js": "'compare rows:'+document.querySelectorAll('#trbox tbody tr').length+' :: '+(document.querySelector('#trbox tbody tr')||{}).innerText",
+  "print": true
+ },
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/schedule",
+  "wait": 2500
+ },
+ {
+  "js": "(()=>{ document.querySelector('#calsync').click(); return 1 })()",
+  "wait": 900
+ },
+ {
+  "js": "'cal url: '+(document.querySelector('#calurl')||{}).value+' google:'+!!document.querySelector('a[href^=\"https://calendar.google.com\"]')",
+  "print": true
+ },
+ {
+  "shot": "k3-calendar.png"
+ },
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/health",
+  "wait": 2500
+ },
+ {
+  "js": "(()=>{ const m=document.querySelector('#main'); return [...m.querySelectorAll('.kpi')].map(k=>k.innerText.replace(/\\s+/g,' ')).join(' | ')+' :: errs '+m.querySelectorAll('details.item').length })()",
+  "print": true
+ },
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/maps",
+  "wait": 2000
+ },
+ {
+  "js": "'logged: '+JSON.stringify((window.__MOCKDB__.app_errors||[]).map(e=>e.message))",
+  "print": true
+ },
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-fear#/home",
+  "wait": 2500
+ },
+ {
+  "js": "'player nav: '+[...document.querySelectorAll('.nav a, .nav button')].map(a=>a.innerText).filter(t=>/Goals|Tryouts|Health|Install/.test(t)).join(',')+' onboard:'+((document.querySelector('#home-onboard')||{}).innerHTML||'').length+' goals:'+document.querySelectorAll('#home-goals .goal').length",
+  "print": true
+ },
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-fear#/tryouts",
+  "wait": 2000
+ },
+ {
+  "js": "'player tryouts -> '+((document.querySelector('#main h1, #main h2')||{}).innerText||'').slice(0,30)",
+  "print": true
+ },
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-fear#/goals",
+  "wait": 2000
+ },
+ {
+  "js": "'player goals: '+document.querySelectorAll('.goal').length+' edit:'+document.querySelectorAll('[data-redit],[data-radd]').length",
+  "print": true
+ },
+ {
+  "size": [
+   390,
+   844
+  ]
+ },
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/tryouts",
+  "wait": 2500
+ },
+ {
+  "shot": "k4-tryouts-mobile.png",
+  "full": true
+ },
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/home",
+  "wait": 3000
+ },
+ {
+  "shot": "k5-home-mobile.png",
+  "full": true
+ }
+]

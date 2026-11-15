@@ -1,0 +1,22 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/live","wait":1800},
+ {"js":"(()=>{ localStorage.clear(); document.querySelector('[data-sc=\"us,1\"]').click(); return 1 })()","wait":900},
+ {"js":"(()=>{ document.querySelector('[data-sc=\"us,1\"]').click(); return 1 })()","wait":900},
+ {"js":"(()=>{ document.querySelector('[data-sc=\"them,1\"]').click(); return 1 })()","wait":900},
+ {"js":"(()=>{ document.querySelector('[data-sc=\"to,-1\"]').click(); return 1 })()","wait":900},
+ {"js":"document.querySelector('.score').innerText.replace(/\\n/g,' ')","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/veto","wait":1800},
+ {"js":"(()=>{ localStorage.removeItem('th_veto'); const i=document.querySelector('#vopp'); i.value='Night Owls'; i.dispatchEvent(new Event('change')); return 1 })()","wait":1200},
+ {"js":"(()=>{ const s=document.querySelector('#vfmt'); s.value='BO3'; s.dispatchEvent(new Event('change')); return 1 })()","wait":1200},
+ {"js":"document.querySelector('.card.alert').innerText","print":true},
+ {"js":"(()=>{ document.querySelectorAll('[data-vm]')[0].click(); return 1 })()","wait":900},
+ {"js":"(()=>{ document.querySelectorAll('[data-vm]')[0].click(); return 1 })()","wait":900},
+ {"js":"document.querySelector('.card.alert').innerText","print":true},
+ {"js":"(()=>{ document.querySelectorAll('[data-vm]')[0].click(); return 1 })()","wait":900},
+ {"js":"(()=>{ document.querySelectorAll('[data-vm]')[0].click(); return 1 })()","wait":900},
+ {"js":"(()=>{ document.querySelectorAll('[data-vm]')[0].click(); return 1 })()","wait":900},
+ {"js":"(()=>{ document.querySelectorAll('[data-vm]')[0].click(); return 1 })()","wait":900,"shot":"b18-veto-done.png","full":true},
+ {"js":"[...document.querySelectorAll('.vstep')].map(x=>x.innerText.replace(/\\n/g,':')).join(' | ') + ' || ' + document.querySelectorAll('.card')[1].innerText","print":true},
+ {"js":"(()=>{ document.querySelector('#vundo').click(); return 1 })()","wait":900},
+ {"js":"[...document.querySelectorAll('.vstep')].map(x=>x.innerText.replace(/\\n/g,':')).join(' | ')","print":true}
+]

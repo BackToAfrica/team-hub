@@ -1,0 +1,14 @@
+[
+ {
+  "go": "file:///home/claude/teamapp-test/index.html?as=u-coach#/maps",
+  "wait": 2500
+ },
+ {
+  "js": "(()=>{ window.dispatchEvent(new ErrorEvent('error',{message:'boom test',error:new Error('boom test')})); return 1 })()",
+  "wait": 1200
+ },
+ {
+  "js": "(()=>{ const m=(window.__MOCKDB__.app_errors||[]).map(e=>e.message); if(!m.some(x=>/boom test/.test(x))) throw new Error('error logger did not record: '+JSON.stringify(m)); return 'logged ok '+m.length })()",
+  "print": true
+ }
+]

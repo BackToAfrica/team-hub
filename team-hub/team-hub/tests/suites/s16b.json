@@ -1,0 +1,4 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/maps","wait":2000},
+ {"js":"document.querySelector('.main').innerText.slice(0,300)","print":true}
+]

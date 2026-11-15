@@ -1,0 +1,11 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/maps","wait":2500},
+ {"js":"(()=>{ const g=document.querySelector('#games'); const st=g&&g.querySelector('.rstrip'); return 'strips:'+document.querySelectorAll('#games .rstrip').length+' blocks:'+(st?st.querySelectorAll('.r').length:0)+' riotpill:'+[...document.querySelectorAll('#games .pill')].filter(p=>p.textContent==='Riot').length+' panel:'+!!document.querySelector('#riotimp') })()","print":true},
+ {"js":"(()=>{ window.prompt=()=>'Night Owls'; document.querySelector('#riotlist').click(); return 1 })()","wait":1200},
+ {"js":"document.querySelector('#riotgames').innerText.replace(/\\s+/g,' ').slice(0,300)","print":true},
+ {"shot":"g1-maps-riot.png","full":true},
+ {"js":"(()=>{ document.querySelector('[data-rimp]').click(); return 1 })()","wait":1800},
+ {"js":"(()=>{ const rows=[...document.querySelectorAll('#games tbody tr')].map(r=>r.innerText.replace(/\\s+/g,' ')); return rows.filter(r=>/Night Owls|Red Fox/.test(r)).join(' || ').slice(0,400) })()","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/maps","wait":2500},
+ {"js":"'player panel:'+!!document.querySelector('#riotimp')+' strips:'+document.querySelectorAll('#games .rstrip').length","print":true}
+]
