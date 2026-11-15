@@ -17,6 +17,14 @@ Do **not** run `schema.sql` against an existing populated project. Use only the 
 
 The migration filenames use the exact 14-digit versions recorded by Supabase. Keep those versions unchanged when applying the migrations through the Supabase CLI.
 
+## Organization foundation migration
+
+The additive migration `migrations/20261116000000_organization_foundation.sql` introduces organization records and organization memberships while retaining the existing `team_id` tenant boundary. Existing teams are mapped one-to-one to organizations; no player, match, VOD, check-in, or other team data is moved. New teams created through the existing `create_team()` RPC receive an organization automatically.
+
+The migration is intentionally a separate step from the browser release. Review it and test it against a disposable database or a verified Supabase branch first. Do not apply it to production until a current backup exists and the migration has been reviewed. The app's Organization workspace appears after the migration is present and the signed-in profile has an active organization membership.
+
+After applying it in a test database, run `tests/organization_foundation.sql` in the SQL Editor. It performs read-only assertions for organization mapping, RLS, grants, and membership synchronization. Also manually test with two teams and at least an owner, head coach, analyst, player, pending member, and platform administrator. Platform-wide `profiles.is_admin` is deliberately not promoted to organization ownership.
+
 ## Verification
 
 Run `verify-security.sql` in the SQL Editor after installation or migration. It performs read-only checks and raises an error if key security invariants fail.

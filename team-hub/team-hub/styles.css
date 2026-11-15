@@ -785,3 +785,13 @@ table.pedit td:nth-child(4) { min-width: 260px; }
 .comprow:first-child { border-top: 0; }
 .up { color: var(--good); } .down { color: var(--accent-2); }
 pre.rtext { white-space: pre-wrap; font-size: .85rem; background: var(--panel-2); padding: 10px; border-radius: 8px; margin: 0; }
+
+
+/* ---- organization workspace */
+.org-context { margin-left: 10px; padding-left: 11px; border-left: 1px solid var(--line); color: var(--muted); font-size: .76rem; font-weight: 650; }
+.org-grid { display: grid; grid-template-columns: minmax(0,1.3fr) minmax(240px,.7fr); gap: 14px; margin-top: 14px; }
+.org-role-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: .84rem; }
+.org-role-row:last-of-type { border-bottom: 0; }
+.org-role-row b { min-width: 28px; text-align: right; }
+.eyebrow { color: var(--accent); font-size: .67rem; font-weight: 850; letter-spacing: 1.5px; }
+@media(max-width:760px) { .org-grid { grid-template-columns: 1fr; } .org-context { display:none; } }
