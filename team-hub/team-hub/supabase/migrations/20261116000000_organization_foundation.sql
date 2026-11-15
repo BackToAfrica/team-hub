@@ -66,7 +66,6 @@ select t.organization_id,
        p.id,
        case
          when t.owner_id = p.id then 'owner'
-         when coalesce(p.is_admin, false) then 'org_admin'
          when coalesce(p.is_coach, false) then 'head_coach'
          when p.staff_role ilike '%analyst%' then 'analyst'
          when p.staff_role is not null then 'coach'
@@ -118,6 +117,61 @@ drop trigger if exists teams_create_organization on public.teams;
 create trigger teams_create_organization
 after insert on public.teams
 for each row execute function public.create_organization_for_new_team();
+
+-- Keep membership status synchronized when an existing user joins, is approved,
+-- changes team, or has a team-scoped staff role changed. Global is_admin is
+-- deliberately NOT mapped to org_admin: platform support is not org ownership.
+create or replace function public.sync_profile_organization_membership()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog, public, pg_temp
+as $function$
+declare org_id uuid; member_role text;
+begin
+  if tg_op = 'UPDATE' and old.team_id is distinct from new.team_id and old.team_id is not null then
+    update public.organization_members om
+       set status = 'suspended', updated_at = now()
+     from public.teams t
+     where t.id = old.team_id
+       and om.organization_id = t.organization_id
+       and om.user_id = old.id
+       and om.role <> 'owner';
+  end if;
+
+  if new.team_id is null then
+    return new;
+  end if;
+
+  select t.organization_id,
+         case
+           when t.owner_id = new.id then 'owner'
+           when coalesce(new.is_coach, false) then 'head_coach'
+           when new.staff_role ilike '%analyst%' then 'analyst'
+           when new.staff_role is not null then 'coach'
+           else 'player'
+         end
+    into org_id, member_role
+    from public.teams t
+   where t.id = new.team_id;
+
+  if org_id is not null then
+    insert into public.organization_members (organization_id, user_id, role, status)
+    values (org_id, new.id, member_role, case when new.approved then 'active' else 'suspended' end)
+    on conflict (organization_id, user_id) do update
+      set role = case when organization_members.role = 'owner' then 'owner' else excluded.role end,
+          status = excluded.status,
+          updated_at = now();
+  end if;
+  return new;
+end
+$function$;
+
+drop trigger if exists profiles_sync_organization_membership on public.profiles;
+create trigger profiles_sync_organization_membership
+after insert or update of team_id, approved, is_coach, staff_role
+on public.profiles
+for each row execute function public.sync_profile_organization_membership();
 
 -- Keep membership checks inside trusted database functions; never authorize from
 -- user-editable profile metadata or client-supplied role values.
@@ -181,6 +235,7 @@ on public.organization_members for select to authenticated
 using (public.is_organization_member(organization_id));
 
 revoke all on function public.create_organization_for_new_team() from public, anon, authenticated;
+revoke all on function public.sync_profile_organization_membership() from public, anon, authenticated;
 revoke all on function public.is_organization_member(uuid) from public, anon;
 revoke all on function public.has_organization_role(uuid, text[]) from public, anon;
 grant execute on function public.is_organization_member(uuid) to authenticated;
