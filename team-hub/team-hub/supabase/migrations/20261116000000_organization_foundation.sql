@@ -78,6 +78,15 @@ join public.teams t on t.id = p.team_id
 where t.organization_id is not null
 on conflict (organization_id, user_id) do nothing;
 
+-- Preserve ownership even if the original owner is no longer assigned to the
+-- legacy team's profile.team_id field.
+insert into public.organization_members (organization_id, user_id, role, status)
+select t.organization_id, t.owner_id, 'owner', 'active'
+from public.teams t
+where t.organization_id is not null and t.owner_id is not null
+on conflict (organization_id, user_id) do update
+  set role = 'owner', status = 'active', updated_at = now();
+
 -- New teams receive a dedicated organization automatically. This preserves the
 -- existing create_team() RPC and does not require a browser-side service key.
 create or replace function public.create_organization_for_new_team()
