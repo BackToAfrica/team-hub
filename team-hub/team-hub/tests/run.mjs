@@ -9,7 +9,10 @@ const suites = fs.readdirSync(path.join(HERE, 'suites')).filter(f => f.endsWith(
   .sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1)) || a.localeCompare(b));
 let failed = 0;
 for (const s of suites) {
-  const r = spawnSync(process.execPath, [path.join(HERE, 'drive.mjs'), path.join(HERE, 'suites', s)], { encoding: 'utf8', timeout: 240000 });
+  const run = () => spawnSync(process.execPath, [path.join(HERE, 'drive.mjs'), path.join(HERE, 'suites', s)], { encoding: 'utf8', timeout: 240000 });
+  let r = run();
+  // Chrome occasionally fails to start on CI machines; that isn't an app bug, so try that suite once more
+  if (/no chrome/.test((r.stdout || '') + (r.stderr || ''))) r = run();
   const out = (r.stdout || '') + (r.stderr || '');
   const line = out.split('\n').find(l => l.startsWith('ERRORS:'));
   const ok = r.status === 0 && line === 'ERRORS: none';

@@ -13,7 +13,7 @@ const chrome = spawn(process.env.CHROME || 'google-chrome', ['--headless=new', '
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let ws, id = 0; const pending = new Map(); const errors = [];
 async function connect() {
-  for (let i = 0; i < 50; i++) { try { const r = await fetch('http://127.0.0.1:' + PORT + '/json'); const j = await r.json(); const p = j.find(t => t.type === 'page'); if (p) return p.webSocketDebuggerUrl; } catch (e) {} await sleep(200); }
+  for (let i = 0; i < 150; i++) { try { const r = await fetch('http://127.0.0.1:' + PORT + '/json'); const j = await r.json(); const p = j.find(t => t.type === 'page'); if (p) return p.webSocketDebuggerUrl; } catch (e) {} await sleep(200); }
   throw new Error('no chrome');
 }
 function send(method, params = {}) { return new Promise(res => { const i = ++id; pending.set(i, res); ws.send(JSON.stringify({ id: i, method, params })); }); }
