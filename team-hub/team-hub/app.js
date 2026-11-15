@@ -180,7 +180,10 @@ const STAFF_TABLES = ['reviews', 'work_on', 'matches', 'player_stats', 'utility_
 const CROSS_TABLES = ['matches', 'player_stats', 'utility_usage', 'reviews', 'comp_notes'];
 const STAFF_ROLES = ['Assistant coach', 'Analyst'];
 function isStaff() { return !!(S.me && (S.me.is_coach || S.me.staff_role)); }
-function staffLabel(m) { return m.is_coach ? 'Head coach' : (m.staff_role || ''); }
+function staffLabel(m) { return m.staff_role || (m.is_coach ? 'Head coach' : ''); }
+// coach types: the first three have full access (run the team); the last two are staff access
+const COACH_TYPES = ['Head coach', 'Team owner', 'Manager', 'Assistant coach', 'Analyst'];
+const FULL_COACH = ['Head coach', 'Team owner', 'Manager'];
 function canEdit(table) { return !!(S.me && ((S.me.is_coach && (!(TABLES[table] || {}).shared || S.me.is_admin)) || (S.me.staff_role && STAFF_TABLES.includes(table)))); }
 
 const db = {
@@ -462,9 +465,12 @@ async function renderOnboard() {
     (invites.length ? '<div class="stack"><b>You\'ve been added to a roster</b>' + invites.map((v, i) =>
       '<button class="check" style="width:100%;text-align:left;color:inherit;font:inherit" data-inv="' + i + '"><div><div class="t">Join ' + esc(v.team_name) + (v.team_tag ? ' [' + esc(v.team_tag) + ']' : '') + '</div><div class="small muted">as ' + esc(v.slot_name) + '</div></div></button>').join('') + '</div>' : '') +
     '<form id="joinf" class="stack"><b>Join your team</b><p class="small muted">Ask your coach for the team code (Coach panel → Team &amp; invites).</p>' +
-    '<div class="row"><input name="code" placeholder="Team code, e.g. 4F9A2C" value="' + esc(saved) + '" style="max-width:220px;text-transform:uppercase" required><button class="btn">Join</button></div></form>' +
+    '<div class="row"><input name="code" placeholder="Team code, e.g. 4F9A2C" value="' + esc(saved) + '" style="max-width:220px;text-transform:uppercase" required>' +
+    '<label class="row small" style="gap:6px">Joining as <select name="as"><option value="">Player</option>' + COACH_TYPES.map(r => '<option>' + r + '</option>').join('') + '</select></label><button class="btn">Join</button></div>' +
+    '<p class="small muted" style="margin:0">Coaches and staff wait for the head coach to approve them.</p></form>' +
     '<div class="sep" style="border-top:1px solid var(--line);margin:6px 0"></div>' +
-    '<form id="createf" class="stack"><b>Register a new team</b><p class="small muted">For coaches. You\'ll be the coach and get a code to invite your players. Each team\'s data is private to that team (the app owner can also open it to run and support the app).</p>' +
+    '<form id="createf" class="stack"><b>Register a new team</b><p class="small muted">You\'ll run the team and get a code to invite your players and staff. Each team\'s data is private to that team (the app owner can also open it to run and support the app).</p>' +
+    '<label class="f"><span>Your role</span><select name="title">' + FULL_COACH.map(r => '<option>' + r + '</option>').join('') + '</select></label>' +
     '<label class="f"><span>Team name</span><input name="name" required minlength="2" maxlength="40"></label>' +
     '<label class="f"><span>Tag (optional)</span><input name="tag" maxlength="6" style="max-width:120px;text-transform:uppercase"></label>' +
     '<button class="btn">Create team</button></form>' +
@@ -480,14 +486,15 @@ async function renderOnboard() {
   });
   $('#joinf').onsubmit = async e => {
     e.preventDefault();
-    const { data, error } = await sb.rpc('join_team', { p_code: e.target.code.value.trim().toUpperCase() });
+    const as = e.target.as.value || null;
+    const { data, error } = await sb.rpc('join_team', { p_code: e.target.code.value.trim().toUpperCase(), p_as: as });
     if (error) return fail(error);
     try { localStorage.removeItem('th_join'); } catch (er) {}
-    toast('Joined ' + data); S._autoTried = false; start();
+    toast(as ? 'Asked to join ' + data + ' as ' + as : 'Joined ' + data); S._autoTried = false; start();
   };
   $('#createf').onsubmit = async e => {
     e.preventDefault();
-    const { error } = await sb.rpc('create_team', { p_name: e.target.name.value, p_tag: e.target.tag.value || null });
+    const { error } = await sb.rpc('create_team', { p_name: e.target.name.value, p_tag: e.target.tag.value || null, p_title: e.target.title.value });
     if (error) return fail(error);
     toast('Team created'); location.hash = '#/coach/team'; start();
   };
@@ -496,6 +503,14 @@ async function renderOnboard() {
 async function renderPending() {
   const me = S.me;
   $('#app').innerHTML = '<div class="auth"><h1>' + esc(TEAM) + '</h1><div class="card"><p class="muted">Loading…</p></div></div>';
+  if (me && me.staff_role) {
+    $('#app').innerHTML = '<div class="auth"><h1>' + esc(teamName()) + '</h1><div class="card"><h2>Waiting for the head coach</h2><p>You asked to join as <b>' + esc(me.staff_role) + '</b>. The head coach approves you in Coach panel → Members, then you\'re in.</p>' +
+      '<div class="row" style="margin-top:14px"><button class="btn" id="refresh">Refresh</button><button class="btn ghost" id="leave">Wrong team? Leave</button><button class="btn ghost" id="out">Sign out</button></div><div id="claimmsg" class="error" style="margin-top:8px"></div></div></div>';
+    $('#refresh').onclick = () => start();
+    $('#leave').onclick = async () => { if (!confirm('Leave ' + teamName() + '?')) return; const { error } = await sb.rpc('leave_team'); if (error) { $('#claimmsg').textContent = error.message; return; } start(); };
+    $('#out').onclick = () => sb.auth.signOut();
+    return;
+  }
   let roster = [];
   try {
     if (me && !S._autoTried) { S._autoTried = true; const { data } = await sb.rpc('auto_claim'); if (data === 'approved') { await start(); return; } }
@@ -1467,8 +1482,7 @@ COACH.members = async function (box) {
     const id = f.dataset.id;
     const vis = {}; Object.keys(SECTIONS).forEach(k => vis[k] = !!f.querySelector('[data-vis="' + k + '"]').checked);
     const patch = { ign: f.ign.value || null, role: f.role.value, is_igl: f.is_igl.checked, is_trial: f.is_trial.checked, approved: f.approved.checked, visibility: vis };
-    if (f.is_coach) patch.is_coach = f.is_coach.checked;
-    if (f.staff_role) patch.staff_role = patch.is_coach ? null : (f.staff_role.value || null);
+    if (f.coach_type && f.coach_type.value) { patch.staff_role = f.coach_type.value; patch.is_coach = FULL_COACH.includes(f.coach_type.value); }
     const { error } = await sb.from('profiles').update(patch).eq('id', id);
     toast(error ? 'Error: ' + error.message : 'Saved'); S.cache = {};
     if (!error && id === S.me.id) await loadMe();
@@ -1495,7 +1509,7 @@ function memberCard(m, slot) {
   const me = m.id === S.me.id;
   const vis = m.visibility || {};
   return '<details class="item"' + (!m.approved ? ' open' : '') + '><summary><div class="row spread"><div><span class="t">' + esc(nameOf(m)) + '</span> ' +
-    (m.is_coach ? '<span class="pill red">Coach</span> ' : '') + (!m.is_coach && m.staff_role ? '<span class="pill purple">' + esc(m.staff_role) + '</span> ' : '') + (!m.approved ? '<span class="pill yellow">Waiting</span> ' : '') + (m.is_trial ? '<span class="pill yellow">Trial</span> ' : '') +
+    (m.is_coach ? '<span class="pill red">' + esc(staffLabel(m)) + '</span> ' : '') + (!m.is_coach && m.staff_role ? '<span class="pill purple">' + esc(m.staff_role) + '</span> ' : '') + (!m.approved ? '<span class="pill yellow">Waiting</span> ' : '') + (m.is_trial ? '<span class="pill yellow">Trial</span> ' : '') +
     '<span class="muted small">' + esc([m.discord ? '@' + m.discord : '', m.ign || 'no IGN', m.role || '', m.is_igl ? 'IGL' : ''].filter(Boolean).join(' · ')) + '</span>' +
     (m.staff_role ? '' : slot ? ' <span class="pill ' + (slot.claim_status === 'approved' ? 'green' : 'yellow') + '">' + (slot.claim_status === 'approved' ? 'Linked to ' : 'Claims ') + esc(slot.name) + '</span>' : (m.is_coach ? '' : ' <span class="pill">No roster slot</span>')) + '</div>' +
     (!m.approved ? '<button class="btn small" data-approve="' + m.id + '">' + (slot ? 'Confirm' : 'Approve') + '</button>' : '') + '</div></summary>' +
@@ -1507,8 +1521,9 @@ function memberCard(m, slot) {
     '<label class="row small"><input type="checkbox" name="approved"' + (m.approved ? ' checked' : '') + (me ? ' disabled' : '') + '> Approved</label>' +
     '<label class="row small"><input type="checkbox" name="is_igl"' + (m.is_igl ? ' checked' : '') + '> IGL</label>' +
     '<label class="row small"><input type="checkbox" name="is_trial"' + (m.is_trial ? ' checked' : '') + '> Trial player</label>' +
-    (me ? '' : '<label class="row small"><input type="checkbox" name="is_coach"' + (m.is_coach ? ' checked' : '') + '> Head coach (full access)</label>') + '</div>' +
-    (me || m.is_coach ? '' : '<label class="f" style="max-width:320px"><span>Team role</span><select name="staff_role"><option value="">Player</option>' + STAFF_ROLES.map(r => '<option' + (r === m.staff_role ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></label>') +
+    '</div>' +
+    ((m.is_coach || m.staff_role) && !me && !(S.team && S.team.owner_id === m.id) ? '<label class="f" style="max-width:320px"><span>Coach type</span><select name="coach_type">' + COACH_TYPES.map(r => '<option' + (r === staffLabel(m) ? ' selected' : '') + '>' + r + '</option>').join('') + '</select>' +
+      '<span class="small muted">Head coach, Team owner and Manager can run the team. Assistant coach and Analyst add reviews, stats and plays.</span></label>' : '') +
     '<div class="lbl small muted" style="margin-bottom:6px">CAN SEE</div><div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px">' +
     Object.keys(SECTIONS).map(k => '<label class="row small"><input type="checkbox" data-vis="' + k + '"' + (vis[k] !== false ? ' checked' : '') + (m.is_coach ? ' disabled' : '') + '> ' + esc(SECTIONS[k]) + '</label>').join('') + '</div>' +
     '<div class="row" style="margin-top:12px"><button class="btn small">Save</button>' + (me ? '' : '<button type="button" class="btn small danger" data-remove="' + m.id + '">Kick from team</button>') + '</div></form></div></details>';
@@ -1565,6 +1580,7 @@ COACH.team = async function (box) {
   const link = location.origin + location.pathname + '#/join/' + (t.join_code || '');
   box.innerHTML = '<div class="card stack" style="max-width:620px"><h2>Invite players</h2>' +
     '<p class="small muted">Send players this link or the code. After they sign in with Discord they land on your team and pick their roster slot. If you put their Discord username on a roster slot (Members tab) they\'re let in automatically; otherwise you approve them.</p>' +
+    '<p class="small muted"><b>Coaches and staff</b> use the same link and pick what they are under "Joining as" (Head coach, Team owner, Manager, Assistant coach or Analyst). You approve them in the Members tab.</p>' +
     '<div class="row"><div class="kpi"><div class="v" style="letter-spacing:3px">' + esc(t.join_code || '—') + '</div><div class="l">Team code</div></div></div>' +
     '<div class="row"><input id="jl" value="' + esc(link) + '" readonly><button class="btn small" id="cp1">Copy link</button></div>' +
     '<div><button class="btn ghost small" id="nc">Make a new code</button> <span class="small muted">Old code and link stop working.</span></div></div>' +

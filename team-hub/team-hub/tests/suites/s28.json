@@ -1,0 +1,16 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fresh","wait":2500},
+ {"js":"(()=>{ const f=document.querySelector('#createf'); return 'create roles: '+[...f.title.options].map(o=>o.value).join('/')+' | join as: '+[...document.querySelector('#joinf [name=as]').options].map(o=>o.text).join('/') })()","print":true},
+ {"js":"(()=>{ const f=document.querySelector('#joinf'); f.code.value=window.__MOCKDB__.teams[0].join_code; f.as.value='Analyst'; f.requestSubmit(); return 1 })()","wait":2000},
+ {"js":"(document.querySelector('#app').innerText||'').replace(/\\s+/g,' ').slice(0,200)","print":true},
+ {"shot":"m1-staff-waiting.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fresh","wait":2500},
+ {"js":"(()=>{ const f=document.querySelector('#createf'); f.name.value='Night Five'; f.title.value='Manager'; f.requestSubmit(); return 1 })()","wait":2500},
+ {"js":"(()=>{ const p=window.__MOCKDB__.profiles.find(x=>x.id==='u-fresh'); return 'creator: is_coach '+p.is_coach+' role '+p.staff_role+' | sidebar: '+(document.querySelector('aside')||document.body).innerText.includes('Manager') })()","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/home","wait":2500},
+ {"js":"(()=>{ const p=window.__MOCKDB__.profiles.find(x=>x.id==='u-new'); Object.assign(p,{team_id:1,approved:false,staff_role:'Assistant coach',is_coach:false}); location.hash='#/coach/members'; return 1 })()","wait":2500},
+ {"js":"(()=>{ const cards=[...document.querySelectorAll('details.item')]; const c=cards.find(d=>d.innerText.includes('Newb')); return 'is_coach boxes: '+document.querySelectorAll('[name=is_coach]').length+' | player role selects: '+document.querySelectorAll('[name=staff_role]').length+' | coach_type selects: '+document.querySelectorAll('[name=coach_type]').length+' | newbie: '+(c?c.querySelector('summary').innerText.replace(/\\s+/g,' '):'none') })()","print":true},
+ {"js":"(()=>{ const c=[...document.querySelectorAll('details.item')].find(d=>d.innerText.includes('Newb')); c.open=true; const f=c.querySelector('form'); f.coach_type.value='Manager'; f.requestSubmit(); return 1 })()","wait":1200},
+ {"js":"(()=>{ const p=window.__MOCKDB__.profiles.find(x=>x.id==='u-new'); return 'after save: '+p.staff_role+' is_coach '+p.is_coach })()","print":true},
+ {"shot":"m2-members.png","full":true}
+]
