@@ -160,7 +160,7 @@ const TABLES = {
     F('seen', 'Seen in VODs', 'long'), F('updated', 'Last updated')] },
   roster: { label: 'Roster slots', sheet: 'Roster', order: 'name', asc: true, req: 'name', merge: true, fields: [
     F('name', 'Name', 'text', ['Player (IGN)', 'Player', 'Name']), F('ign', 'In-game name', 'text', ['Player (IGN)', 'IGN', 'In-game name']), F('discord', 'Discord username', 'text', ['Discord username', 'Discord']),
-    F('role', 'Role', 'select', ['Role'], { options: ROLES }), F('is_igl', 'IGL', 'bool', ['IGL?', 'IGL']), F('is_trial', 'Trial', 'bool', ['Trial', 'Trial player']), F('status', 'Status', 'select', ['Status'], { options: ['Active', 'Bench', 'Coach'] })] },
+    F('role', 'Role', 'select', ['Role'], { options: ROLES }), F('is_igl', 'IGL', 'bool', ['IGL?', 'IGL']), F('is_trial', 'Trial', 'bool', ['Trial', 'Trial player']), F('status', 'Status', 'select', ['Status'], { options: ['Active', 'Bench'] })] },
   game_plans: { label: 'Game plans', order: 'match_date', req: 'opponent', keepOnAdd: ['scrim_id'], fields: [
     F('opponent', 'Opponent'), F('match_date', 'Match date', 'date'), F('maps', 'Maps (comma separated)'), F('their_tendencies', 'Their tendencies (how they play)', 'long'),
     F('comp', 'Our comp (per map)', 'long'), F('attack_plan', 'Attack plan', 'long'), F('defense_plan', 'Defense plan', 'long'), F('pistols', 'Pistol rounds', 'long'),
@@ -736,7 +736,7 @@ function pcard(p, ps) {
     (p.rank ? '<div style="margin-top:6px">' + rankPill(p.rank, true) + '</div>' : '') + riotLine(p.rs) +
     (ps ? '<div class="pstats">' + (s ? '<div><b>' + num(s.kd, 2) + '</b><span>K/D</span></div><div><b>' + pct(s.hs) + '</b><span>HS%</span></div><div><b>' + s.maps + '</b><span>Maps</span></div>' : '<div class="muted small" style="grid-column:1/-1">No stats yet</div>') + '</div>' : '') +
     (S.me.is_coach ? '<div class="pact">' + (p.coachSlot ? '<button class="btn small ghost" data-slot="' + key + '|Active">Make player</button>'
-      : '<button class="btn small ghost" data-bench="' + key + '">' + (p.bench ? 'Make active' : 'Bench') + '</button><button class="btn small ghost" data-slot="' + key + '|Coach">Coach</button>') +
+      : '<button class="btn small ghost" data-bench="' + key + '">' + (p.bench ? 'Make active' : 'Bench') + '</button>') +
       (p.rid ? '<button class="btn small ghost" data-redit="roster:' + p.rid + '">Edit</button>' : '') + '<button class="btn small ghost danger-t" data-kick="' + key + '">Kick</button></div>' : '') + '</div>';
 }
 
@@ -1547,7 +1547,7 @@ function rosterTable(roster, members) {
       '<td><select data-f="role">' + ROLES.map(x => '<option' + (x === (r.role || 'Flex') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></td>' +
       '<td style="text-align:center"><input type="checkbox" data-f="is_igl"' + (r.is_igl ? ' checked' : '') + '></td>' +
       '<td style="text-align:center"><input type="checkbox" data-f="is_trial"' + (r.is_trial ? ' checked' : '') + '></td>' +
-      '<td><select data-f="status" style="min-width:96px">' + ['Active', 'Bench', 'Coach'].map(x => '<option' + (x === (r.status || 'Active') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></td>' +
+      '<td><select data-f="status" style="min-width:96px">' + ['Active', 'Bench'].concat(r.status === 'Coach' ? ['Coach'] : []).map(x => '<option' + (x === (r.status || 'Active') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></td>' +
       '<td>' + (r.id ? status + (who ? '<div class="small muted">' + esc(nameOf(who)) + '</div>' : '') : '') + '</td>' +
       '<td style="white-space:nowrap">' + (r.id ? '<button class="btn small ghost" data-rsave>Save</button> ' + (r.claimed_by ? '<button class="btn small ghost" data-runlink>Unlink</button> <button class="btn small danger" data-rkick>Kick</button>' : '<button class="btn small danger" data-rdel title="Delete slot">×</button>') : '<button class="btn small" data-rsave>Add</button>') + '</td></tr>';
   };
