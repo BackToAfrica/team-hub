@@ -2811,18 +2811,18 @@ PAGES.veto = async function (el) {
 // ---------------------------------------------------------------- Lineup library
 PAGES.lineups = async function (el) {
   const [rows, learned, team] = await Promise.all([db.list('lineups', { order: 'created_at', asc: false, limit: 1000 }), sb.from('lineup_learned').select('*').eq('team_id', S.me.team_id).then(r => r.data || []), teamPlayers()]);
-  const f = localStore('th_lu') || {};
+  const f = localStore('th_lu') || {}; const maps2 = await valMaps().catch(() => ({}));
   const mine = new Set(learned.filter(l => l.user_id === S.me.id).map(l => l.lineup_id));
   const players = team.players.filter(p => p.user_id);
   const opts = (k, list) => '<select data-lf="' + k + '"><option value="">All ' + k + 's</option>' + list.map(x => '<option' + (f[k] === x ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select>';
   const agents = Array.from(new Set(rows.map(r => r.agent).filter(Boolean))).sort(), maps = Array.from(new Set(rows.map(r => r.map).filter(Boolean))).sort();
   const list = rows.filter(r => (!f.agent || r.agent === f.agent) && (!f.map || r.map === f.map) && (!f.show || (f.show === 'todo' ? !mine.has(r.id) : mine.has(r.id))));
   const card = r => { const vi = videoInfo(r.link); const who = learned.filter(l => l.lineup_id === r.id).map(l => players.find(p => p.user_id === l.user_id)).filter(Boolean);
-    return '<div class="lcard' + (mine.has(r.id) ? ' got' : '') + '">' + (r.image ? '<img src="' + esc(r.image) + '" alt="" loading="lazy">' : vi ? thumbHtml(vi) : '') +
+    return '<div class="lcard' + (mine.has(r.id) ? ' got' : '') + '"><div class="lview" data-lview="' + r.id + '" title="Show me how">' + (r.image ? '<img src="' + esc(r.image) + '" alt="" loading="lazy">' : vi ? thumbHtml(vi) : r.pos ? lineupMapHtml(r, maps2) : '<div class="thumb ph"><span class="play">▶</span><span class="src">How to</span></div>') + '</div>' +
       '<div class="lb"><div class="row" style="gap:6px">' + (r.agent ? '<span class="pill purple">' + esc(r.agent) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + sidePill(r.side) + (r.site ? '<span class="pill">' + esc(r.site) + '</span>' : '') + '</div>' +
-      '<div class="t">' + esc(r.title) + (r.ability ? ' <span class="muted small">· ' + esc(r.ability) + '</span>' : '') + '</div>' + (r.purpose ? '<div class="small">' + inlineMd(r.purpose) + '</div>' : '') +
+      '<div class="t"><button class="linkbtn lt" data-lview="' + r.id + '">' + esc(r.title) + '</button>' + (r.ability ? ' <span class="muted small">· ' + esc(r.ability) + '</span>' : '') + '</div>' + (r.purpose ? '<div class="small">' + inlineMd(r.purpose) + '</div>' : '') +
       (r.stand ? '<div class="small"><span class="muted">Stand:</span> ' + inlineMd(r.stand) + '</div>' : '') + (r.aim ? '<div class="small"><span class="muted">Aim / throw:</span> ' + inlineMd(r.aim) + '</div>' : '') +
-      '<div class="row small" style="margin-top:8px;gap:8px">' + (vi ? '<a href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch</a>' : r.link ? linkHtml(r.link, 'Open') : '') +
+      '<div class="row small" style="margin-top:8px;gap:8px"><button class="btn small" data-lview="' + r.id + '">▶ Show me how</button>' +
         '<button class="btn small ' + (mine.has(r.id) ? '' : 'ghost') + '" data-learn="' + r.id + '">' + (mine.has(r.id) ? '✓ I know it' : 'I learned this') + '</button>' +
         ((isStaff() || r.created_by === S.me.id) ? '<button class="linkbtn" data-led="' + r.id + '">Edit</button>' : '') + '</div>' +
       (who.length ? '<div class="small muted" style="margin-top:6px">Knows it: ' + who.map(p => esc(p.name)).join(', ') + '</div>' : '') + '</div></div>'; };
@@ -2838,6 +2838,7 @@ PAGES.lineups = async function (el) {
     const { error } = mine.has(id) ? await sb.from('lineup_learned').delete().eq('lineup_id', id).eq('user_id', S.me.id) : await sb.from('lineup_learned').insert([{ lineup_id: id, user_id: S.me.id }]);
     if (error) toast(error.message); render(); });
   $('#addlu').onclick = () => lineupForm({});
+  $$('[data-lview]', el).forEach(b => b.onclick = () => lineupView(Number(b.dataset.lview), list, mine));
   $$('[data-led]', el).forEach(b => b.onclick = () => lineupForm(rows.find(r => r.id === Number(b.dataset.led))));
 };
 function lineupForm(r) {
@@ -2845,11 +2846,20 @@ function lineupForm(r) {
   openModal('<h2>' + (r.id ? 'Edit' : 'Add') + ' lineup</h2><form id="lf"><label class="f"><span>Name</span><input name="title" required value="' + esc(r.title || '') + '" placeholder="e.g. Viper A main molly for post-plant"></label>' +
     '<div class="row"><label class="f grow"><span>Agent</span>' + sel('agent', AGENTS, r.agent) + '</label><label class="f grow"><span>Ability</span><input name="ability" value="' + esc(r.ability || '') + '" placeholder="Snake Bite"></label></div>' +
     '<div class="row"><label class="f grow"><span>Map</span>' + sel('map', MAPS, r.map) + '</label><label class="f"><span>Side</span>' + sel('side', ['Attack', 'Defense'], r.side) + '</label><label class="f"><span>Site</span><input name="site" style="width:90px" value="' + esc(r.site || '') + '" placeholder="A"></label></div>' +
+    '<div class="f"><span>Show it on the map <span class="muted">(click where you stand, then where it lands)</span></span><div class="lupick"></div></div>' +
     '<label class="f"><span>What it\'s for</span><input name="purpose" value="' + esc(r.purpose || '') + '" placeholder="Stops the defuse on default plant"></label>' +
     '<label class="f"><span>Where to stand</span><input name="stand" value="' + esc(r.stand || '') + '"></label><label class="f"><span>Where to aim / how to throw</span><input name="aim" value="' + esc(r.aim || '') + '" placeholder="Top of the pillar, jump throw"></label>' +
     '<label class="f"><span>Clip link (YouTube, Medal, Twitch…)</span><input name="link" value="' + esc(r.link || '') + '"></label><label class="f"><span>Screenshot link (optional)</span><input name="image" value="' + esc(r.image || '') + '" placeholder="https://i.imgur.com/…"></label>' +
     '<div class="row"><button class="btn">Save</button><button type="button" class="btn ghost" data-close>Cancel</button>' + (r.id ? '<span class="grow"></span><button type="button" class="btn small danger" id="ldel">Delete</button>' : '') + '</div></form>', m => {
-    $('#lf', m).onsubmit = async e => { e.preventDefault(); const f = e.target; const rec = {}; ['title', 'agent', 'ability', 'map', 'side', 'site', 'purpose', 'stand', 'aim', 'link', 'image'].forEach(k => rec[k] = f[k].value.trim() || null);
+    let pos = r.pos ? JSON.parse(JSON.stringify(r.pos)) : null; const pick = $('.lupick', m);
+    const drawPick = async () => { const cals = await valMaps().catch(() => ({})); const mp = $('#lf', m).map.value;
+      if (!mp) { pick.innerHTML = '<p class="small muted" style="margin:0">Pick a map first.</p>'; return; }
+      pick.innerHTML = lineupMapHtml({ map: mp, pos: pos, side: $('#lf', m).side.value }, cals, true) + '<div class="row small" style="gap:8px;margin-top:4px"><span class="muted">' + (!pos || !pos.s ? 'Click where you stand.' : !pos.l ? 'Now click where it lands.' : 'Done. Click again to start over.') + '</span>' + (pos ? '<button type="button" class="linkbtn" id="lupclr">Clear</button>' : '') + '</div>';
+      const svg = $('svg', pick); svg.onclick = e => { const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const q = pt.matrixTransform(svg.getScreenCTM().inverse()); const xy = [Math.round(q.x), Math.round(q.y)];
+        if (!pos || pos.l) pos = { s: xy }; else pos.l = xy; drawPick(); };
+      if ($('#lupclr', pick)) $('#lupclr', pick).onclick = () => { pos = null; drawPick(); }; };
+    $('#lf', m).map.addEventListener('change', () => { pos = null; drawPick(); }); $('#lf', m).side.addEventListener('change', drawPick); drawPick();
+    $('#lf', m).onsubmit = async e => { e.preventDefault(); const f = e.target; const rec = {}; ['title', 'agent', 'ability', 'map', 'side', 'site', 'purpose', 'stand', 'aim', 'link', 'image'].forEach(k => rec[k] = f[k].value.trim() || null); rec.pos = pos && pos.s ? pos : null;
       try { if (r.id) await db.update('lineups', r.id, rec); else await db.insert('lineups', [Object.assign({ created_by: S.me.id }, rec)]); closeModal(); toast('Saved'); render(); } catch (err) { toast('Error: ' + err.message); } };
     if ($('#ldel', m)) $('#ldel', m).onclick = async () => { if (!confirm('Delete this lineup?')) return; await db.remove('lineups', r.id); closeModal(); render(); };
   });
@@ -4362,7 +4372,67 @@ PAGES.lineups = async function (el) {
   const b = document.createElement('button'); b.className = 'btn small ghost'; b.textContent = '🃏 Practice'; b.style.marginRight = '6px';
   const add = $('#addlu', el); add.parentNode.insertBefore(b, add);
   b.onclick = lineupQuiz;
+  const sg = document.createElement('button'); sg.className = 'btn small ghost'; sg.textContent = 'Strats.gg ↗'; sg.style.marginRight = '6px';
+  add.parentNode.insertBefore(sg, b); sg.onclick = stratsGgModal;
 };
+// ---------- quick "show me how" for a lineup: clip on mute, stand → land on the minimap, and the steps
+function lineupMapHtml(r, cals, big) {
+  const cal = cals[String(r.map || '').toLowerCase()]; const p = r.pos || {};
+  const dot = (xy, c, label) => xy ? '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="' + (big ? 20 : 26) + '" fill="' + c + '" stroke="#0b0f14" stroke-width="5"/><text x="' + xy[0] + '" y="' + (xy[1] - 34) + '" text-anchor="middle" font-size="34" font-weight="800" fill="#fff" stroke="#0b0f14" stroke-width="7" paint-order="stroke">' + label + '</text>' : '';
+  return '<div class="kmap lumap">' + (cal ? '<img src="' + esc(cal.displayIcon) + '" alt="">' : '<div class="kmap-blank"></div>') +
+    '<svg viewBox="0 0 1000 1000"><defs><marker id="luah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#ffe066"/></marker></defs><rect width="1000" height="1000" fill="transparent"/>' +
+    (p.s && p.l ? '<line x1="' + p.s[0] + '" y1="' + p.s[1] + '" x2="' + p.l[0] + '" y2="' + p.l[1] + '" stroke="#ffe066" stroke-width="8" stroke-dasharray="22 14" marker-end="url(#luah)"/>' : '') +
+    dot(p.s, '#3ba55d', 'STAND') + dot(p.l, '#ff4655', 'LANDS') + '</svg></div>';
+}
+function lineupClip(r) {
+  const vi = videoInfo(r.link); if (!vi || (vi.kind !== 'yt' && vi.kind !== 'tw')) return '';
+  let src = embedSrc(vi, vi.t || 0);
+  if (vi.kind === 'yt') src = src.replace(/&autoplay=1/, '') + '&autoplay=1&mute=1&playsinline=1&loop=1&playlist=' + encodeURIComponent(vi.id);
+  else src = src.replace(/autoplay=(true|false)/, 'autoplay=true') + '&muted=true';
+  return '<div class="luclip"><iframe src="' + esc(src) + '" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>';
+}
+async function lineupView(id, list, mine) {
+  const cals = await valMaps().catch(() => ({})); let i = Math.max(0, list.findIndex(x => x.id === id));
+  const show = () => { const r = list[i]; const vi = videoInfo(r.link); const clip = lineupClip(r); const hasMap = !!(r.pos && r.pos.s);
+    const steps = [r.stand && ['Stand', r.stand], r.aim && ['Aim / throw', r.aim], (r.ability || r.purpose) && ['Use', [r.ability, r.purpose].filter(Boolean).join(' — ')]].filter(Boolean);
+    openModal('<div class="row spread"><div class="row" style="gap:6px">' + (r.agent ? '<span class="pill purple">' + esc(r.agent) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + sidePill(r.side) + (r.site ? '<span class="pill">' + esc(r.site) + '</span>' : '') + '</div><span class="small muted">' + (i + 1) + ' / ' + list.length + '</span></div>' +
+      '<h2 style="margin:8px 0 10px">' + esc(r.title) + '</h2>' +
+      '<div class="luview' + (clip && hasMap ? ' two' : '') + '">' + (clip || (r.image ? '<img class="luimg" src="' + esc(r.image) + '" alt="">' : '')) + (hasMap ? lineupMapHtml(r, cals, true) : '') +
+        (!clip && !hasMap && !r.image ? '<p class="small muted">No clip or map spot yet' + (isStaff() || r.created_by === S.me.id ? ' — press Edit to add a clip link and click the stand and landing spots on the map.' : '.') + '</p>' : '') + '</div>' +
+      (clip && r.image ? '<img class="luimg" src="' + esc(r.image) + '" alt="" style="margin-top:8px">' : '') +
+      (steps.length ? '<ol class="lusteps">' + steps.map(([k, v]) => '<li><b>' + k + ':</b> ' + inlineMd(v) + '</li>').join('') + '</ol>' : '') +
+      '<div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn small ghost" id="luprev"' + (i ? '' : ' disabled') + '>← Prev</button><button class="btn small ghost" id="lunext"' + (i < list.length - 1 ? '' : ' disabled') + '>Next →</button>' +
+        '<button class="btn small ' + (mine.has(r.id) ? '' : 'ghost') + '" id="lulearn">' + (mine.has(r.id) ? '✓ I know it' : 'I learned this') + '</button>' +
+        (vi ? '<a class="small" href="' + esc(vi.url) + '" target="_blank" rel="noopener">Open clip ↗</a>' : '') +
+        ((isStaff() || r.created_by === S.me.id) ? '<button class="linkbtn" id="luedit">Edit</button>' : '') + '<span class="grow"></span><button class="btn small ghost" id="luclose">Close</button></div>', m => {
+      const box = m.closest('.modal') || m; box.style.maxWidth = '920px';
+      $('#luclose', m).onclick = () => { closeModal(); render(); };
+      $('#luprev', m).onclick = () => { if (i) { i--; show(); } };
+      $('#lunext', m).onclick = () => { if (i < list.length - 1) { i++; show(); } };
+      if ($('#luedit', m)) $('#luedit', m).onclick = () => { closeModal(); lineupForm(r); };
+      $('#lulearn', m).onclick = async () => { const { error } = mine.has(r.id) ? await sb.from('lineup_learned').delete().eq('lineup_id', r.id).eq('user_id', S.me.id) : await sb.from('lineup_learned').insert([{ lineup_id: r.id, user_id: S.me.id }]);
+        if (error) { toast(error.message); return; } mine.has(r.id) ? mine.delete(r.id) : mine.add(r.id); show(); };
+    }); };
+  show();
+}
+// Strats.gg doesn't allow embedding, so we open their filtered lineup page in a new tab.
+function stratsGgUrl(map, agent, side) {
+  const q = new URLSearchParams(); const slug = v => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (map) q.set('map', slug(map)); if (agent) q.set('agent', slug(agent)); if (/def/i.test(side || '')) q.set('side', 'defense');
+  return 'https://strats.gg/valorant/lineups' + (q.toString() ? '?' + q : '');
+}
+function stratsGgModal() {
+  const f = localStore('th_lu') || {}; const st = localStore('th_sg') || {};
+  const map = f.map || st.map || '', agent = f.agent || st.agent || '', side = st.side || 'Attack';
+  const opt = (list, v, blank) => '<option value="">' + blank + '</option>' + list.map(x => '<option' + (x === v ? ' selected' : '') + '>' + esc(x) + '</option>').join('');
+  openModal('<h2>Find lineups on Strats.gg</h2><p class="small muted" style="margin-top:0">Pick what you\'re looking for and it opens Strats.gg already filtered. Found one you\'ll use? Copy its link and press <b>Add lineup</b> here so the team can learn it.</p>' +
+    '<div class="row kmctl" style="gap:8px;flex-wrap:wrap"><select id="sgmap">' + opt(MAPS, map, 'Any map') + '</select><select id="sgagent">' + opt(AGENTS, agent, 'Any agent') + '</select><select id="sgside">' + ['Attack', 'Defense'].map(x => '<option' + (x === side ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></div>' +
+    '<div class="row" style="gap:8px;margin-top:14px"><a class="btn" id="sggo" target="_blank" rel="noopener">Open on Strats.gg ↗</a><button class="btn ghost" id="sgclose">Close</button></div>', m => {
+    const upd = () => { const v = { map: $('#sgmap', m).value, agent: $('#sgagent', m).value, side: $('#sgside', m).value }; localStore('th_sg', v); $('#sggo', m).href = stratsGgUrl(v.map, v.agent, v.side); };
+    ['#sgmap', '#sgagent', '#sgside'].forEach(k => $(k, m).onchange = upd); upd();
+    $('#sgclose', m).onclick = closeModal;
+  });
+}
 async function lineupQuiz() {
   const f = localStore('th_lu') || {};
   const [rows, { data: learned }] = await Promise.all([db.list('lineups', { order: 'created_at', asc: false, limit: 1000 }), sb.from('lineup_learned').select('lineup_id').eq('user_id', S.me.id)]);
@@ -4370,14 +4440,15 @@ async function lineupQuiz() {
   let deck = rows.filter(r => (!f.agent || r.agent === f.agent) && (!f.map || r.map === f.map));
   deck = deck.filter(r => !got.has(r.id)).sort(() => Math.random() - 0.5).concat(deck.filter(r => got.has(r.id)).sort(() => Math.random() - 0.5));
   if (!deck.length) { toast('No lineups to practise with these filters'); return; }
-  let i = 0, shown = false, right = 0;
+  let i = 0, shown = false, right = 0; const qcals = await valMaps().catch(() => ({}));
   const show = () => {
     if (i >= deck.length) { openModal('<h2>Done!</h2><p>You knew <b>' + right + '</b> of ' + deck.length + '.</p><div class="row"><button class="btn" id="qagain">Again</button><button class="btn ghost" id="qclose">Close</button></div>', m => { $('#qagain', m).onclick = () => { closeModal(); lineupQuiz(); }; $('#qclose', m).onclick = () => { closeModal(); render(); }; }); return; }
     const r = deck[i]; const vi = videoInfo(r.link);
     openModal('<div class="row spread"><span class="small muted">' + (i + 1) + ' / ' + deck.length + (got.has(r.id) ? ' · already learned' : '') + '</span><button class="linkbtn" id="qclose">Close</button></div>' +
       '<div class="qcard"><div class="row" style="gap:6px">' + (r.agent ? '<span class="pill purple">' + esc(r.agent) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + sidePill(r.side) + (r.site ? '<span class="pill">' + esc(r.site) + '</span>' : '') + '</div>' +
       '<h2 style="margin:10px 0">' + esc(r.title) + (r.ability ? ' <span class="muted small">· ' + esc(r.ability) + '</span>' : '') + '</h2>' +
-      (shown ? (r.image ? '<img src="' + esc(r.image) + '" alt="" style="width:100%;border-radius:8px">' : '') + (r.stand ? '<p><b>Stand:</b> ' + inlineMd(r.stand) + '</p>' : '') + (r.aim ? '<p><b>Aim / throw:</b> ' + inlineMd(r.aim) + '</p>' : '') + (vi ? '<p><a href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch the clip</a></p>' : r.link ? '<p>' + linkHtml(r.link, 'Open') + '</p>' : '') +
+      (shown ? (lineupClip(r) || (r.image ? '<img src="' + esc(r.image) + '" alt="" style="width:100%;border-radius:8px">' : '')) + (r.pos && r.pos.s ? lineupMapHtml(r, qcals, true) : '') + (r.stand ? '<p><b>Stand:</b> ' + inlineMd(r.stand) + '</p>' : '') + (r.aim ? '<p><b>Aim / throw:</b> ' + inlineMd(r.aim) + '</p>' : '') + (vi ? '<p><a href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch the clip</a></p>' : r.link ? '<p>' + linkHtml(r.link, 'Open') + '</p>' : '') +
+        ((r.agent || r.map) ? '<p class="small"><a href="' + esc(stratsGgUrl(r.map, r.agent, r.side)) + '" target="_blank" rel="noopener">More ' + esc([r.agent, r.map].filter(Boolean).join(' ')) + ' lineups on Strats.gg ↗</a></p>' : '') +
         '<div class="row" style="gap:8px;margin-top:12px"><button class="btn" id="qyes">✓ Knew it</button><button class="btn ghost" id="qno">Still learning</button></div>'
         : '<p class="muted">Where do you stand and where do you aim? Picture it, then check.</p><button class="btn" id="qshow">Show answer</button>') + '</div>', m => {
       $('#qclose', m).onclick = () => { closeModal(); render(); };

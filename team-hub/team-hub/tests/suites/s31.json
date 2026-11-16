@@ -1,0 +1,20 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/lineups","wait":3000},
+ {"js":"'cards '+document.querySelectorAll('.lcard').length+' howto buttons '+document.querySelectorAll('button[data-lview]').length","print":true},
+ {"js":"(()=>{ document.querySelector('.lcard button.btn[data-lview]').click(); return 1 })()","wait":1200},
+ {"js":"(()=>{ const m=document.querySelector('#modal-root'); const f=m.querySelector('iframe'); return 'title: '+m.querySelector('h2').innerText+' | iframe mute '+(f&&/mute=1/.test(f.src))+' autoplay '+(f&&/autoplay=1/.test(f.src))+' | map dots '+m.querySelectorAll('.lumap circle').length+' arrow '+!!m.querySelector('.lumap line')+' | steps '+m.querySelectorAll('.lusteps li').length+' | two-col '+!!m.querySelector('.luview.two') })()","print":true},
+ {"shot":"m7-howto.png"},
+ {"js":"(()=>{ document.querySelector('#lulearn').click(); return 1 })()","wait":700},
+ {"js":"'learn btn: '+document.querySelector('#lulearn').innerText","print":true},
+ {"js":"(()=>{ const n=document.querySelector('#lunext'); if(!n.disabled) n.click(); return document.querySelector('#modal-root h2').innerText+' | '+document.querySelector('#modal-root').innerText.replace(/\\s+/g,' ').slice(0,200) })()","wait":800,"print":true},
+ {"js":"(()=>{ document.querySelector('#luclose').click(); return 1 })()","wait":800},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/lineups","wait":3000},
+ {"js":"(()=>{ document.querySelector('#addlu').click(); return 1 })()","wait":800},
+ {"js":"(()=>{ const f=document.querySelector('#lf'); f.title.value='Test lineup'; f.agent.value='Viper'; f.map.value='Lotus'; f.map.dispatchEvent(new Event('change')); return 1 })()","wait":1200},
+ {"js":"(()=>{ const svg=document.querySelector('.lupick svg'); if(!svg) return 'no picker'; let r=svg.getBoundingClientRect(); svg.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.left+r.width*.4,clientY:r.top+r.height*.7})); return 'one' })()","wait":800,"print":true},
+ {"js":"(()=>{ const svg=document.querySelector('.lupick svg'); let r=svg.getBoundingClientRect(); svg.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.left+r.width*.3,clientY:r.top+r.height*.3})); return document.querySelector('.lupick').innerText })()","wait":800,"print":true},
+ {"js":"(()=>{ document.querySelector('#lf').requestSubmit(); return 1 })()","wait":1200},
+ {"js":"JSON.stringify(window.__MOCKDB__.lineups.find(l=>l.title==='Test lineup').pos)","print":true},
+ {"js":"(()=>{ const c=[...document.querySelectorAll('.lcard')].find(c=>/Test lineup/.test(c.innerText)); return 'card map preview '+!!(c&&c.querySelector('.lumap circle')) })()","print":true},
+ {"js":"'errors: '+JSON.stringify((window.__errs||[]).slice(0,3))","print":true}
+]

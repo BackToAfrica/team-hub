@@ -856,3 +856,19 @@ pre.rtext { white-space: pre-wrap; font-size: .85rem; background: var(--panel-2)
 .green-t { color: #3ba55d; } .red-t { color: #ff4655; }
 @media print { .noprint, nav, .sidebar, .topbar, header { display: none !important; } body { background: #fff; color: #000; } .card { break-inside: avoid; } }
 .kmctl input[type=date], .kmctl input[type=month] { width: auto; }
+
+/* lineup "show me how" */
+.lview { cursor: pointer; }
+.lcard .lview > img, .lcard .lview > .thumb { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+.lcard .lview > .lumap { aspect-ratio: 16/9; }
+.lcard .lview > .lumap img, .lcard .lview > .lumap svg { object-fit: contain; }
+.linkbtn.lt { font-weight: 700; color: var(--text); text-align: left; padding: 0; }
+.luview { display: grid; gap: 10px; }
+.luview.two { grid-template-columns: 1.4fr 1fr; align-items: start; }
+@media (max-width: 700px) { .luview.two { grid-template-columns: 1fr; } }
+.luclip { position: relative; aspect-ratio: 16/9; border-radius: 10px; overflow: hidden; background: #000; }
+.luclip iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.luimg { width: 100%; border-radius: 10px; display: block; }
+.lumap { position: relative; }
+.lupick .lumap { max-width: 320px; cursor: crosshair; }
+.lusteps { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 6px; }

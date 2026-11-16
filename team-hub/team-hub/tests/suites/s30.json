@@ -1,0 +1,11 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/lineups","wait":2500},
+ {"js":"(()=>{ const b=[...document.querySelectorAll('button')].find(x=>/Strats\\.gg/.test(x.textContent)); if(!b) return 'no button'; b.click(); return 'opened' })()","wait":500,"print":true},
+ {"js":"document.querySelector('#sggo').href","print":true},
+ {"js":"(()=>{ const m=document.querySelector('#sgmap'); m.value='Bind'; m.dispatchEvent(new Event('change')); const a=document.querySelector('#sgagent'); a.value='KAY/O'; a.dispatchEvent(new Event('change')); const s=document.querySelector('#sgside'); s.value='Defense'; s.dispatchEvent(new Event('change')); return document.querySelector('#sggo').href })()","print":true},
+ {"shot":"m6-stratsgg.png"},
+ {"js":"(()=>{ document.querySelector('#sgclose').click(); const b=[...document.querySelectorAll('button')].find(x=>/Practice/.test(x.textContent)); b.click(); return 1 })()","wait":800},
+ {"js":"(()=>{ document.querySelector('#qshow').click(); return 1 })()","wait":400},
+ {"js":"[...document.querySelectorAll('#modal-root a')].map(a=>a.textContent+' '+a.href).join(' | ')","print":true},
+ {"js":"'errors: '+JSON.stringify((window.__errs||[]).slice(0,3))","print":true}
+]
