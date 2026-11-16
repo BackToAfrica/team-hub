@@ -4362,7 +4362,27 @@ PAGES.lineups = async function (el) {
   const b = document.createElement('button'); b.className = 'btn small ghost'; b.textContent = '🃏 Practice'; b.style.marginRight = '6px';
   const add = $('#addlu', el); add.parentNode.insertBefore(b, add);
   b.onclick = lineupQuiz;
+  const sg = document.createElement('button'); sg.className = 'btn small ghost'; sg.textContent = 'Strats.gg ↗'; sg.style.marginRight = '6px';
+  add.parentNode.insertBefore(sg, b); sg.onclick = stratsGgModal;
 };
+// Strats.gg doesn't allow embedding, so we open their filtered lineup page in a new tab.
+function stratsGgUrl(map, agent, side) {
+  const q = new URLSearchParams(); const slug = v => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (map) q.set('map', slug(map)); if (agent) q.set('agent', slug(agent)); if (/def/i.test(side || '')) q.set('side', 'defense');
+  return 'https://strats.gg/valorant/lineups' + (q.toString() ? '?' + q : '');
+}
+function stratsGgModal() {
+  const f = localStore('th_lu') || {}; const st = localStore('th_sg') || {};
+  const map = f.map || st.map || '', agent = f.agent || st.agent || '', side = st.side || 'Attack';
+  const opt = (list, v, blank) => '<option value="">' + blank + '</option>' + list.map(x => '<option' + (x === v ? ' selected' : '') + '>' + esc(x) + '</option>').join('');
+  openModal('<h2>Find lineups on Strats.gg</h2><p class="small muted" style="margin-top:0">Pick what you\'re looking for and it opens Strats.gg already filtered. Found one you\'ll use? Copy its link and press <b>Add lineup</b> here so the team can learn it.</p>' +
+    '<div class="row kmctl" style="gap:8px;flex-wrap:wrap"><select id="sgmap">' + opt(MAPS, map, 'Any map') + '</select><select id="sgagent">' + opt(AGENTS, agent, 'Any agent') + '</select><select id="sgside">' + ['Attack', 'Defense'].map(x => '<option' + (x === side ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></div>' +
+    '<div class="row" style="gap:8px;margin-top:14px"><a class="btn" id="sggo" target="_blank" rel="noopener">Open on Strats.gg ↗</a><button class="btn ghost" id="sgclose">Close</button></div>', m => {
+    const upd = () => { const v = { map: $('#sgmap', m).value, agent: $('#sgagent', m).value, side: $('#sgside', m).value }; localStore('th_sg', v); $('#sggo', m).href = stratsGgUrl(v.map, v.agent, v.side); };
+    ['#sgmap', '#sgagent', '#sgside'].forEach(k => $(k, m).onchange = upd); upd();
+    $('#sgclose', m).onclick = closeModal;
+  });
+}
 async function lineupQuiz() {
   const f = localStore('th_lu') || {};
   const [rows, { data: learned }] = await Promise.all([db.list('lineups', { order: 'created_at', asc: false, limit: 1000 }), sb.from('lineup_learned').select('lineup_id').eq('user_id', S.me.id)]);
@@ -4378,6 +4398,7 @@ async function lineupQuiz() {
       '<div class="qcard"><div class="row" style="gap:6px">' + (r.agent ? '<span class="pill purple">' + esc(r.agent) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + sidePill(r.side) + (r.site ? '<span class="pill">' + esc(r.site) + '</span>' : '') + '</div>' +
       '<h2 style="margin:10px 0">' + esc(r.title) + (r.ability ? ' <span class="muted small">· ' + esc(r.ability) + '</span>' : '') + '</h2>' +
       (shown ? (r.image ? '<img src="' + esc(r.image) + '" alt="" style="width:100%;border-radius:8px">' : '') + (r.stand ? '<p><b>Stand:</b> ' + inlineMd(r.stand) + '</p>' : '') + (r.aim ? '<p><b>Aim / throw:</b> ' + inlineMd(r.aim) + '</p>' : '') + (vi ? '<p><a href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch the clip</a></p>' : r.link ? '<p>' + linkHtml(r.link, 'Open') + '</p>' : '') +
+        ((r.agent || r.map) ? '<p class="small"><a href="' + esc(stratsGgUrl(r.map, r.agent, r.side)) + '" target="_blank" rel="noopener">More ' + esc([r.agent, r.map].filter(Boolean).join(' ')) + ' lineups on Strats.gg ↗</a></p>' : '') +
         '<div class="row" style="gap:8px;margin-top:12px"><button class="btn" id="qyes">✓ Knew it</button><button class="btn ghost" id="qno">Still learning</button></div>'
         : '<p class="muted">Where do you stand and where do you aim? Picture it, then check.</p><button class="btn" id="qshow">Show answer</button>') + '</div>', m => {
       $('#qclose', m).onclick = () => { closeModal(); render(); };
