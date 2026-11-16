@@ -131,4 +131,19 @@
       { riot_id: 'OwlB#1234', rank: 'Diamond 1', games: 9, wins: 4, kd: 0.92, acs: 188, hs: 0.21, fk: 4, fd: 6, main_role: 'Controller', agents: [{ name: 'Omen', games: 7, wins: 3 }], maps: [{ name: 'Haven', games: 2, wins: 1 }], events: [['Haven', 'D', 'k', 800, -900, 1100, -500, 0, 'Omen']] },
       { riot_id: 'Ghost#NA1', error: "Riot couldn't find this player" }],
       together: [{ map: 'Haven', score: '13-9', won: true, queue: 'premier', at: new Date().toISOString(), comp: [{ agent: 'Jett', name: 'OwlA#NA1' }, { agent: 'Omen', name: 'OwlB#1234' }, { agent: 'Sova' }, { agent: 'Killjoy' }, { agent: 'Breach' }] }] } }];
+
+  // strats, clips, attendance, scrim finder, goals, lineups, personal kill map
+  DB.riot_matches.forEach((m, j) => { if (m.user_id === 'u-fear') m.events = Array.from({ length: 12 }, (_, r) => [m.map, r < 6 ? 'A' : 'D', r % 3 ? 'k' : 'd', -2500 + r * 300 + j * 50, 2000 - r * 250, -2200 + r * 280, 2300 - r * 240, r === 0 ? 1 : 0, m.agent]); });
+  DB.strats = [{ id: 1, team_id: 1, map: 'Lotus', side: 'Attack', title: 'A split double smoke', notes: 'Run on round 2 after a won pistol.', created_at: t(2), updated_at: t(1),
+    steps: [{ label: 'Setup', note: 'Two A main, one tree, two link.', items: [{ k: 'p', side: 'ally', x: 300, y: 600, label: 'Jet' }, { k: 'p', side: 'ally', x: 340, y: 640, label: 'Omn' }, { k: 'p', side: 'enemy', x: 200, y: 300, label: '?' }] },
+      { label: 'Execute', note: 'Smokes on tree and top, flash over.', items: [{ k: 'p', side: 'ally', x: 250, y: 450, label: 'Jet' }, { k: 'smoke', x: 180, y: 320 }, { k: 'arrow', x: 300, y: 600, x2: 220, y2: 380, side: 'ally' }, { k: 'text', x: 400, y: 200, text: 'Hit on flash' }] }] }];
+  DB.clips = [{ id: 1, team_id: 1, review_id: 501, t: 135, tags: ['Failed trade'], player: 'Fear', note: 'Too far from Kairo', vod: 'https://youtu.be/QnBTE-UVpX4', created_at: t(1) },
+    { id: 2, team_id: 1, review_id: 501, t: 410, tags: ['Good retake', 'Utility'], player: 'Kairo', note: null, vod: 'https://youtu.be/QnBTE-UVpX4', created_at: t(1) }];
+  DB.attendance = [{ id: 1, team_id: 1, day: t(3), kind: 'Scrim', player: 'Fear', status: 'On time' }, { id: 2, team_id: 1, day: t(3), kind: 'Scrim', player: 'Kairo', status: 'Late', minutes_late: 10 }, { id: 3, team_id: 1, day: t(5), kind: 'Scrim', player: 'Kairo', status: 'Absent' }];
+  DB.scrim_posts = [{ id: 1, team_id: 2, starts_at: new Date(Date.now() + 3 * 86400000).toISOString(), maps: 'Lotus, Haven', format: '2 maps', region: 'NA East', level: 'Diamond', note: 'DM OwlA', status: 'open', created_at: t(0) },
+    { id: 2, team_id: 2, starts_at: new Date(Date.now() + 5 * 86400000).toISOString(), maps: 'Any', format: 'BO3', region: 'NA East', status: 'open', created_at: t(0) }];
+  DB.player_goals = [{ id: 1, team_id: 1, user_id: 'u-fear', title: 'HS% to 25', metric: 'Headshot %', target: 25, deadline: t(-20), done: false, created_at: t(2) }];
+  DB.aim_logs = DB.aim_logs || []; for (let d = 0; d < 4; d++) DB.aim_logs.push({ id: 700 + d, team_id: 1, user_id: 'u-fear', date: t(d), kind: 'Aimlabs', scenario: 'Gridshot', score: 80000 });
+  DB.lineups = DB.lineups || []; if (!DB.lineups.length) DB.lineups.push({ id: 1, team_id: 1, title: 'Tree smoke from A main', agent: 'Omen', ability: 'Dark Cover', map: 'Lotus', side: 'Attack', site: 'A', stand: 'Corner of A main box', aim: 'Top of the tree', link: 'https://youtu.be/QnBTE-UVpX4', created_at: t(1) },
+    { id: 2, team_id: 1, title: 'Post-plant molly B', agent: 'Viper', ability: 'Snake Bite', map: 'Lotus', side: 'Attack', site: 'B', stand: 'B main door', aim: 'Antenna tip', created_at: t(1) });
 })();

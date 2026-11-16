@@ -19,6 +19,7 @@
   Q.prototype.limit = function (n) { this.lim = n; return this; };
   Q.prototype.insert = function (rows) { this.op = 'insert'; this.payload = rows; return this; };
   Q.prototype.update = function (p) { this.op = 'update'; this.payload = p; return this; };
+  Q.prototype.upsert = function (rows, o) { this.op = 'upsert'; this.payload = rows; this.conf = ((o && o.onConflict) || 'id').split(','); return this; };
   Q.prototype.delete = function () { this.op = 'delete'; return this; };
   Q.prototype.in = function (k, vs) { this.filters.push(r => vs.map(String).includes(String(r[k]))); return this; };
   Q.prototype.maybeSingle = function () { const q = this; return { then: (res, rej) => q.then(r => res({ data: r.data && r.data.length ? r.data[0] : null, error: r.error }), rej), catch: f => Promise.resolve() }; };
@@ -28,6 +29,7 @@
       const T = DB[this.t] = DB[this.t] || [];
       const match = r => this.filters.every(f => f(r));
       if (this.op === 'insert') { const made = this.payload.map(r => { const x = Object.assign({ id: nextId++, created_at: new Date().toISOString(), team_id: 1 }, r); T.push(x); return x; }); return Promise.resolve({ data: made, error: null }).then(res, rej); }
+      if (this.op === 'upsert') { const keys = this.conf; this.payload.forEach(r => { const ex = T.find(x => keys.every(k => String(x[k]) === String(r[k]))); if (ex) Object.assign(ex, r); else T.push(Object.assign({ id: nextId++, created_at: new Date().toISOString() }, r)); }); return Promise.resolve({ data: null, error: null }).then(res, rej); }
       if (this.op === 'update') { T.filter(match).forEach(r => Object.assign(r, this.payload)); return Promise.resolve({ data: null, error: null }).then(res, rej); }
       if (this.op === 'delete') { DB[this.t] = T.filter(r => !match(r)); return Promise.resolve({ data: null, error: null }).then(res, rej); }
       let rows = T.filter(match).map(r => Object.assign({}, r));
@@ -60,9 +62,14 @@
           if (fn === 'public_team') { const t = DB.teams.find(x => x.public_enabled && String(x.public_slug).toLowerCase() === String(args.p_slug).toLowerCase()); if (!t) return { data: null, error: null };
             return { data: { name: t.name, tag: t.tag, bio: t.public_bio, links: t.public_links, roster: DB.roster.filter(r => r.team_id === t.id && r.status !== 'Bench' && !r.is_trial).map(r => { const p = DB.profiles.find(x => x.id === r.claimed_by) || {}; return { ign: r.ign || r.name, role: r.role, igl: r.is_igl, rank: p.rank, peak: p.peak_rank }; }),
               staff: [{ name: 'dylanl', role: 'Head coach' }], results: DB.matches.filter(m => m.team_id === t.id && m.type !== 'Scrim').map(m => ({ date: m.date, event: m.event, opponent: m.opponent, map: m.map, rounds_won: m.rounds_won, rounds_lost: m.rounds_lost })) }, error: null }; }
-          if (fn === 'discord_status') { const d = (DB.team_discord || [])[0]; return { data: d ? { connected: true, mention: d.mention, hint: d.webhook_url.slice(-4), remind_day: d.remind_day, remind_hour: d.remind_hour, remind_avail: d.remind_avail } : { connected: false }, error: null }; }
+          if (fn === 'discord_status') { const d = (DB.team_discord || [])[0]; return { data: d ? { connected: true, mention: d.mention, hint: d.webhook_url.slice(-4), remind_day: d.remind_day, remind_hour: d.remind_hour, remind_avail: d.remind_avail, post_scrims: d.post_scrims } : { connected: false }, error: null }; }
           if (fn === 'set_discord_webhook') { if (!args.p_url) { DB.team_discord = []; return { data: null, error: null }; } if (!/^https:\/\/discord\.com\/api\/webhooks\/\d+\/[\w-]{20,}$/.test(args.p_url)) return { data: null, error: { message: 'That isn\'t a Discord webhook link.' } }; DB.team_discord = [{ team_id: 1, webhook_url: args.p_url, mention: args.p_mention || '' }]; return { data: null, error: null }; }
           if (fn === 'set_discord_reminders') { (DB.team_discord || []).forEach(d => { d.remind_day = args.p_day; d.remind_hour = args.p_hour; d.remind_avail = args.p_avail; }); return { data: null, error: null }; }
+          if (fn === 'set_discord_scrim_posts') { (DB.team_discord || []).forEach(d => d.post_scrims = args.p_on); return { data: null, error: null }; }
+          if (fn === 'scrim_post_teams') return { data: DB.teams.map(t => ({ id: t.id, name: t.name, tag: t.tag })), error: null };
+          if (fn === 'book_scrim_post') { const p = (DB.scrim_posts || []).find(x => x.id === args.p_id); if (!p || p.status !== 'open') return { data: null, error: { message: 'That scrim was already booked.' } };
+            Object.assign(p, { status: 'booked', booked_team_id: 1 }); const other = DB.teams.find(t => t.id === p.team_id);
+            DB.scrims.push({ id: nextId++, team_id: 1, starts_at: p.starts_at, opponent: other.name, maps: p.maps, format: p.format, status: 'Planned' }); return { data: other.name, error: null }; }
           if (fn === 'set_discord_mention') { (DB.team_discord || []).forEach(d => d.mention = args.p_mention); return { data: null, error: null }; }
           const me = DB.profiles.find(x => x.id === session.user.id);
           const claim = rid => { const r = DB.roster.find(x => x.id === rid); if (r.claimed_by && r.claimed_by !== me.id) return 'taken';

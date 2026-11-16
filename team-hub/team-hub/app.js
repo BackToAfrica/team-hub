@@ -407,16 +407,19 @@ const NAV = [
   { r: 'maps', label: 'Map pool', sec: 'team_stats', i: 'map', g: 'Prepare' },
   { r: 'analytics', label: 'Scrim analytics', sec: 'team_stats', i: 'chart', g: 'Prepare', staff: true },
   { r: 'killmap', label: 'Kill maps', sec: 'team_stats', i: 'pin', g: 'Prepare', staff: true },
+  { r: 'strats', label: 'Strat board', sec: 'playbook', i: 'route', g: 'Prepare' },
   { r: 'playbook', label: 'Playbook', sec: ['playbook', 'comms'], i: 'book', g: 'Prepare' },
   { r: 'lineups', label: 'Lineups', sec: 'playbook', i: 'pin', g: 'Prepare' },
   { r: 'comms', label: 'Comms', sec: 'comms', i: 'mic', g: 'Prepare' },
   { r: 'scouting', label: 'Scouting', sec: 'scouting', i: 'eye', g: 'Prepare' },
   { r: 'comps', label: 'Comp Checker', sec: 'comp_checker', i: 'shield', g: 'Prepare' },
   { r: 'reviews', label: 'VOD reviews', sec: 'reviews', i: 'play', g: 'Prepare', staff: true },
+  { r: 'clips', label: 'Clip library', sec: null, i: 'play', g: 'Prepare' },
   { r: 'patches', label: 'Patch notes', sec: 'patch_notes', i: 'doc', g: 'Prepare' },
   { r: 'games', label: 'My games', sec: null, i: 'chart', g: 'Improve' },
   { r: 'aim', label: 'Aim tracker', sec: null, i: 'cross', g: 'Improve' },
   { r: 'paths', label: 'Training path', sec: null, i: 'route', g: 'Improve' },
+  { r: 'streaks', label: 'Streaks & goals', sec: null, i: 'flag', g: 'Improve' },
   { r: 'notes', label: '1-on-1', sec: null, i: 'chat', g: 'Improve' }
 ];
 function navAllowed(n) {
@@ -431,13 +434,13 @@ function render() {
   if (me && !me.team_id) { renderOnboard(); return; }
   if (!me || !me.approved) { renderPending(); return; }
   const items = NAV.filter(navAllowed);
-  if (!items.some(n => n.r === S.route) && S.route !== 'player' && !((S.route === 'coach' || S.route === 'explore' || S.route === 'report' || S.route === 'tryouts') && isStaff()) && !((S.route === 'owner' || S.route === 'health') && me.is_admin) && S.route !== 'account') S.route = 'home';
+  if (!items.some(n => n.r === S.route) && S.route !== 'player' && !((S.route === 'coach' || S.route === 'explore' || S.route === 'report' || S.route === 'tryouts' || S.route === 'attendance' || S.route === 'finder') && isStaff()) && S.route !== 'card' && !((S.route === 'owner' || S.route === 'health') && me.is_admin) && S.route !== 'account') S.route = 'home';
   const ownerView = me.is_admin && S.team && S.team.owner_id !== me.id;
   const link = (r, label, i) => '<a href="#/' + r + '" class="' + (S.route === r ? 'active' : '') + '">' + icon(i) + '<span>' + esc(label) + '</span></a>';
   const groups = groupBy(items, 'g');
   const navHtml = groups.map(([g, list]) => '<div class="nav-g">' + esc(g) + '</div>' + list.map(n => link(n.r, n.label, n.i)).join('')).join('') +
     (isStaff() || me.is_admin ? '<div class="nav-g">Manage</div>' : '') +
-    (isStaff() ? link('coach', me.is_coach ? 'Coach panel' : 'Staff panel', 'gear') + link('report', 'Weekly report', 'doc') + link('tryouts', 'Tryouts', 'users') + link('explore', 'Other teams', 'eye') : '') +
+    (isStaff() ? link('coach', me.is_coach ? 'Coach panel' : 'Staff panel', 'gear') + link('report', 'Weekly report', 'doc') + link('tryouts', 'Tryouts', 'users') + link('attendance', 'Attendance', 'check') + link('finder', 'Scrim finder', 'swap') + link('explore', 'Other teams', 'eye') : '') +
     (me.is_admin ? link('owner', 'All teams', 'globe') + link('health', 'Health', 'bolt') : '') + installLinkHtml();
   $('#app').innerHTML =
     '<div class="topbar"><button id="menubtn" aria-label="Menu">☰</button><span class="dot"></span><b>' + esc(teamName()) + '</b></div>' +
@@ -1352,6 +1355,8 @@ async function reviewDetail(el, r, work) {
   const seekTo = sec => { if (!canEmbed) { if (vi) window.open(vi.kind === 'yt' ? 'https://www.youtube.com/watch?v=' + vi.id + '&t=' + Math.round(sec) + 's' : vi.url, '_blank', 'noopener'); return; }
     const fr = $('#vplayer'); fr.src = embedSrc(vi, sec); ytListen(fr); fr.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
   if (isOurs(r) || isStaff()) reviewRoundsPanel(el, r, vi, seekTo).catch(err => console.warn('rounds', err));
+  if (isStaff()) clipsPanel(el, r, seekTo).catch(err => console.warn('clips', err));
+  if (S.clipSeek != null) { const t = S.clipSeek; S.clipSeek = null; setTimeout(() => seekTo(t), 400); }
   if (isStaff()) {
     // new Work on item tied to this review (shows on the Work on board right away)
     const addWork = issue => editRow('work_on', { review_id: r.id, issue: issue || '', date: r.date || todayISO(), source: r.title || [r.opponent, r.type].filter(Boolean).join(' · ') || 'VOD review',
@@ -4069,6 +4074,381 @@ discordPanel = async function (box, after) {
     const { error } = await sb.rpc('set_discord_reminders', { p_day: v('day'), p_hour: v('hour'), p_avail: v('avail') });
     toast(error ? error.message : 'Saved');
   });
+};
+
+// =============================================================== STRAT BOARD
+// Steps of a setup drawn on the minimap: players, utility, arrows and notes. Coordinates are 0–1000 on the map square.
+const STRAT_TOOLS = [['move', 'Move'], ['ally', 'Our player'], ['enemy', 'Enemy'], ['smoke', 'Smoke'], ['molly', 'Molly'], ['flash', 'Flash'], ['wall', 'Wall'], ['arrow', 'Arrow'], ['text', 'Text']];
+const STRAT_COLOR = { ally: '#3ba55d', enemy: '#ff4655', smoke: '#9aa4b2', molly: '#ff8a3d', flash: '#ffe066', wall: '#6ec6ff' };
+function stratItemSvg(it, i, sel) {
+  const s = sel ? ' stroke="#fff" stroke-width="4"' : '';
+  if (it.k === 'p') return '<g data-i="' + i + '"><circle cx="' + it.x + '" cy="' + it.y + '" r="22" fill="' + (it.side === 'enemy' ? STRAT_COLOR.enemy : STRAT_COLOR.ally) + '"' + (s || ' stroke="#0b0f14" stroke-width="3"') + '/>' +
+    '<text x="' + it.x + '" y="' + (Number(it.y) + 6) + '" text-anchor="middle" font-size="17" font-weight="700" fill="#fff" pointer-events="none">' + esc(String(it.label || '').slice(0, 3)) + '</text></g>';
+  if (it.k === 'smoke') return '<circle data-i="' + i + '" cx="' + it.x + '" cy="' + it.y + '" r="55" fill="' + STRAT_COLOR.smoke + '" opacity=".55"' + s + '/>';
+  if (it.k === 'molly') return '<circle data-i="' + i + '" cx="' + it.x + '" cy="' + it.y + '" r="34" fill="' + STRAT_COLOR.molly + '" opacity=".6"' + s + '/>';
+  if (it.k === 'flash') return '<circle data-i="' + i + '" cx="' + it.x + '" cy="' + it.y + '" r="16" fill="' + STRAT_COLOR.flash + '"' + (s || ' stroke="#0b0f14" stroke-width="2"') + '/>';
+  if (it.k === 'wall') return '<line data-i="' + i + '" x1="' + it.x + '" y1="' + it.y + '" x2="' + it.x2 + '" y2="' + it.y2 + '" stroke="' + (sel ? '#fff' : STRAT_COLOR.wall) + '" stroke-width="12" stroke-linecap="round" opacity=".85"/>';
+  if (it.k === 'arrow') return '<line data-i="' + i + '" x1="' + it.x + '" y1="' + it.y + '" x2="' + it.x2 + '" y2="' + it.y2 + '" stroke="' + (sel ? '#fff' : it.side === 'enemy' ? STRAT_COLOR.enemy : STRAT_COLOR.ally) + '" stroke-width="6" marker-end="url(#ah-' + (it.side === 'enemy' ? 'e' : 'a') + ')"/>';
+  if (it.k === 'text') return '<text data-i="' + i + '" x="' + it.x + '" y="' + it.y + '" font-size="26" font-weight="700" fill="' + (sel ? '#ffe066' : '#fff') + '" stroke="#0b0f14" stroke-width="5" paint-order="stroke">' + esc(it.text || '') + '</text>';
+  return '';
+}
+function stratSvg(items, sel) {
+  return '<svg viewBox="0 0 1000 1000" class="stratsvg"><defs>' +
+    '<marker id="ah-a" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="' + STRAT_COLOR.ally + '"/></marker>' +
+    '<marker id="ah-e" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="' + STRAT_COLOR.enemy + '"/></marker></defs>' +
+    '<rect width="1000" height="1000" fill="transparent" data-bg="1"/>' + (items || []).map((it, i) => stratItemSvg(it, i, i === sel)).join('') + '</svg>';
+}
+PAGES.strats = async function (el) {
+  const id = Number(location.hash.split('/')[2]) || null;
+  if (id || location.hash.split('/')[2] === 'new') return stratEditor(el, id);
+  const rows = await db.list('strats', { order: 'updated_at', asc: false, limit: 500 });
+  const f = localStore('th_st') || {}; const maps = Array.from(new Set(rows.map(r => r.map).filter(Boolean))).sort();
+  const list = rows.filter(r => !f.map || r.map === f.map);
+  el.innerHTML = '<div class="page-h"><div><h1>Strat board</h1><p class="muted">Executes, retakes and defaults drawn step by step on the map.</p></div>' + (isStaff() ? '<a class="btn small" href="#/strats/new">New strat</a>' : '') + '</div>' +
+    (maps.length ? '<div class="row kmctl" style="margin-bottom:12px"><select id="stmap"><option value="">All maps</option>' + maps.map(m => '<option' + (f.map === m ? ' selected' : '') + '>' + esc(m) + '</option>').join('') + '</select></div>' : '') +
+    (list.length ? '<div class="oppgrid">' + list.map(r => '<a class="card oppcard" href="#/strats/' + r.id + '"><div class="row spread"><b>' + esc(r.title) + '</b>' + sidePill(r.side) + '</div>' +
+      '<div class="small muted" style="margin-top:6px">' + esc([r.map, (r.steps || []).length + ' step' + ((r.steps || []).length === 1 ? '' : 's')].filter(Boolean).join(' · ')) + '</div>' + (r.notes ? '<div class="small" style="margin-top:6px">' + esc(String(r.notes).slice(0, 120)) + '</div>' : '') + '</a>').join('') + '</div>'
+      : empty(rows.length ? 'No strats on that map yet.' : 'No strats yet.' + (isStaff() ? ' Draw your first execute: place players and utility, add steps, and save.' : ' Your coach adds them here.')));
+  if ($('#stmap', el)) $('#stmap', el).onchange = e => { f.map = e.target.value; localStore('th_st', f); render(); };
+};
+async function stratEditor(el, id) {
+  let st = id ? (await db.list('strats', { eq: { id: id }, limit: 1 }))[0] : { title: '', map: 'Ascent', side: 'Attack', notes: '', steps: [{ label: 'Setup', items: [] }] };
+  if (!st) { el.innerHTML = empty('That strat isn\'t here any more.', '<a class="btn small" href="#/strats">All strats</a>'); return; }
+  st = JSON.parse(JSON.stringify(st)); if (!Array.isArray(st.steps) || !st.steps.length) st.steps = [{ label: 'Setup', items: [] }];
+  const edit = isStaff(); const cals = await valMaps(); const mapNames = Object.values(cals).map(c => c.displayName).sort();
+  let step = 0, tool = 'move', sel = -1, label = 'Jett', dirty = false, playing = null;
+  const draw = () => {
+    const cal = cals[String(st.map || '').toLowerCase()]; const items = st.steps[step].items;
+    el.innerHTML = '<div class="page-h"><div><a href="#/strats" class="small">← All strats</a>' +
+      (edit ? '<input id="sttitle" class="h1input" value="' + esc(st.title) + '" placeholder="Strat name, e.g. A split with double smoke">' : '<h1 style="margin-top:6px">' + esc(st.title) + '</h1>') + '</div>' +
+      (edit ? '<div class="row">' + (st.id ? '<button class="btn small ghost danger-t" id="stdel">Delete</button>' : '') + '<button class="btn small" id="stsave">' + (dirty || !st.id ? 'Save' : 'Saved') + '</button></div>' : '') + '</div>' +
+      '<div class="row kmctl" style="gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+        (edit ? '<select id="stmapsel">' + (mapNames.length ? mapNames : [st.map]).map(m => '<option' + (m === st.map ? ' selected' : '') + '>' + esc(m) + '</option>').join('') + '</select><select id="stside">' + ['Attack', 'Defense', 'Retake', 'Post-plant'].map(s => '<option' + (s === st.side ? ' selected' : '') + '>' + s + '</option>').join('') + '</select>' : '<span class="pill">' + esc(st.map || '') + '</span> ' + sidePill(st.side)) + '</div>' +
+      '<div class="tabs" style="margin-bottom:8px">' + st.steps.map((s, i) => '<button data-step="' + i + '" class="' + (i === step ? 'active' : '') + '">' + (i + 1) + '. ' + esc(s.label || 'Step') + '</button>').join('') + (edit ? '<button id="stadd">+ Step</button>' : '') + '</div>' +
+      '<div class="kgrid"><div><div class="kmap stratmap">' + (cal ? '<img src="' + esc(cal.displayIcon) + '" alt="">' : '<div class="kmap-blank"></div>') + stratSvg(items, edit ? sel : -1) + '</div>' +
+        '<div class="row" style="gap:6px;margin-top:8px"><button class="btn small ghost" id="stprev"' + (step ? '' : ' disabled') + '>← Prev</button><button class="btn small ghost" id="stplay">' + (playing ? 'Stop' : '▶ Play') + '</button><button class="btn small ghost" id="stnext"' + (step < st.steps.length - 1 ? '' : ' disabled') + '>Next →</button></div></div><div>' +
+        (edit ? '<div class="sttools">' + STRAT_TOOLS.map(([k, l]) => '<button class="btn small ' + (tool === k ? '' : 'ghost') + '" data-tool="' + k + '">' + l + '</button>').join('') + '</div>' +
+          '<label class="f" style="margin-top:8px"><span>Player label (agent)</span><input id="stlabel" value="' + esc(label) + '" maxlength="12"></label>' +
+          '<p class="small muted" style="margin:4px 0 8px">Pick a tool and click the map. Walls and arrows: drag. Move: drag anything. Select something and press Delete to remove it.</p>' +
+          '<div class="row" style="gap:6px"><button class="btn small ghost" id="stdelitem"' + (sel < 0 ? ' disabled' : '') + '>Delete selected</button><button class="btn small ghost" id="stclear">Clear step</button></div>' +
+          '<label class="f" style="margin-top:10px"><span>Step name</span><input id="stlabelstep" value="' + esc(st.steps[step].label || '') + '"></label>' +
+          '<label class="f"><span>What happens in this step</span><textarea id="ststepnote" rows="3">' + esc(st.steps[step].note || '') + '</textarea></label>' +
+          (st.steps.length > 1 ? '<button class="btn small ghost danger-t" id="stdelstep">Delete this step</button>' : '') +
+          '<label class="f" style="margin-top:10px"><span>Notes for the whole strat</span><textarea id="stnotes" rows="4">' + esc(st.notes || '') + '</textarea></label>'
+          : (st.steps[step].note ? '<div class="card"><b>' + esc(st.steps[step].label || '') + '</b><div class="small" style="margin-top:6px">' + inlineMd(st.steps[step].note) + '</div></div>' : '') + (st.notes ? '<div class="card" style="margin-top:10px">' + inlineMd(st.notes) + '</div>' : '')) +
+      '</div></div>';
+    wire();
+  };
+  const svgPt = (svg, e) => { const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; const q = p.matrixTransform(svg.getScreenCTM().inverse()); return [Math.round(Math.max(0, Math.min(1000, q.x))), Math.round(Math.max(0, Math.min(1000, q.y)))]; };
+  const change = () => { dirty = true; const b = $('#stsave', el); if (b) b.textContent = 'Save'; };
+  function wire() {
+    $$('[data-step]', el).forEach(b => b.onclick = () => { step = Number(b.dataset.step); sel = -1; draw(); });
+    $('#stprev', el).onclick = () => { if (step) { step--; sel = -1; draw(); } };
+    $('#stnext', el).onclick = () => { if (step < st.steps.length - 1) { step++; sel = -1; draw(); } };
+    $('#stplay', el).onclick = () => { if (playing) { clearInterval(playing); playing = null; draw(); return; } step = 0; sel = -1; playing = setInterval(() => { if (!el.isConnected || step >= st.steps.length - 1) { clearInterval(playing); playing = null; if (el.isConnected) draw(); return; } step++; draw(); }, 1600); draw(); };
+    if (!edit) return;
+    $('#sttitle', el).oninput = e => { st.title = e.target.value; change(); };
+    $('#stmapsel', el).onchange = e => { st.map = e.target.value; change(); draw(); };
+    $('#stside', el).onchange = e => { st.side = e.target.value; change(); };
+    $('#stlabel', el).oninput = e => { label = e.target.value; };
+    $('#stlabelstep', el).oninput = e => { st.steps[step].label = e.target.value; change(); };
+    $('#ststepnote', el).oninput = e => { st.steps[step].note = e.target.value; change(); };
+    $('#stnotes', el).oninput = e => { st.notes = e.target.value; change(); };
+    $$('[data-tool]', el).forEach(b => b.onclick = () => { tool = b.dataset.tool; draw(); });
+    $('#stadd', el).onclick = () => { st.steps.push({ label: 'Step ' + (st.steps.length + 1), items: JSON.parse(JSON.stringify(st.steps[step].items)) }); step = st.steps.length - 1; sel = -1; change(); draw(); };
+    if ($('#stdelstep', el)) $('#stdelstep', el).onclick = () => { if (!confirm('Delete this step?')) return; st.steps.splice(step, 1); step = Math.max(0, step - 1); sel = -1; change(); draw(); };
+    $('#stdelitem', el).onclick = () => { if (sel >= 0) { st.steps[step].items.splice(sel, 1); sel = -1; change(); draw(); } };
+    $('#stclear', el).onclick = () => { if (!confirm('Clear everything in this step?')) return; st.steps[step].items = []; sel = -1; change(); draw(); };
+    $('#stsave', el).onclick = async () => {
+      if (!st.title.trim()) { toast('Give the strat a name'); return; }
+      const rec = { title: st.title.trim(), map: st.map, side: st.side, notes: st.notes || null, steps: st.steps, updated_at: new Date().toISOString() };
+      try { if (st.id) await db.update('strats', st.id, rec); else { const { data: made, error } = await sb.from('strats').insert([rec]).select('id'); if (error) throw error; st.id = (made && made[0] && made[0].id) || null; if (st.id) history.replaceState(null, '', '#/strats/' + st.id); }
+        dirty = false; S.cache = {}; toast('Saved'); draw(); } catch (err) { toast('Error: ' + err.message); }
+    };
+    if ($('#stdel', el)) $('#stdel', el).onclick = async () => { if (!confirm('Delete this strat?')) return; await db.remove('strats', st.id); toast('Deleted'); location.hash = '#/strats'; };
+    const svg = $('.stratsvg', el); let drag = null;
+    svg.onpointerdown = e => {
+      const [x, y] = svgPt(svg, e); const items = st.steps[step].items; const hit = e.target.closest('[data-i]');
+      if (tool === 'move') { if (!hit) { sel = -1; draw(); return; } sel = Number(hit.dataset.i); const it = items[sel]; drag = { x0: x, y0: y, orig: Object.assign({}, it) }; svg.setPointerCapture(e.pointerId); return; }
+      if (tool === 'wall' || tool === 'arrow') { const it = { k: tool, x: x, y: y, x2: x, y2: y, side: 'ally' }; items.push(it); sel = items.length - 1; drag = { line: it }; svg.setPointerCapture(e.pointerId); return; }
+      if (tool === 'text') { const t = prompt('Text'); if (!t) return; items.push({ k: 'text', x: x, y: y, text: t.slice(0, 40) }); }
+      else if (tool === 'ally' || tool === 'enemy') items.push({ k: 'p', side: tool, x: x, y: y, label: label });
+      else items.push({ k: tool, x: x, y: y });
+      sel = items.length - 1; change(); draw();
+    };
+    svg.onpointermove = e => { if (!drag) return; const [x, y] = svgPt(svg, e); const it = st.steps[step].items[sel];
+      if (drag.line) { it.x2 = x; it.y2 = y; } else { const dx = x - drag.x0, dy = y - drag.y0; it.x = drag.orig.x + dx; it.y = drag.orig.y + dy; if (drag.orig.x2 != null) { it.x2 = drag.orig.x2 + dx; it.y2 = drag.orig.y2 + dy; } }
+      const g = svg.querySelector('[data-i="' + sel + '"]'); if (g) g.outerHTML = stratItemSvg(it, sel, true); };
+    svg.onpointerup = () => { if (drag) { const it = st.steps[step].items[sel]; if (drag.line && Math.hypot(it.x2 - it.x, it.y2 - it.y) < 12) { st.steps[step].items.splice(sel, 1); sel = -1; } drag = null; change(); draw(); } };
+  }
+  const key = e => { if (!el.isConnected) { document.removeEventListener('keydown', key); return; } if ((e.key === 'Delete' || e.key === 'Backspace') && edit && sel >= 0 && !/input|textarea/i.test(document.activeElement.tagName)) { e.preventDefault(); st.steps[step].items.splice(sel, 1); sel = -1; change(); draw(); } };
+  document.addEventListener('keydown', key);
+  draw();
+}
+
+// =============================================================== CLIP LIBRARY
+const CLIP_TAGS = ['Good trade', 'Failed trade', 'Good retake', 'Bad retake', 'Execute', 'Post-plant', 'Clutch', 'Positioning', 'Utility', 'Comms', 'Eco', 'Rotation'];
+function vodAt(vod, t) { const vi = videoInfo(vod); if (!vi) return vod || ''; if (vi.kind === 'yt') return 'https://www.youtube.com/watch?v=' + vi.id + '&t=' + Math.round(t) + 's'; if (vi.kind === 'tw') return 'https://www.twitch.tv/videos/' + vi.id + '?t=' + Math.floor(t / 3600) + 'h' + Math.floor(t % 3600 / 60) + 'm' + (Math.round(t) % 60) + 's'; return vi.url; }
+async function clipsPanel(el, r, seek) {
+  const host = $('.ncol', el); if (!host) return;
+  const box = document.createElement('div'); host.prepend(box);
+  const team = await teamPlayers(); const players = team.players.map(p => p.name);
+  let picked = new Set();
+  const load = async () => {
+    const rows = await db.list('clips', { eq: { review_id: r.id }, order: 't', asc: true });
+    box.innerHTML = panel('Clips', '<a class="small" href="#/clips">Clip library →</a>',
+      '<div class="row" style="gap:4px;flex-wrap:wrap;margin-bottom:6px">' + CLIP_TAGS.map(t => '<button class="tagchip' + (picked.has(t) ? ' on' : '') + '" data-ctag="' + esc(t) + '">' + esc(t) + '</button>').join('') + '</div>' +
+      '<div class="row" style="gap:6px;flex-wrap:wrap"><input id="cltime" placeholder="mm:ss (blank = now)" style="max-width:150px"><select id="clplayer"><option value="">Whole team</option>' + players.map(p => '<option>' + esc(p) + '</option>').join('') + '</select>' +
+      '<input id="clnote" class="grow" placeholder="Note (optional)"><button class="btn small" id="cladd">Clip it</button></div>' +
+      (rows.length ? '<div style="margin-top:10px">' + rows.map(c => '<div class="row spread small clrow"><div><button class="linkbtn" data-cseek="' + c.t + '">' + fmtTs(c.t) + '</button> ' + (c.tags || []).map(t => '<span class="pill">' + esc(t) + '</span>').join(' ') + (c.player ? ' <b>' + esc(c.player) + '</b>' : '') + (c.note ? ' <span class="muted">' + esc(c.note) + '</span>' : '') + '</div><button class="linkbtn" data-cdel="' + c.id + '">Delete</button></div>').join('') + '</div>' : '<p class="small muted" style="margin:8px 0 0">Tag moments while you watch. Pick tags, then Clip it. The time comes from the player.</p>'));
+    $$('[data-ctag]', box).forEach(b => b.onclick = () => { const t = b.dataset.ctag; picked.has(t) ? picked.delete(t) : picked.add(t); b.classList.toggle('on'); });
+    $$('[data-cseek]', box).forEach(b => b.onclick = () => seek(Number(b.dataset.cseek)));
+    $$('[data-cdel]', box).forEach(b => b.onclick = async () => { await db.remove('clips', Number(b.dataset.cdel)); load(); });
+    $('#cladd', box).onclick = async () => {
+      const typed = $('#cltime', box).value.trim(); const t = typed ? tsToSec(typed) : ytNow();
+      if (t == null || isNaN(t)) { toast('Play the video, or type the time (mm:ss)'); return; }
+      if (!picked.size && !$('#clnote', box).value.trim()) { toast('Pick a tag or write a note'); return; }
+      try { await db.insert('clips', [{ review_id: r.id, t: Math.round(t), tags: Array.from(picked), player: $('#clplayer', box).value || null, note: $('#clnote', box).value.trim() || null, vod: r.vod || null }]); picked = new Set(); toast('Clipped at ' + fmtTs(t)); load(); }
+      catch (err) { toast('Error: ' + err.message); }
+    };
+  };
+  load();
+}
+PAGES.clips = async function (el) {
+  const [rows, reviews] = await Promise.all([db.list('clips', { order: 'created_at', asc: false, limit: 2000 }), isStaff() ? cached('reviews') : []]);
+  const revBy = new Map(reviews.map(r => [r.id, r]));
+  const f = localStore('th_cl') || {};
+  const tags = Array.from(new Set(rows.flatMap(c => c.tags || []))).sort(), players = Array.from(new Set(rows.map(c => c.player).filter(Boolean))).sort();
+  const maps = Array.from(new Set(rows.map(c => (revBy.get(c.review_id) || {}).map).filter(Boolean))).sort();
+  const list = rows.filter(c => (!f.tag || (c.tags || []).includes(f.tag)) && (!f.player || c.player === f.player) && (!f.map || (revBy.get(c.review_id) || {}).map === f.map));
+  const sel = (k, opts, label) => '<select data-cf="' + k + '"><option value="">' + label + '</option>' + opts.map(o => '<option' + (f[k] === o ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>';
+  el.innerHTML = '<div class="page-h"><div><h1>' + (isStaff() ? 'Clip library' : 'My clips') + '</h1><p class="muted">' + (isStaff() ? 'Tagged moments from every VOD review. Filter by habit, player or map to show a player all their clips on one thing.' : 'Moments your coach clipped for you in VOD reviews.') + '</p></div></div>' +
+    '<div class="row kmctl" style="gap:8px;margin-bottom:12px;align-items:center">' + sel('tag', tags, 'All tags') + (isStaff() ? sel('player', players, 'All players') + sel('map', maps, 'All maps') : '') + '<span class="small muted">' + list.length + ' clip' + (list.length === 1 ? '' : 's') + '</span></div>' +
+    (list.length ? '<div class="tablewrap"><table><thead><tr><th>VOD</th><th>Time</th><th>Tags</th><th>Player</th><th>Note</th></tr></thead><tbody>' + list.map(c => { const r = revBy.get(c.review_id);
+      return '<tr><td>' + (r ? '<b>' + esc(r.title || 'VOD') + '</b><div class="small muted">' + esc([r.map, r.date ? fmtDate(r.date) : ''].filter(Boolean).join(' · ')) + '</div>' : '<span class="muted">VOD</span>') + '</td>' +
+        '<td>' + (r ? '<button class="linkbtn" data-copen="' + c.id + '">▶ ' + fmtTs(c.t) + '</button>' : c.vod ? '<a href="' + esc(vodAt(c.vod, c.t)) + '" target="_blank" rel="noopener">▶ ' + fmtTs(c.t) + '</a>' : fmtTs(c.t)) + '</td>' +
+        '<td>' + (c.tags || []).map(t => '<span class="pill">' + esc(t) + '</span>').join(' ') + '</td><td>' + esc(c.player || 'Team') + '</td><td class="small">' + esc(c.note || '') + '</td></tr>'; }).join('') + '</tbody></table></div>'
+      : empty(rows.length ? 'No clips match.' : isStaff() ? 'No clips yet. Open a VOD review and use the Clips box to tag moments.' : 'No clips for you yet.'));
+  $$('[data-cf]', el).forEach(s => s.onchange = () => { f[s.dataset.cf] = s.value; localStore('th_cl', f); render(); });
+  $$('[data-copen]', el).forEach(b => b.onclick = () => { const c = rows.find(x => x.id === Number(b.dataset.copen)); S.clipSeek = c.t; location.hash = '#/reviews/' + c.review_id; });
+};
+
+// =============================================================== ATTENDANCE
+const ATT = ['On time', 'Late', 'Absent', 'Excused'];
+function reliability(rows) {
+  const counted = rows.filter(r => r.status !== 'Excused'); if (!counted.length) return null;
+  return (counted.filter(r => r.status === 'On time').length + 0.5 * counted.filter(r => r.status === 'Late').length) / counted.length;
+}
+function attendanceSummary(rows) {
+  return groupBy(rows, 'player').map(([p, l]) => ({ p, n: l.length, on: l.filter(r => r.status === 'On time').length, late: l.filter(r => r.status === 'Late').length, abs: l.filter(r => r.status === 'Absent').length, exc: l.filter(r => r.status === 'Excused').length, rel: reliability(l) }))
+    .sort((a, b) => (b.rel == null ? -1 : b.rel) - (a.rel == null ? -1 : a.rel));
+}
+PAGES.attendance = async function (el) {
+  if (!isStaff()) { el.innerHTML = empty('Coaches only.'); return; }
+  const parts = location.hash.split('/'); const day = parts[2] || todayISO(), kind = decodeURIComponent(parts[3] || 'Scrim');
+  const [team, all] = await Promise.all([teamPlayers(), db.list('attendance', { order: 'day', asc: false, limit: 3000 })]);
+  const roster = team.players.filter(p => !p.bench).map(p => p.name).concat(all.map(a => a.player)).filter((v, i, a) => v && a.indexOf(v) === i);
+  const today = all.filter(a => a.day === day && a.kind === kind);
+  const since = addDays(todayISO(), -60); const recent = all.filter(a => a.day >= since);
+  el.innerHTML = '<div class="page-h"><div><h1>Attendance</h1><p class="muted">Who showed up on time for scrims, practice and matches. Reliability counts late as half and leaves excused out.</p></div></div>' +
+    '<div class="card"><div class="row kmctl" style="gap:8px;flex-wrap:wrap;margin-bottom:10px"><input type="date" id="atday" value="' + esc(day) + '"><select id="atkind">' + ['Scrim', 'Practice', 'Match', 'Meeting'].map(k => '<option' + (k === kind ? ' selected' : '') + '>' + k + '</option>').join('') + '</select></div>' +
+      '<div class="tablewrap"><table><thead><tr><th>Player</th><th>Status</th><th>Minutes late</th><th>Note</th></tr></thead><tbody>' + roster.map(p => { const a = today.find(x => x.player === p) || {};
+        return '<tr data-ap="' + esc(p) + '"><td><b>' + esc(p) + '</b></td><td><div class="row" style="gap:4px">' + ATT.map(s => '<button class="tagchip' + (a.status === s ? ' on' : '') + '" data-as="' + s + '">' + s + '</button>').join('') + '</div></td>' +
+          '<td><input type="number" min="0" max="240" data-al value="' + esc(a.minutes_late || '') + '" style="max-width:80px"></td><td><input data-an value="' + esc(a.note || '') + '"></td></tr>'; }).join('') + '</tbody></table></div>' +
+      '<div class="row" style="margin-top:10px;gap:8px"><button class="btn small" id="atsave">Save attendance</button><button class="btn small ghost" id="atall">Everyone on time</button></div></div>' +
+    panel('Last 60 days', '', recent.length ? '<div class="tablewrap"><table><thead><tr><th>Player</th><th class="num">Sessions</th><th class="num">On time</th><th class="num">Late</th><th class="num">Absent</th><th class="num">Excused</th><th>Reliability</th></tr></thead><tbody>' +
+      attendanceSummary(recent).map(x => '<tr><td><b>' + esc(x.p) + '</b></td><td class="num">' + x.n + '</td><td class="num">' + x.on + '</td><td class="num">' + x.late + '</td><td class="num">' + x.abs + '</td><td class="num">' + x.exc + '</td><td>' + (x.rel == null ? '–' : '<b>' + pct(x.rel) + '</b>' + bar2(x.rel)) + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="small muted" style="margin:0">Nothing saved yet.</p>');
+  const go = () => { location.hash = '#/attendance/' + $('#atday', el).value + '/' + encodeURIComponent($('#atkind', el).value); };
+  $('#atday', el).onchange = go; $('#atkind', el).onchange = go;
+  $$('[data-as]', el).forEach(b => b.onclick = () => { $$('[data-as]', b.closest('tr')).forEach(x => x.classList.toggle('on', x === b)); });
+  $('#atall', el).onclick = () => $$('tr[data-ap]', el).forEach(tr => $$('[data-as]', tr).forEach(x => x.classList.toggle('on', x.dataset.as === 'On time')));
+  $('#atsave', el).onclick = async () => {
+    const rows = $$('tr[data-ap]', el).map(tr => { const on = $('[data-as].on', tr); return on ? { team_id: S.me.team_id, day: day, kind: kind, player: tr.dataset.ap, status: on.dataset.as, minutes_late: Number($('[data-al]', tr).value) || null, note: $('[data-an]', tr).value.trim() || null } : null; }).filter(Boolean);
+    if (!rows.length) { toast('Mark at least one player'); return; }
+    const { error } = await sb.from('attendance').upsert(rows, { onConflict: 'team_id,day,kind,player' });
+    toast(error ? error.message : 'Saved ' + rows.length); if (!error) render();
+  };
+};
+
+// =============================================================== MONTHLY REPORT CARD
+PAGES.card = async function (el) {
+  const parts = location.hash.split('/'); const team = await teamPlayers();
+  const meName = (team.players.find(p => p.user_id === S.me.id) || {}).name || S.me.ign;
+  let name = decodeURIComponent(parts[2] || '') || meName; if (!isStaff()) name = meName;
+  const month = /^\d{4}-\d{2}$/.test(parts[3] || '') ? parts[3] : todayISO().slice(0, 7);
+  const p = team.players.find(x => normName(x.name) === normName(name)) || { name: name };
+  const prevM = (() => { const d = new Date(month + '-15T12:00:00'); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); })();
+  const inM = (d, m) => String(d || '').slice(0, 7) === m;
+  const [ps, work, att, checks, goals] = await Promise.all([can('team_stats') || can('my_stats') || isStaff() ? cached('player_stats') : [], cached('work_on'), db.list('attendance', { limit: 3000 }),
+    p.user_id ? sb.from('checkins').select('day,rating,minutes').eq('user_id', p.user_id).gte('day', prevM + '-01').then(r => r.data || []) : [],
+    p.user_id ? sb.from('player_goals').select('*').eq('user_id', p.user_id).then(r => r.data || []) : []]);
+  const mine = ps.filter(r => normName(r.player) === normName(p.name));
+  const agg = m => { const l = mine.filter(r => inM(r.date, m)); const k = sum(l, 'kills'), d = sum(l, 'deaths'), rd = sum(l, 'rounds');
+    const acs = l.map(r => Number(String(r.notes || '').match(/ACS (\d+)/)?.[1])).filter(Boolean);
+    return { maps: l.length, kd: d ? k / d : null, kpr: rd ? k / rd : null, fk: sum(l, 'first_kills'), fd: sum(l, 'first_deaths'), hs: l.filter(r => r.true_hs_pct != null).length ? l.reduce((a, r) => a + (Number(r.true_hs_pct) || 0), 0) / l.filter(r => r.true_hs_pct != null).length : null, acs: acs.length ? Math.round(acs.reduce((a, b) => a + b, 0) / acs.length) : null }; };
+  const now = agg(month), was = agg(prevM);
+  const delta = (a, b, f, better) => a == null ? '–' : f(a) + (b == null ? '' : ' <span class="small ' + ((better === 'up' ? a >= b : a <= b) ? 'green-t' : 'red-t') + '">' + (a >= b ? '▲' : '▼') + ' ' + f(Math.abs(a - b)) + '</span>');
+  const w = work.filter(x => normName(x.player) === normName(p.name));
+  const a = att.filter(x => normName(x.player) === normName(p.name) && inM(x.day, month)); const rel = reliability(a);
+  const c = checks.filter(x => inM(x.day, month)); const avgR = c.filter(x => x.rating).length ? c.reduce((s, x) => s + (Number(x.rating) || 0), 0) / c.filter(x => x.rating).length : null;
+  const monthName = new Date(month + '-15T12:00:00').toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  el.innerHTML = '<div class="page-h"><div>' + (isStaff() ? '<a href="#/player/' + encodeURIComponent(p.name) + '" class="small">← ' + esc(p.name) + '</a>' : '') + '<h1 style="margin-top:6px">Report card: ' + esc(p.name) + '</h1><p class="muted">' + esc(monthName) + (p.role ? ' · ' + esc(p.role) : '') + '</p></div>' +
+    '<div class="row noprint kmctl" style="gap:6px;align-items:center">' + (isStaff() ? '<select id="rcp">' + team.players.map(x => '<option' + (x.name === p.name ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select>' : '') + '<input type="month" id="rcm" value="' + month + '"><button class="btn small ghost" id="rcprint">Print / save PDF</button></div></div>' +
+    '<div class="kpis">' + kpi(now.maps, 'Maps played') + kpi(delta(now.kd, was.kd, v => v.toFixed(2), 'up'), 'K/D') + kpi(delta(now.acs, was.acs, v => Math.round(v), 'up'), 'ACS') + kpi(delta(now.hs, was.hs, v => pct(v), 'up'), 'Headshot %') +
+      kpi(now.fk + '–' + now.fd, 'First kills–deaths') + kpi(rel == null ? '–' : pct(rel), 'Attendance (' + a.length + ')') + kpi(c.length, 'Check-ins') + kpi(avgR == null ? '–' : avgR.toFixed(1) + '/5', 'Avg day rating') + '</div>' +
+    '<p class="small muted">Arrows compare with ' + esc(new Date(prevM + '-15T12:00:00').toLocaleDateString(undefined, { month: 'long' })) + '.</p>' +
+    panel('Work on', '', (() => { const opened = w.filter(x => inM(x.date, month)), fixed = w.filter(x => inM(x.fixed_at, month)), open = w.filter(x => x.status !== 'Fixed' && x.status !== 'Done');
+      return '<div class="mini-kpis">' + kpi(opened.length, 'New this month') + kpi(fixed.length, 'Fixed this month') + kpi(open.length, 'Still open') + '</div>' +
+        (open.length ? '<ul class="small" style="margin:10px 0 0">' + open.slice(0, 6).map(x => '<li><b>' + esc(x.issue || '') + '</b>' + (x.priority ? ' <span class="muted">(' + esc(x.priority) + ')</span>' : '') + '</li>').join('') + '</ul>' : ''); })()) +
+    (goals.length ? panel('Personal goals', '', goals.map(g => '<div class="small">' + (g.done ? '✅' : '⬜') + ' ' + esc(g.title) + (g.deadline ? ' <span class="muted">by ' + fmtDate(g.deadline) + '</span>' : '') + '</div>').join('')) : '') +
+    (isStaff() ? panel('Coach comments', '<span class="small muted">for printing only, not saved</span>', '<textarea rows="4" style="width:100%" placeholder="Strengths, what to focus on next month…"></textarea>') : '');
+  const go = () => { location.hash = '#/card/' + encodeURIComponent(isStaff() ? $('#rcp', el).value : p.name) + '/' + ($('#rcm', el).value || month); };
+  if ($('#rcp', el)) $('#rcp', el).onchange = go; $('#rcm', el).onchange = go;
+  $('#rcprint', el).onclick = () => window.print();
+};
+
+// =============================================================== SCRIM FINDER
+PAGES.finder = async function (el) {
+  if (!isStaff()) { el.innerHTML = empty('Coaches only.'); return; }
+  const [{ data: posts }, { data: teams }] = await Promise.all([sb.from('scrim_posts').select('*').order('starts_at').limit(500), sb.rpc('scrim_post_teams')]);
+  const tname = id => { const t = (teams || []).find(x => x.id === id); return t ? t.name + (t.tag ? ' [' + t.tag + ']' : '') : 'A team'; };
+  const now = Date.now(), all = posts || [];
+  const open = all.filter(p => p.status === 'open' && p.team_id !== S.me.team_id && new Date(p.starts_at).getTime() > now);
+  const mine = all.filter(p => p.team_id === S.me.team_id).sort((a, b) => String(b.starts_at).localeCompare(String(a.starts_at)));
+  const booked = all.filter(p => p.booked_team_id === S.me.team_id);
+  const row = (p, act) => '<tr><td><b>' + esc(fmtWhen(p.starts_at)) + '</b></td><td>' + esc(p.team_id === S.me.team_id ? (p.status === 'booked' ? 'vs ' + tname(p.booked_team_id) : '—') : tname(p.team_id)) + '</td><td>' + esc(p.maps || 'Any') + '</td><td>' + esc(p.format || '') + '</td><td>' + esc([p.region, p.level].filter(Boolean).join(' · ')) + '</td><td class="small">' + esc(p.note || '') + '</td><td>' + act(p) + '</td></tr>';
+  const head = '<div class="tablewrap"><table><thead><tr><th>When (your time)</th><th>Team</th><th>Maps</th><th>Format</th><th>Region · level</th><th>Note</th><th></th></tr></thead><tbody>';
+  el.innerHTML = '<div class="page-h"><div><h1>Scrim finder</h1><p class="muted">Teams on Team Hub post open scrim times. Book one and it lands on both teams\' schedules (and calendars).</p></div></div>' +
+    panel('Open scrims', '<span class="small muted">' + open.length + ' open</span>', open.length ? head + open.map(p => row(p, x => '<button class="btn small" data-book="' + x.id + '">Book</button>')).join('') + '</tbody></table></div>' : '<p class="small muted" style="margin:0">No open scrims right now. Post your own times below.</p>') +
+    '<div class="card"><h2>Post a scrim time</h2><form id="fpf" class="cards" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">' +
+      '<label class="f"><span>When</span><input type="datetime-local" name="when" required></label><label class="f"><span>Maps</span><input name="maps" placeholder="e.g. Lotus, Ascent or Any"></label>' +
+      '<label class="f"><span>Format</span><select name="format"><option>2 maps</option><option>1 map</option><option>BO3</option><option>24 rounds</option></select></label>' +
+      '<label class="f"><span>Region</span><select name="region"><option>NA East</option><option>NA West</option><option>NA Central</option><option>EU</option><option>LATAM</option><option>BR</option><option>APAC</option></select></label>' +
+      '<label class="f"><span>Level</span><input name="level" placeholder="e.g. Diamond–Ascendant, Premier Contender"></label><label class="f"><span>Note</span><input name="note" placeholder="Contact, lobby rules…"></label>' +
+      '<div><button class="btn">Post</button></div></form></div>' +
+    (mine.length ? panel('Your posts', '', head + mine.map(p => row(p, x => '<span class="pill ' + (x.status === 'booked' ? 'green' : x.status === 'open' ? 'blue' : '') + '">' + esc(x.status) + '</span> ' + (x.status === 'open' ? '<button class="linkbtn" data-fcancel="' + x.id + '">Cancel</button>' : '') + ' <button class="linkbtn" data-fdel="' + x.id + '">Delete</button>')).join('') + '</tbody></table></div>') : '') +
+    (booked.length ? panel('Scrims you booked', '', head + booked.map(p => row(p, () => '<span class="pill green">Booked</span>')).join('') + '</tbody></table></div>') : '');
+  $('#fpf', el).onsubmit = async e => { e.preventDefault(); const f = e.target; const when = new Date(f.when.value);
+    if (isNaN(when) || when.getTime() < Date.now()) { toast('Pick a time in the future'); return; }
+    const { error } = await sb.from('scrim_posts').insert([{ team_id: S.me.team_id, starts_at: when.toISOString(), maps: f.maps.value.trim() || null, format: f.format.value, region: f.region.value, level: f.level.value.trim() || null, note: f.note.value.trim() || null }]);
+    toast(error ? error.message : 'Posted'); if (!error) render(); };
+  $$('[data-book]', el).forEach(b => b.onclick = async () => { const p = open.find(x => x.id === Number(b.dataset.book));
+    if (!confirm('Book this scrim with ' + tname(p.team_id) + ' on ' + fmtWhen(p.starts_at) + '?')) return;
+    const { data, error } = await sb.rpc('book_scrim_post', { p_id: p.id }); toast(error ? error.message : 'Booked with ' + data + '. It\'s on your schedule.'); if (!error) { S.cache = {}; render(); } });
+  $$('[data-fcancel]', el).forEach(b => b.onclick = async () => { const { error } = await sb.from('scrim_posts').update({ status: 'cancelled' }).eq('id', Number(b.dataset.fcancel)); toast(error ? error.message : 'Cancelled'); render(); });
+  $$('[data-fdel]', el).forEach(b => b.onclick = async () => { if (!confirm('Delete this post?')) return; const { error } = await sb.from('scrim_posts').delete().eq('id', Number(b.dataset.fdel)); toast(error ? error.message : 'Deleted'); render(); });
+};
+
+// =============================================================== PERSONAL KILL MAP (My games)
+const _gamesPage = PAGES.games;
+PAGES.games = async function (el) {
+  await _gamesPage(el);
+  if (S.route !== 'games' || !el.isConnected) return;
+  const { data } = await sb.from('riot_matches').select('map,events,queue').eq('user_id', S.me.id).order('started_at', { ascending: false }).limit(60);
+  const ev = (data || []).flatMap(m => (m.events || []).map(e => ({ map: e[0], side: e[1], k: e[2] === 'k', player: 'Me', enemy: 'enemy', x: e[3], y: e[4], ox: e[5], oy: e[6], fb: !!e[7], w: '', agent: e[8] })));
+  const box = document.createElement('div'); box.className = 'card'; box.style.marginTop = '16px';
+  box.innerHTML = '<h2>Where I fight</h2><p class="small muted" style="margin-top:0">From your recent Riot games: where you stood for each kill (green) and death (red). Look for spots where you keep dying.</p><div class="mykm"></div>';
+  el.appendChild(box);
+  killMapView($('.mykm', box), ev, { state: { map: '', side: '', who: 'both', player: '', fb: false, lines: false, heat: true, view: 'us' }, usLabel: 'Where I stood', themLabel: 'Where my opponent stood', allLabel: 'Me', empty: 'No positions yet. Link your Riot ID (Account page); your next games fill this in.' });
+};
+
+// =============================================================== LINEUP FLASHCARDS
+const _lineupsPage = PAGES.lineups;
+PAGES.lineups = async function (el) {
+  await _lineupsPage(el);
+  if (S.route !== 'lineups' || !el.isConnected) return;
+  const head = $('.page-h', el); if (!head) return;
+  const b = document.createElement('button'); b.className = 'btn small ghost'; b.textContent = '🃏 Practice'; b.style.marginRight = '6px';
+  const add = $('#addlu', el); add.parentNode.insertBefore(b, add);
+  b.onclick = lineupQuiz;
+};
+async function lineupQuiz() {
+  const f = localStore('th_lu') || {};
+  const [rows, { data: learned }] = await Promise.all([db.list('lineups', { order: 'created_at', asc: false, limit: 1000 }), sb.from('lineup_learned').select('lineup_id').eq('user_id', S.me.id)]);
+  const got = new Set((learned || []).map(l => l.lineup_id));
+  let deck = rows.filter(r => (!f.agent || r.agent === f.agent) && (!f.map || r.map === f.map));
+  deck = deck.filter(r => !got.has(r.id)).sort(() => Math.random() - 0.5).concat(deck.filter(r => got.has(r.id)).sort(() => Math.random() - 0.5));
+  if (!deck.length) { toast('No lineups to practise with these filters'); return; }
+  let i = 0, shown = false, right = 0;
+  const show = () => {
+    if (i >= deck.length) { openModal('<h2>Done!</h2><p>You knew <b>' + right + '</b> of ' + deck.length + '.</p><div class="row"><button class="btn" id="qagain">Again</button><button class="btn ghost" id="qclose">Close</button></div>', m => { $('#qagain', m).onclick = () => { closeModal(); lineupQuiz(); }; $('#qclose', m).onclick = () => { closeModal(); render(); }; }); return; }
+    const r = deck[i]; const vi = videoInfo(r.link);
+    openModal('<div class="row spread"><span class="small muted">' + (i + 1) + ' / ' + deck.length + (got.has(r.id) ? ' · already learned' : '') + '</span><button class="linkbtn" id="qclose">Close</button></div>' +
+      '<div class="qcard"><div class="row" style="gap:6px">' + (r.agent ? '<span class="pill purple">' + esc(r.agent) + '</span>' : '') + (r.map ? '<span class="pill">' + esc(r.map) + '</span>' : '') + sidePill(r.side) + (r.site ? '<span class="pill">' + esc(r.site) + '</span>' : '') + '</div>' +
+      '<h2 style="margin:10px 0">' + esc(r.title) + (r.ability ? ' <span class="muted small">· ' + esc(r.ability) + '</span>' : '') + '</h2>' +
+      (shown ? (r.image ? '<img src="' + esc(r.image) + '" alt="" style="width:100%;border-radius:8px">' : '') + (r.stand ? '<p><b>Stand:</b> ' + inlineMd(r.stand) + '</p>' : '') + (r.aim ? '<p><b>Aim / throw:</b> ' + inlineMd(r.aim) + '</p>' : '') + (vi ? '<p><a href="' + esc(vi.url) + '" target="_blank" rel="noopener">▶ Watch the clip</a></p>' : r.link ? '<p>' + linkHtml(r.link, 'Open') + '</p>' : '') +
+        '<div class="row" style="gap:8px;margin-top:12px"><button class="btn" id="qyes">✓ Knew it</button><button class="btn ghost" id="qno">Still learning</button></div>'
+        : '<p class="muted">Where do you stand and where do you aim? Picture it, then check.</p><button class="btn" id="qshow">Show answer</button>') + '</div>', m => {
+      $('#qclose', m).onclick = () => { closeModal(); render(); };
+      if ($('#qshow', m)) $('#qshow', m).onclick = () => { shown = true; show(); };
+      if ($('#qyes', m)) $('#qyes', m).onclick = async () => { right++; if (!got.has(r.id)) { await sb.from('lineup_learned').insert([{ lineup_id: r.id, user_id: S.me.id }]); got.add(r.id); } i++; shown = false; show(); };
+      if ($('#qno', m)) $('#qno', m).onclick = () => { i++; shown = false; show(); };
+    });
+  };
+  show();
+}
+
+// =============================================================== STREAKS & PERSONAL GOALS
+const PGOAL_METRICS = ['Headshot %', 'K/D', 'ACS', 'Win %', 'Check-ins this month', 'Aim sessions this month', 'Custom (tick when done)'];
+function dayStreak(days) {
+  const set = new Set(days); let cur = 0, best = 0, run = 0;
+  let d = todayISO(); if (!set.has(d)) d = addDays(d, -1);
+  while (set.has(d)) { cur++; d = addDays(d, -1); }
+  const sorted = Array.from(set).sort(); let prev = null;
+  sorted.forEach(x => { run = prev && addDays(prev, 1) === x ? run + 1 : 1; best = Math.max(best, run); prev = x; });
+  return { cur, best };
+}
+const BADGES = [3, 7, 14, 30, 60, 100];
+PAGES.streaks = async function (el) {
+  const month = todayISO().slice(0, 7);
+  const [{ data: checks }, { data: aims }, { data: goals }, { data: rs }] = await Promise.all([
+    sb.from('checkins').select('day').eq('user_id', S.me.id).order('day', { ascending: false }).limit(400),
+    sb.from('aim_logs').select('date').eq('user_id', S.me.id).order('date', { ascending: false }).limit(400),
+    sb.from('player_goals').select('*').eq('user_id', S.me.id).order('created_at'),
+    sb.from('riot_summary').select('*').eq('user_id', S.me.id).maybeSingle()]);
+  const cs = dayStreak((checks || []).map(c => c.day)), as = dayStreak((aims || []).map(a => a.date));
+  const val = g => { const s = rs || {};
+    switch (g.metric) { case 'Headshot %': return s.hs_pct != null ? Number(s.hs_pct) * 100 : null; case 'K/D': return s.kd != null ? Number(s.kd) : null; case 'ACS': return s.acs != null ? Number(s.acs) : null;
+      case 'Win %': return s.win_pct != null ? Number(s.win_pct) * 100 : s.games ? s.wins / s.games * 100 : null; case 'Check-ins this month': return (checks || []).filter(c => String(c.day).startsWith(month)).length;
+      case 'Aim sessions this month': return (aims || []).filter(a => String(a.date).startsWith(month)).length; default: return null; } };
+  const fmt = (m, v) => v == null ? '–' : m === 'K/D' ? v.toFixed(2) : Math.round(v) + (/%/.test(m) ? '%' : '');
+  const streakCard = (title, s, unit) => '<div class="card streakcard"><div class="small muted">' + title + '</div><div class="big">' + (s.cur ? '🔥 ' : '') + s.cur + ' <span class="small muted">' + unit + '</span></div><div class="small muted">Best: ' + s.best + '</div>' +
+    '<div class="row" style="gap:4px;margin-top:8px;flex-wrap:wrap">' + BADGES.map(b => '<span class="badge' + (s.best >= b ? ' got' : '') + '" title="' + b + '-day streak">' + b + '</span>').join('') + '</div></div>';
+  el.innerHTML = '<div class="page-h"><div><h1>Streaks &amp; goals</h1><p class="muted">Keep the daily habits going and set your own targets. Badges unlock at 3, 7, 14, 30, 60 and 100 days.</p></div></div>' +
+    '<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr));margin-bottom:16px">' + streakCard('Daily check-in streak', cs, 'days') + streakCard('Aim routine streak', as, 'days') + '</div>' +
+    '<div class="card"><h2>My goals</h2>' + ((goals || []).length ? (goals || []).map(g => { const v = val(g); const t = Number(g.target); const reached = g.done || (v != null && t && v >= t);
+      return '<div class="goal' + (reached ? ' done' : '') + '"><div class="row spread"><div><b>' + (reached ? '✅ ' : '') + esc(g.title) + '</b>' + (g.deadline ? ' <span class="small muted">by ' + fmtDate(g.deadline) + '</span>' : '') + '</div><div class="row" style="gap:6px">' +
+        (g.metric === 'Custom (tick when done)' || !g.metric ? '<button class="btn small ' + (g.done ? '' : 'ghost') + '" data-gdone="' + g.id + '">' + (g.done ? 'Done' : 'Mark done') + '</button>' : '') + '<button class="linkbtn" data-gdel="' + g.id + '">Delete</button></div></div>' +
+        (g.metric && g.metric !== 'Custom (tick when done)' ? '<div class="small muted">' + esc(g.metric) + ': <b>' + fmt(g.metric, v) + '</b>' + (t ? ' / ' + fmt(g.metric, t) : '') + '</div>' + (t && v != null ? bar2(Math.min(1, v / t)) : '') : '') + '</div>'; }).join('') : '<p class="small muted">No goals yet. Try "Headshot % 25 by the end of the month" or "12 check-ins this month".</p>') +
+    '<form id="pgf" class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px"><input name="title" class="grow" placeholder="Goal, e.g. Get my HS% to 25" required><select name="metric">' + PGOAL_METRICS.map(m => '<option>' + m + '</option>').join('') + '</select>' +
+      '<input name="target" type="number" step="0.01" placeholder="Target" style="max-width:100px"><input name="deadline" type="date"><button class="btn small">Add goal</button></form>' +
+      '<p class="small muted" style="margin:6px 0 0">Stats goals (HS %, K/D, ACS, Win %) use your last 20 linked Riot games. Your coach can see your goals.</p></div>';
+  $('#pgf', el).onsubmit = async e => { e.preventDefault(); const f = e.target;
+    const { error } = await sb.from('player_goals').insert([{ team_id: S.me.team_id, title: f.title.value.trim(), metric: f.metric.value, target: f.target.value === '' ? null : Number(f.target.value), deadline: f.deadline.value || null }]);
+    toast(error ? error.message : 'Goal added'); if (!error) render(); };
+  $$('[data-gdone]', el).forEach(b => b.onclick = async () => { const g = goals.find(x => x.id === Number(b.dataset.gdone)); await sb.from('player_goals').update({ done: !g.done }).eq('id', g.id); render(); });
+  $$('[data-gdel]', el).forEach(b => b.onclick = async () => { if (!confirm('Delete this goal?')) return; await sb.from('player_goals').delete().eq('id', Number(b.dataset.gdel)); render(); });
+};
+
+// =============================================================== LINKS INTO NEW PAGES
+const _playerPage = PAGES.player;
+PAGES.player = async function (el) {
+  await _playerPage(el);
+  if (S.route !== 'player' || !el.isConnected || !isStaff()) return;
+  const name = decodeURIComponent(location.hash.split('/').slice(2).join('/') || '');
+  const head = $('.page-h', el); if (!head || !name) return;
+  const a = document.createElement('a'); a.className = 'btn small ghost'; a.href = '#/card/' + encodeURIComponent(name) + '/' + todayISO().slice(0, 7); a.textContent = 'Monthly report card';
+  head.appendChild(a);
+};
+const _discordPanel2 = discordPanel;
+discordPanel = async function (box, after) {
+  await _discordPanel2(box, after);
+  const r = $('.remind', box); if (!r) return;
+  const { data: st } = await sb.rpc('discord_status');
+  const l = document.createElement('label'); l.className = 'small row'; l.style.gap = '6px';
+  l.innerHTML = '<input type="checkbox" id="dcscrim"' + (st && st.post_scrims !== false ? ' checked' : '') + '> Post a result summary after each Riot-imported scrim';
+  r.insertBefore(l, r.lastElementChild);
+  $('#dcscrim', l).onchange = async e => { const { error } = await sb.rpc('set_discord_scrim_posts', { p_on: e.target.checked }); toast(error ? error.message : 'Saved'); };
 };
 
 // expose pure helpers for tests
