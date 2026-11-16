@@ -1,0 +1,17 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/prep","wait":4000},
+ {"js":"[...document.querySelectorAll('section.card h2')].map(h=>h.innerText).join(' | ')","print":true},
+ {"js":"(()=>{ const s=[...document.querySelectorAll('section.card')].find(x=>/Lineup readiness/.test(x.innerText)); return s?s.innerText.replace(/\\s+/g,' ').slice(0,300):'none' })()","print":true},
+ {"js":"(()=>{ const s=[...document.querySelectorAll('section.card')].find(x=>/Strats for/.test(x.innerText)); return s?s.innerText.replace(/\\s+/g,' ').slice(0,200):'none' })()","print":true},
+ {"js":"(()=>{ const s=[...document.querySelectorAll('section.card')].find(x=>/Riot scout/.test(x.innerText)); return s?s.innerText.replace(/\\s+/g,' ').slice(0,160)+' | map '+!!s.querySelector('.kmap'):'none' })()","print":true},
+ {"shot":"m8-prep.png","full":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/prep","wait":3500},
+ {"js":"[...document.querySelectorAll('section.card h2')].map(h=>h.innerText).join(' | ')","print":true},
+ {"js":"(()=>{ window.__MOCKDB__.team_discord=[{team_id:1,webhook_url:'https://discord.com/api/webhooks/1/abc',mention:'',remind_day:true,remind_hour:true,remind_avail:false,post_scrims:true,digest:true}]; location.hash='#/coach/announce'; return 1 })()","wait":2500},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-coach#/coach/announce","wait":3000},
+ {"js":"(()=>{ window.__MOCKDB__.team_discord=[{team_id:1,webhook_url:'https://discord.com/api/webhooks/1/abc',mention:'',remind_day:true,remind_hour:true,remind_avail:false,post_scrims:true,digest:true}]; location.hash='#/home'; return 1 })()","wait":1500},
+ {"js":"(()=>{ location.hash='#/coach/announce'; return 1 })()","wait":3000},
+ {"js":"(()=>{ const c=document.querySelector('#dcdigest'); if(!c) return 'no digest checkbox'; c.checked=false; c.dispatchEvent(new Event('change')); return 'was checked' })()","wait":800,"print":true},
+ {"js":"'digest='+window.__MOCKDB__.team_discord[0].digest+' boxes='+document.querySelectorAll('#dcdigest').length+' scrimbox='+document.querySelectorAll('#dcscrim').length","print":true},
+ {"js":"'errors: '+JSON.stringify((window.__errs||[]).slice(0,3))","print":true}
+]

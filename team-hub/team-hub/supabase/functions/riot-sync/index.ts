@@ -563,9 +563,64 @@ export async function sendReminders(admin: SupabaseClient) {
           if (ok) { await admin.from("team_discord").update({ avail_nudged_on: today }).eq("team_id", h.team_id); sent++; }
         }
       }
+      if (h.digest !== false) {
+        const p = etParts(new Date(now)); const today = `${p.year}-${p.month}-${p.day}`;
+        if (p.weekday === "Mon" && Number(p.hour) >= 9 && h.digest_sent_on !== today) {
+          const embed = await weeklyDigest(admin, h.team_id, now);
+          if (embed) { const ok = await postDiscord(h, "📊 Weekly team report", embed); if (ok) { await admin.from("team_discord").update({ digest_sent_on: today }).eq("team_id", h.team_id); sent++; } }
+          else await admin.from("team_discord").update({ digest_sent_on: today }).eq("team_id", h.team_id);
+        }
+      }
     } catch (_) { /* one team's bad webhook shouldn't stop the others */ }
   }
   return sent;
+}
+
+// Monday summary of the last 7 days: results, attendance, check-ins, work-on, and the coming week's scrims.
+export function digestStreak(days: string[], today: string) {
+  const set = new Set(days); let d = today, n = 0;
+  const back = (x: string) => { const t = new Date(x + "T12:00:00Z"); t.setUTCDate(t.getUTCDate() - 1); return t.toISOString().slice(0, 10); };
+  if (!set.has(d)) d = back(d);
+  while (set.has(d)) { n++; d = back(d); }
+  return n;
+}
+export async function weeklyDigest(admin: SupabaseClient, teamId: number, now: number) {
+  const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const today = iso(now), weekAgo = iso(now - 7 * 86400000), monthAgo = iso(now - 40 * 86400000);
+  const [{ data: matches }, { data: att }, { data: checks }, { data: work }, { data: scrims }, { data: members }] = await Promise.all([
+    admin.from("matches").select("date, opponent, map, rounds_won, rounds_lost").eq("team_id", teamId).gte("date", weekAgo).order("date").limit(50),
+    admin.from("attendance").select("player, status").eq("team_id", teamId).gte("day", weekAgo).limit(500),
+    admin.from("checkins").select("user_id, day").eq("team_id", teamId).gte("day", monthAgo).limit(2000),
+    admin.from("work_on").select("status, fixed_at, date").eq("team_id", teamId).limit(2000),
+    admin.from("scrims").select("starts_at, opponent, status").eq("team_id", teamId).gte("starts_at", new Date(now).toISOString()).lte("starts_at", new Date(now + 7 * 86400000).toISOString()).order("starts_at").limit(10),
+    admin.from("profiles").select("id, ign, display_name, is_coach, staff_role").eq("team_id", teamId).limit(100)]);
+  const fields: any[] = [];
+  const ms = matches || [];
+  if (ms.length) {
+    const w = ms.filter((m: any) => Number(m.rounds_won) > Number(m.rounds_lost)).length;
+    fields.push({ name: `Results: ${w}W–${ms.length - w}L`, value: ms.slice(-6).map((m: any) => `${Number(m.rounds_won) > Number(m.rounds_lost) ? "✅" : "❌"} ${m.map || "?"} ${m.rounds_won}–${m.rounds_lost} vs ${m.opponent || "?"}`).join("\n").slice(0, 1000) });
+  }
+  const a = att || [];
+  if (a.length) {
+    const by = new Map<string, { n: number; on: number; miss: string[] }>();
+    for (const r of a) { const x = by.get(r.player) || { n: 0, on: 0, miss: [] }; x.n++; if (r.status === "On time") x.on++; else if (r.status !== "Excused") x.miss.push(r.status); by.set(r.player, x); }
+    fields.push({ name: "Attendance", value: [...by.entries()].sort((p, q) => (q[1].on / q[1].n) - (p[1].on / p[1].n)).map(([p, x]) => `${x.miss.length ? "⚠️" : "✅"} ${p}: ${x.on}/${x.n} on time${x.miss.length ? " (" + x.miss.join(", ").toLowerCase() + ")" : ""}`).join("\n").slice(0, 1000) });
+  }
+  const players = (members || []).filter((m: any) => !m.is_coach && !m.staff_role);
+  if (players.length) {
+    const days = new Map<string, string[]>(); for (const c of checks || []) { const l = days.get(c.user_id) || []; l.push(String(c.day).slice(0, 10)); days.set(c.user_id, l); }
+    const rows = players.map((m: any) => { const l = days.get(m.id) || []; return { name: m.ign || m.display_name || "Player", week: l.filter((d) => d >= weekAgo).length, streak: digestStreak(l, today) }; }).sort((p: any, q: any) => q.week - p.week);
+    if (rows.some((r: any) => r.week)) fields.push({ name: "Check-ins this week", value: rows.map((r: any) => `${r.streak >= 3 ? "🔥" : r.week ? "•" : "⚪"} ${r.name}: ${r.week}/7${r.streak >= 3 ? ` (${r.streak}-day streak)` : ""}`).join("\n").slice(0, 1000) });
+  }
+  const wk = work || [];
+  if (wk.length) {
+    const open = wk.filter((x: any) => x.status !== "Fixed").length, fixed = wk.filter((x: any) => x.status === "Fixed" && x.fixed_at && String(x.fixed_at).slice(0, 10) >= weekAgo).length, added = wk.filter((x: any) => x.date && String(x.date).slice(0, 10) >= weekAgo).length;
+    fields.push({ name: "Work on", value: `${fixed} fixed · ${added} new · ${open} still open`, inline: true });
+  }
+  const sc = (scrims || []).filter((x: any) => String(x.status || "").toLowerCase() !== "cancelled");
+  fields.push({ name: "This week", value: sc.length ? sc.map((x: any) => `<t:${Math.floor(new Date(x.starts_at).getTime() / 1000)}:f> vs ${x.opponent || "TBD"}`).join("\n").slice(0, 1000) : "No scrims booked yet. Try the scrim finder.", inline: !sc.length });
+  if (fields.length <= 1 && !sc.length && !ms.length) return null; // nothing happened and nothing planned: skip the post
+  return { title: "Week in review", url: APP_URL + "#/home", color: 0xff4655, description: `${weekAgo} → ${today}`, fields };
 }
 
 // ---------------------------------------------------------------- calendar feed (GET ?calendar=<team token>)

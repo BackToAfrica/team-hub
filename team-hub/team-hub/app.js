@@ -4523,6 +4523,70 @@ discordPanel = async function (box, after) {
   $('#dcscrim', l).onchange = async e => { const { error } = await sb.rpc('set_discord_scrim_posts', { p_on: e.target.checked }); toast(error ? error.message : 'Saved'); };
 };
 
+
+// =============================================================== MATCH PREP: strats, lineup readiness, Riot scout, roster reliability
+const _prepPage = PAGES.prep;
+PAGES.prep = async function (el) {
+  await _prepPage(el);
+  if (S.route !== 'prep' || !el.isConnected) return;
+  const scrim = await nextScrim().catch(() => null);
+  const opponent = scrim && scrim.opponent ? String(scrim.opponent) : '';
+  const maps = mapList(scrim && scrim.maps);
+  const [strats, lineups, learned, team, scouts, att] = await Promise.all([
+    db.list('strats', { order: 'updated_at', asc: false, limit: 500 }).catch(() => []),
+    can('playbook') ? db.list('lineups', { limit: 1000 }).catch(() => []) : [],
+    sb.from('lineup_learned').select('lineup_id,user_id').eq('team_id', S.me.team_id).then(r => r.data || []),
+    teamPlayers(),
+    isStaff() && opponent ? sb.from('opponent_scouts').select('*').order('created_at', { ascending: false }).limit(50).then(r => (r.data || []).filter(x => sameOpp(x.opponent, opponent))) : [],
+    isStaff() ? db.list('attendance', { limit: 3000 }).catch(() => []) : []]);
+  if (S.route !== 'prep' || !el.isConnected) return;
+  const onMap = (x, m) => String(x.map || '').toLowerCase() === m.toLowerCase();
+  const focus = maps.length ? maps : Array.from(new Set(strats.map(x => x.map).concat(lineups.map(x => x.map)).filter(Boolean))).slice(0, 4);
+  const box = document.createElement('div');
+  const stratHtml = focus.length ? focus.map(m => { const l = strats.filter(x => onMap(x, m));
+    return '<div class="prep-map" style="display:block"><b>' + esc(m) + '</b> <span class="small muted">' + l.length + ' strat' + (l.length === 1 ? '' : 's') + '</span>' +
+      (l.length ? '<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px">' + l.slice(0, 8).map(x => '<a class="pill" href="#/strats/' + x.id + '">' + esc(x.title) + ' · ' + esc(x.side || '') + '</a>').join('') + '</div>'
+        : '<div class="small muted" style="margin-top:4px">None yet. ' + (isStaff() ? '<a href="#/strats/new">Draw one →</a>' : '') + '</div>') + '</div>'; }).join('')
+    : '<p class="small muted" style="margin:0">Add maps to the next scrim to see strats for them here.</p>';
+  const players = team.players.filter(p => !p.bench && p.user_id);
+  const luHtml = focus.length && lineups.length && players.length ? '<div class="tablewrap"><table><thead><tr><th>Player</th>' + focus.map(m => '<th class="num">' + esc(m) + '</th>').join('') + '<th>Still to learn</th></tr></thead><tbody>' +
+    players.map(p => { const got = new Set(learned.filter(l => l.user_id === p.user_id).map(l => l.lineup_id)); const mine = lineups.filter(x => focus.some(m => onMap(x, m)) && (!x.agent || !p.agents || true));
+      const miss = mine.filter(x => !got.has(x.id));
+      return '<tr><td><b>' + esc(p.name) + '</b></td>' + focus.map(m => { const t = lineups.filter(x => onMap(x, m)); const g = t.filter(x => got.has(x.id)).length;
+        return '<td class="num">' + (t.length ? '<span class="' + (g === t.length ? 'green-t' : g ? '' : 'red-t') + '">' + g + '/' + t.length + '</span>' : '–') + '</td>'; }).join('') +
+        '<td class="small">' + (miss.length ? miss.slice(0, 3).map(x => esc(x.title)).join(', ') + (miss.length > 3 ? ' +' + (miss.length - 3) : '') : '<span class="green-t">All learned ✓</span>') + '</td></tr>'; }).join('') +
+    '</tbody></table></div><p class="small muted" style="margin:6px 0 0">Players can drill the rest with <a href="#/lineups">Lineups → Practice</a>.</p>'
+    : '<p class="small muted" style="margin:0">' + (lineups.length ? 'Players need to join the app to track learned lineups.' : 'No lineups saved yet. <a href="#/lineups">Add some →</a>') + '</p>';
+  let html = '<section class="card panel"><div class="card-h"><h2>Strats for ' + (maps.length ? 'these maps' : 'your maps') + '</h2><a class="small" href="#/strats">Strat board →</a></div><div class="prep-maps" style="display:grid;gap:8px">' + stratHtml + '</div></section>' +
+    '<section class="card panel"><div class="card-h"><h2>Lineup readiness</h2><span class="small muted">who knows the lineups for ' + (focus.length ? esc(focus.join(', ')) : 'these maps') + '</span></div>' + luHtml + '</section>';
+  if (isStaff()) {
+    const since = addDays(todayISO(), -30); const rel = attendanceSummary(att.filter(a => a.day >= since));
+    html += '<section class="card panel"><div class="card-h"><h2>Roster reliability</h2><a class="small" href="#/attendance">Attendance →</a></div>' +
+      (rel.length ? '<div class="row" style="gap:8px;flex-wrap:wrap">' + rel.map(x => '<span class="pill ' + (x.rel == null ? '' : x.rel >= .9 ? 'green' : x.rel >= .7 ? 'yellow' : 'red') + '">' + esc(x.p) + ' ' + (x.rel == null ? '–' : pct(x.rel)) + '</span>').join('') + '</div><p class="small muted" style="margin:6px 0 0">Last 30 days. Late counts as half.</p>'
+        : '<p class="small muted" style="margin:0">No attendance taken yet. <a href="#/attendance">Take it at your next scrim →</a></p>') + '</section>';
+    if (opponent) {
+      const last = scouts[0];
+      html += '<section class="card panel"><div class="card-h"><h2>Riot scout: ' + esc(opponent) + '</h2><a class="small" href="#/scouting">Scouting →</a></div>' +
+        (last ? '<div class="prepscout">' + scoutHtml(last) + '</div>' : '<p class="small muted" style="margin:0">Not scouted yet. Open the opponent in Scouting and paste their Riot IDs to see ranks, mains, maps and where they fight.</p>') + '</section>';
+      box.dataset.scout = last ? '1' : '';
+    }
+  }
+  box.innerHTML = html;
+  const tail = el.lastElementChild; el.insertBefore(box, tail && tail.tagName === 'P' ? tail : null);
+  const host = $('.prepscout .sckm', box);
+  if (host && scouts[0]) killMapView(host, scoutEvents(scouts[0].data), { state: { map: maps[0] || '', side: '', who: 'both', player: '', fb: false, lines: false, heat: true, view: 'us' }, usLabel: 'Where they stood', themLabel: 'Where their opponent stood', allLabel: 'Them' });
+};
+const _discordPanel3 = discordPanel;
+discordPanel = async function (box, after) {
+  await _discordPanel3(box, after);
+  const r = $('.remind', box); if (!r || $('#dcdigest', box)) return;
+  const { data: st } = await sb.rpc('discord_status');
+  const l = document.createElement('label'); l.className = 'small row'; l.style.gap = '6px';
+  l.innerHTML = '<input type="checkbox" id="dcdigest"' + (st && st.digest !== false ? ' checked' : '') + '> Weekly report every Monday morning (results, attendance, check-ins, work on, this week\'s scrims)';
+  r.insertBefore(l, r.lastElementChild);
+  $('#dcdigest', l).onchange = async e => { const { error } = await sb.rpc('set_discord_digest', { p_on: e.target.checked }); toast(error ? error.message : 'Saved'); };
+};
+
 // expose pure helpers for tests
 window.__TEAMHUB__ = { goalValue: goalValue, tryAvg: tryAvg, compStats: compStats, lineChart: lineChart, teamAnalytics: teamAnalytics, playerAnalytics: playerAnalytics, buildInsights: buildInsights, makePracticePlan: makePracticePlan, metricValue: metricValue, md: md, planImport: planImport, mergeWork: mergeWork, coerce: coerce, compAnalysis: compAnalysis, calcStreak: calcStreak, parseCSV: parseCSV, TABLES: TABLES, normName: normName };
 

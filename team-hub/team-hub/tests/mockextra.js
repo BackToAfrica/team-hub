@@ -142,6 +142,9 @@
   DB.attendance = [{ id: 1, team_id: 1, day: t(3), kind: 'Scrim', player: 'Fear', status: 'On time' }, { id: 2, team_id: 1, day: t(3), kind: 'Scrim', player: 'Kairo', status: 'Late', minutes_late: 10 }, { id: 3, team_id: 1, day: t(5), kind: 'Scrim', player: 'Kairo', status: 'Absent' }];
   DB.scrim_posts = [{ id: 1, team_id: 2, starts_at: new Date(Date.now() + 3 * 86400000).toISOString(), maps: 'Lotus, Haven', format: '2 maps', region: 'NA East', level: 'Diamond', note: 'DM OwlA', status: 'open', created_at: t(0) },
     { id: 2, team_id: 2, starts_at: new Date(Date.now() + 5 * 86400000).toISOString(), maps: 'Any', format: 'BO3', region: 'NA East', status: 'open', created_at: t(0) }];
+  DB.scrims.push({ id: 9901, team_id: 1, starts_at: new Date(Date.now() + 2 * 86400000).toISOString(), opponent: 'Night Owls', maps: 'Lotus, Haven', format: '2 maps', status: 'Planned' });
+  DB.opponent_scouts = DB.opponent_scouts || []; if (DB.opponent_scouts[0]) DB.opponent_scouts[0].opponent = 'Night Owls';
+  DB.lineup_learned = DB.lineup_learned || [];
   DB.player_goals = [{ id: 1, team_id: 1, user_id: 'u-fear', title: 'HS% to 25', metric: 'Headshot %', target: 25, deadline: t(-20), done: false, created_at: t(2) }];
   DB.aim_logs = DB.aim_logs || []; for (let d = 0; d < 4; d++) DB.aim_logs.push({ id: 700 + d, team_id: 1, user_id: 'u-fear', date: t(d), kind: 'Aimlabs', scenario: 'Gridshot', score: 80000 });
   DB.lineups = DB.lineups || []; if (DB.lineups.length && !DB.lineups[0].pos) DB.lineups[0].pos = { s: [300, 640], l: [200, 320] }; if (!DB.lineups.length) DB.lineups.push({ id: 1, team_id: 1, title: 'Tree smoke from A main', agent: 'Omen', ability: 'Dark Cover', map: 'Lotus', side: 'Attack', site: 'A', stand: 'Corner of A main box', aim: 'Top of the tree', link: 'https://youtu.be/QnBTE-UVpX4', pos: { s: [300, 640], l: [200, 320] }, created_at: t(1) },
