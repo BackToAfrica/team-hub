@@ -12,9 +12,9 @@ const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-function toast(msg) {
+function toast(msg, ms) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
-  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2600);
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms || 2600);
 }
 function todayISO() {
   const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -230,6 +230,34 @@ function can(sec) {
 }
 
 // ------------------------------------------------------------------ boot
+// Where the sign-in is kept. Some browsers (privacy settings, cleaner extensions) block or wipe this site's saved data,
+// which used to drop the sign-in straight after Discord and loop back to "Sign in". Keep it in memory too, and fall back to
+// per-tab storage, so the player stays signed in; S.storageBlocked shows them how to fix their browser for next time.
+const AUTH_MEM = {};
+const authStorage = {
+  getItem(k) {
+    if (k in AUTH_MEM) return AUTH_MEM[k];
+    try { const v = localStorage.getItem(k); if (v != null) return v; } catch (e) {}
+    try { const v = sessionStorage.getItem(k); if (v != null) return v; } catch (e) {}
+    return null;
+  },
+  setItem(k, v) {
+    AUTH_MEM[k] = v;
+    let ok = false;
+    try { localStorage.setItem(k, v); ok = localStorage.getItem(k) === v; } catch (e) {}
+    if (!ok) { S.storageBlocked = true; try { sessionStorage.setItem(k, v); } catch (e) {} }
+  },
+  removeItem(k) {
+    delete AUTH_MEM[k];
+    try { localStorage.removeItem(k); } catch (e) {}
+    try { sessionStorage.removeItem(k); } catch (e) {}
+  }
+};
+function storageWarn() {
+  if (!S.storageBlocked || S.storageWarned) return;
+  S.storageWarned = true;
+  toast('Your browser is blocking this site from saving your sign-in, so you\'ll have to sign in again next time. In Chrome: click the icon left of the web address → Site settings → allow Cookies and site data (or turn off cleaner/privacy extensions for this site).', 12000);
+}
 async function boot() {
   if (!CFG.SUPABASE_URL || /PASTE_/.test(CFG.SUPABASE_URL) || !CFG.SUPABASE_ANON_KEY || /PASTE_/.test(CFG.SUPABASE_ANON_KEY)) {
     $('#app').innerHTML = '<div class="auth"><div class="card stack"><h1>' + esc(TEAM) + '</h1>' +
@@ -245,7 +273,7 @@ async function boot() {
   S.authReturn = { code: qs.get('code') || hs.get('access_token'), error: qs.get('error_description') || hs.get('error_description') || qs.get('error') || hs.get('error') };
   const jm = location.hash.match(/^#\/join\/([A-Za-z0-9]+)/);
   if (jm) { try { localStorage.setItem('th_join', jm[1].toUpperCase()); } catch (e) {} location.hash = '#/home'; }
-  sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, { auth: { flowType: 'implicit', detectSessionInUrl: true, persistSession: true } });
+  sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, { auth: { flowType: 'implicit', detectSessionInUrl: true, persistSession: true, storage: authStorage } });
   if (/^#\/t\//.test(location.hash)) { // public team page: no sign-in
     window.addEventListener('hashchange', () => { if (/^#\/t\//.test(location.hash)) renderPublic(); else location.reload(); });
     await renderPublic(); return;
@@ -299,6 +327,7 @@ async function start() {
   S.cache = {};
   S.route = (location.hash.slice(2) || 'home').split('/')[0];
   render();
+  storageWarn();
   // quietly refresh this player's Riot games once per visit (the server skips it if it ran in the last 5 minutes)
   if (S.me && S.me.team_id && !S.riotTried) { S.riotTried = true;
     sb.from('riot_links').select('user_id').eq('user_id', S.me.id).maybeSingle().then(({ data }) => { if (data) riotCall({ action: 'sync' }).then(r => { if (r && r.new_games) { S.cache = {}; } }).catch(() => {}); }).catch(() => {}); }
