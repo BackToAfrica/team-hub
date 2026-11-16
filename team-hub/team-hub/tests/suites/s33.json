@@ -1,0 +1,11 @@
+[
+ {"go":"file:///home/claude/teamapp-test/index.html?as=none#/join/aec024","wait":2500},
+ {"js":"[document.querySelector('#app').innerText.replace(/\\s+/g,' ').slice(0,260), localStorage.getItem('th_join'), location.hash]","print":true},
+ {"shot":"m9-invite-signin.png"},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=none&code=abc123#/home","wait":2500},
+ {"js":"[document.querySelector('#app').innerText.replace(/\\s+/g,' ').slice(0,400), location.search]","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=none&error=access_denied&error_description=Error+getting+user+email+from+external+provider","wait":2500},
+ {"js":"[document.querySelector('#app').innerText.replace(/\\s+/g,' ').slice(0,400), location.search]","print":true},
+ {"go":"file:///home/claude/teamapp-test/index.html?as=u-fear#/home","wait":2500},
+ {"js":"'signed in ok: '+!!document.querySelector('nav, .sidebar')+' | errors: '+JSON.stringify((window.__errs||[]).slice(0,3))","print":true}
+]

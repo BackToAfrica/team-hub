@@ -240,6 +240,9 @@ async function boot() {
     $('#app').innerHTML = '<div class="auth"><div class="card"><h1>Can\'t load</h1><p>Couldn\'t load the Supabase library. Check your internet connection and refresh.</p></div></div>';
     return;
   }
+  // Remember what the sign-in redirect brought back, so a failed Discord sign-in says why instead of silently showing "Sign in" again.
+  const qs = new URLSearchParams(location.search), hs = new URLSearchParams(location.hash.replace(/^#/, ''));
+  S.authReturn = { code: qs.get('code'), error: qs.get('error_description') || hs.get('error_description') || qs.get('error') || hs.get('error') };
   const jm = location.hash.match(/^#\/join\/([A-Za-z0-9]+)/);
   if (jm) { try { localStorage.setItem('th_join', jm[1].toUpperCase()); } catch (e) {} location.hash = '#/home'; }
   sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, { auth: { flowType: 'pkce', detectSessionInUrl: true, persistSession: true } });
@@ -266,8 +269,13 @@ async function boot() {
       }
     }
   });
-  const { data } = await sb.auth.getSession();
+  const { data, error: sessErr } = await sb.auth.getSession();
   S.session = data.session;
+  if (!S.session && (S.authReturn.code || S.authReturn.error)) {
+    const why = S.authReturn.error || (sessErr && sessErr.message) || '';
+    S.authMsg = { text: 'Discord sign-in didn\'t finish' + (why ? ' (' + why + ')' : '') + '. Open the invite link in the same browser you sign in to Discord with (not inside the Discord app), then press Continue with Discord again.' };
+  }
+  if (S.authReturn.code || S.authReturn.error) { try { history.replaceState(null, '', location.pathname + (location.hash && !/^#(error|access_token)/.test(location.hash) ? location.hash : '#/home')); } catch (e) {} }
   window.addEventListener('hashchange', () => { S.route = (location.hash.slice(2) || 'home').split('/')[0]; render(); });
   await start();
 }
@@ -285,7 +293,7 @@ async function loadMe() {
 }
 
 async function start() {
-  if (!S.session) { renderAuth('signin'); return; }
+  if (!S.session) { renderAuth('signin', S.authMsg); S.authMsg = null; return; }
   await loadMe();
   S.cache = {};
   S.route = (location.hash.slice(2) || 'home').split('/')[0];
@@ -301,10 +309,11 @@ async function discordLogin() {
   const { error } = await sb.auth.signInWithOAuth({ provider: 'discord', options: { redirectTo: location.origin + location.pathname, scopes: 'identify email' } });
   if (error) toast(error.message);
 }
+function savedInvite() { try { return localStorage.getItem('th_join') || ''; } catch (e) { return ''; } }
 function renderAuth(mode, msg) {
   if (!CFG.ALLOW_EMAIL_LOGIN && mode !== 'email') {
     $('#app').innerHTML = '<div class="auth"><h1>' + esc(TEAM) + '</h1><div class="card stack" style="text-align:center">' +
-      '<h2>Sign in</h2><p class="muted">Use your Discord account. New here? After signing in you can register your team, or join your team with the code your coach gives you.</p>' +
+      '<h2>Sign in</h2>' + (savedInvite() ? '<div class="ok" style="margin-bottom:10px">You\'ve been invited to join a team (code <b>' + esc(savedInvite()) + '</b>). Sign in with Discord, then press <b>Join</b>.</div>' : '<p class="muted">Use your Discord account. New here? After signing in you can register your team, or join your team with the code your coach gives you.</p>') +
       '<button class="btn discord" id="dlogin" style="width:100%">' + DISCORD_SVG + ' Continue with Discord</button>' +
       (msg ? '<div class="' + (msg.ok ? 'ok' : 'error') + '">' + esc(msg.text) + '</div>' : '') + '</div></div>';
     $('#dlogin').onclick = discordLogin;
