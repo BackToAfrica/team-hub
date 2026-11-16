@@ -71,6 +71,7 @@ function summarise(match: any, puuid: string) {
     headshots: s.headshots ?? null, bodyshots: s.bodyshots ?? null, legshots: s.legshots ?? null, damage: s.damage?.dealt ?? null,
     first_kills: fk, first_deaths: fd, trades, traded_deaths: traded,
     detail: { players: players.map((p) => ({ n: p.name, team: p.team_id, me: p.puuid === puuid, agent: p.agent?.name, k: p.stats?.kills, d: p.stats?.deaths, a: p.stats?.assists, s: p.stats?.score })) },
+    events: playerEvents(match, puuid),
   };
 }
 
@@ -234,6 +235,23 @@ export function killEvents(match: any, ourTeam: string, R: number) {
   }
   return out.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 }
+// one player's kill/death positions in a game: [map, side A/D, "k"/"d", my x, my y, other x, other y, first duel 1/0, agent]
+export function playerEvents(m: any, puuid: string) {
+  const me = (m.players || []).find((p: any) => pidOf(p) === puuid); if (!me) return [];
+  const map = m.metadata?.map?.name || m.metadata?.map || null; if (!map) return [];
+  const myTeam = teamOf(me);
+  const kills: any[] = (m.kills || []).filter((k: any) => k?.killer && k?.victim); const base = roundBase(kills);
+  const first = new Map<number, any>();
+  for (const k of kills) { const ri = Number(k.round) - base; const c = first.get(ri); if (!c || (k.time_in_round_in_ms || 0) < (c.time_in_round_in_ms || 0)) first.set(ri, k); }
+  const out: any[] = [];
+  for (const k of kills) {
+    const ri = Number(k.round) - base; const isK = pidOf(k.killer) === puuid, isD = pidOf(k.victim) === puuid; if (!isK && !isD) continue;
+    const mine = isK ? locOf(k, puuid) : (k.location || k.victim_death_location || locOf(k, puuid));
+    const other = isK ? (k.location || k.victim_death_location || locOf(k, pidOf(k.victim))) : locOf(k, pidOf(k.killer));
+    if (mine) out.push([map, sideIn(myTeam, ri), isK ? "k" : "d", rnd(mine.x), rnd(mine.y), rnd(other?.x), rnd(other?.y), first.get(ri) === k ? 1 : 0, me.agent?.name || ""]);
+  }
+  return out;
+}
 // which side a team was on in round i (Red attacks first; overtime swaps every round)
 function sideIn(team: string, i: number) {
   const red = team.toLowerCase() === "red";
@@ -256,7 +274,7 @@ function ourSide(match: any, linked: Map<string, any>) {
   const best = [...c.entries()].sort((x, y) => y[1] - x[1])[0];
   return best ? { team: best[0], n: best[1] } : null;
 }
-export async function importScrim(admin: SupabaseClient, teamId: number, match: any, opts: { opponent?: string; minLinked?: number } = {}) {
+export async function importScrim(admin: SupabaseClient, teamId: number, match: any, opts: { opponent?: string; minLinked?: number; post?: boolean } = {}) {
   const md = match.metadata || {};
   const matchId = md.match_id || md.matchid;
   if (!matchId) return { skipped: "no match id" };
@@ -276,9 +294,9 @@ export async function importScrim(admin: SupabaseClient, teamId: number, match: 
     rounds: res.rounds, riot_match_id: matchId, source: "riot", notes, kills: killEvents(match, side.team, res.R),
   };
   // already imported? update it. A hand-logged game on the same day and map? attach to it. Otherwise insert.
-  let { data: existing } = await admin.from("matches").select("id, opponent, event, rounds").eq("riot_match_id", matchId).maybeSingle();
+  let { data: existing } = await admin.from("matches").select("id, opponent, event, rounds, discord_posted_at").eq("riot_match_id", matchId).maybeSingle();
   if (!existing) {
-    const { data: manual } = await admin.from("matches").select("id, opponent, event, rounds").eq("team_id", teamId).eq("date", date).eq("map", map).is("riot_match_id", null).limit(1);
+    const { data: manual } = await admin.from("matches").select("id, opponent, event, rounds, discord_posted_at").eq("team_id", teamId).eq("date", date).eq("map", map).is("riot_match_id", null).limit(1);
     existing = manual?.[0] || null;
   }
   let id: number;
@@ -311,6 +329,12 @@ export async function importScrim(admin: SupabaseClient, teamId: number, match: 
   });
   await admin.from("player_stats").delete().eq("riot_match_id", matchId);
   if (stats.length) { const { error } = await admin.from("player_stats").insert(stats); if (error) throw new Error(error.message); }
+  // post a summary to the team's Discord once, for games from the last day (never for old games being refreshed)
+  const recent = md.started_at && Date.now() - new Date(md.started_at).getTime() < 24 * 3600000;
+  if (opts.post !== false && recent && !existing?.discord_posted_at) {
+    try { if (await postScrimSummary(admin, teamId, id, res, map, String(fields.opponent || existing?.opponent || "Scrim"), stats)) await admin.from("matches").update({ discord_posted_at: new Date().toISOString() }).eq("id", id); }
+    catch (_) { /* Discord problems never block the import */ }
+  }
   return { imported: true, match_id: id, result: `${res.won}-${res.lost}`, map, date };
 }
 async function autoImportScrims(admin: SupabaseClient, teamId: number | null, matches: any[]) {
@@ -468,6 +492,34 @@ async function scoutTeam(riotIds: string[]) {
   }
   together.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
   return { players, together, scouted_at: new Date().toISOString() };
+}
+
+// ---------------------------------------------------------------- Discord scrim summary
+export function scrimSummary(res: any, map: string | null, opponent: string, stats: any[]) {
+  const won = res.won > res.lost, rate = (w: number, l: number) => (w + l ? w / (w + l) : null);
+  const fkUs = res.rounds.filter((r: any) => r.fk === "us").length, fkThem = res.rounds.filter((r: any) => r.fk === "them").length;
+  const top = stats.map((p: any) => ({ p, acs: Number(String(p.notes || "").replace(/\D+/g, "")) || 0 })).sort((a, b) => b.acs - a.acs || (b.p.kills - b.p.deaths) - (a.p.kills - a.p.deaths))[0];
+  const weak = [
+    { k: "Attack rounds", r: rate(res.atk_won, res.atk_lost), t: `${res.atk_won}–${res.atk_lost}` },
+    { k: "Defense rounds", r: rate(res.def_won, res.def_lost), t: `${res.def_won}–${res.def_lost}` },
+    { k: "Opening duels", r: rate(fkUs, fkThem), t: `${fkUs}–${fkThem}` },
+  ].filter((x) => x.r != null && x.r < 0.5).sort((a, b) => (a.r as number) - (b.r as number));
+  return {
+    title: `${won ? "✅ Win" : res.won === res.lost ? "➖ Draw" : "❌ Loss"} ${res.won}–${res.lost}${map ? " on " + map : ""} vs ${opponent}`,
+    color: won ? 0x3ba55d : 0xff4655, url: APP_URL + "#/analytics",
+    fields: [
+      { name: "Attack", value: `${res.atk_won}–${res.atk_lost}`, inline: true }, { name: "Defense", value: `${res.def_won}–${res.def_lost}`, inline: true },
+      { name: "Pistols", value: `${res.pistols_won}/2`, inline: true }, { name: "First kills", value: `${fkUs}–${fkThem}`, inline: true },
+      top ? { name: "Top player", value: `${top.p.player} (${top.p.agent || "?"}) ${top.p.kills}/${top.p.deaths}/${top.p.assists}${top.acs ? " · ACS " + top.acs : ""}`, inline: true } : null,
+      { name: "Work on", value: weak.length ? weak.slice(0, 2).map((x) => `${x.k} (${x.t})`).join(", ") : "Nothing below 50%. Nice.", inline: false },
+    ].filter(Boolean),
+    footer: { text: "Full round-by-round breakdown in Team Hub → Scrim analytics" },
+  };
+}
+async function postScrimSummary(admin: SupabaseClient, teamId: number, _matchId: number, res: any, map: string | null, opponent: string, stats: any[]) {
+  const { data: hook } = await admin.from("team_discord").select("*").eq("team_id", teamId).maybeSingle();
+  if (!hook?.webhook_url || hook.post_scrims === false) return false;
+  return await postDiscord({ ...hook, mention: "" }, "📊 Scrim result", scrimSummary(res, map, opponent, stats));
 }
 
 // ---------------------------------------------------------------- Discord reminders (run with the 20-minute cron)
@@ -638,7 +690,7 @@ Deno.serve(async (req: Request) => {
             const { data: link } = who?.length ? await admin.from("riot_links").select("region").eq("user_id", who[0].user_id).maybeSingle() : { data: null as any };
             const r = await henrik(`/valorant/v4/match/${link?.region || "na"}/${x.riot_match_id}`);
             if (r.notFound || !r.body?.data) { failed++; continue; }
-            const res: any = await importScrim(admin, team, r.body.data, { minLinked: 1 });
+            const res: any = await importScrim(admin, team, r.body.data, { minLinked: 1, post: false });
             if (res.imported) ok++; else failed++;
           } catch (_) { failed++; }
         }
