@@ -144,6 +144,6 @@
     { id: 2, team_id: 2, starts_at: new Date(Date.now() + 5 * 86400000).toISOString(), maps: 'Any', format: 'BO3', region: 'NA East', status: 'open', created_at: t(0) }];
   DB.player_goals = [{ id: 1, team_id: 1, user_id: 'u-fear', title: 'HS% to 25', metric: 'Headshot %', target: 25, deadline: t(-20), done: false, created_at: t(2) }];
   DB.aim_logs = DB.aim_logs || []; for (let d = 0; d < 4; d++) DB.aim_logs.push({ id: 700 + d, team_id: 1, user_id: 'u-fear', date: t(d), kind: 'Aimlabs', scenario: 'Gridshot', score: 80000 });
-  DB.lineups = DB.lineups || []; if (!DB.lineups.length) DB.lineups.push({ id: 1, team_id: 1, title: 'Tree smoke from A main', agent: 'Omen', ability: 'Dark Cover', map: 'Lotus', side: 'Attack', site: 'A', stand: 'Corner of A main box', aim: 'Top of the tree', link: 'https://youtu.be/QnBTE-UVpX4', created_at: t(1) },
+  DB.lineups = DB.lineups || []; if (DB.lineups.length && !DB.lineups[0].pos) DB.lineups[0].pos = { s: [300, 640], l: [200, 320] }; if (!DB.lineups.length) DB.lineups.push({ id: 1, team_id: 1, title: 'Tree smoke from A main', agent: 'Omen', ability: 'Dark Cover', map: 'Lotus', side: 'Attack', site: 'A', stand: 'Corner of A main box', aim: 'Top of the tree', link: 'https://youtu.be/QnBTE-UVpX4', pos: { s: [300, 640], l: [200, 320] }, created_at: t(1) },
     { id: 2, team_id: 1, title: 'Post-plant molly B', agent: 'Viper', ability: 'Snake Bite', map: 'Lotus', side: 'Attack', site: 'B', stand: 'B main door', aim: 'Antenna tip', created_at: t(1) });
 })();
