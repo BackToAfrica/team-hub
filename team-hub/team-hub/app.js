@@ -4274,7 +4274,8 @@ PAGES.attendance = async function (el) {
 PAGES.card = async function (el) {
   const parts = location.hash.split('/'); const team = await teamPlayers();
   const meName = (team.players.find(p => p.user_id === S.me.id) || {}).name || S.me.ign;
-  let name = decodeURIComponent(parts[2] || '') || meName; if (!isStaff()) name = meName;
+  const onRoster = team.players.some(p => p.user_id === S.me.id);
+  let name = decodeURIComponent(parts[2] || '') || (isStaff() && !onRoster ? (team.players[0] || {}).name || meName : meName); if (!isStaff()) name = meName;
   const month = /^\d{4}-\d{2}$/.test(parts[3] || '') ? parts[3] : todayISO().slice(0, 7);
   const p = team.players.find(x => normName(x.name) === normName(name)) || { name: name };
   const prevM = (() => { const d = new Date(month + '-15T12:00:00'); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); })();
