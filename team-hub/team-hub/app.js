@@ -242,14 +242,15 @@ async function boot() {
   }
   // Remember what the sign-in redirect brought back, so a failed Discord sign-in says why instead of silently showing "Sign in" again.
   const qs = new URLSearchParams(location.search), hs = new URLSearchParams(location.hash.replace(/^#/, ''));
-  S.authReturn = { code: qs.get('code'), error: qs.get('error_description') || hs.get('error_description') || qs.get('error') || hs.get('error') };
+  S.authReturn = { code: qs.get('code') || hs.get('access_token'), error: qs.get('error_description') || hs.get('error_description') || qs.get('error') || hs.get('error') };
   const jm = location.hash.match(/^#\/join\/([A-Za-z0-9]+)/);
   if (jm) { try { localStorage.setItem('th_join', jm[1].toUpperCase()); } catch (e) {} location.hash = '#/home'; }
-  sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, { auth: { flowType: 'pkce', detectSessionInUrl: true, persistSession: true } });
+  sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, { auth: { flowType: 'implicit', detectSessionInUrl: true, persistSession: true } });
   if (/^#\/t\//.test(location.hash)) { // public team page: no sign-in
     window.addEventListener('hashchange', () => { if (/^#\/t\//.test(location.hash)) renderPublic(); else location.reload(); });
     await renderPublic(); return;
   }
+  // Implicit sign-in (not PKCE): Discord can finish in a different browser or app than the one that started it, and that browser still gets signed in.
   // Keep the auth-state callback synchronous. Supabase holds an internal
   // auth lock while notifying listeners; awaiting database work (start/loadMe)
   // inside this callback can deadlock sign-in on some clients.
